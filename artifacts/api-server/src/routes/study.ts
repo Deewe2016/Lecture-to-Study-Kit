@@ -91,7 +91,13 @@ router.post("/generate-kit", async (req, res) => {
     const { object } = await generateObject({
       model: openai("gpt-5.6-terra"),
       schema: kitSchema,
-      prompt: `You are a careful college study coach. Build a complete study kit from the supplied lecture material. Return 3-6 chapters, a 7-day plan, 10-15 multiple-choice questions, and 20-30 flashcards. Map questions and cards to chapter ids. Use syllabus objectives when present. Do not invent facts beyond the source.\\n\\nTitle: ${input.title}\\nSyllabus: ${input.syllabus || "Not provided"}\\nMaterial:\\n${source}`,
+      prompt: `You are a careful college study coach and document analyst. Build a complete study kit from the supplied lecture material.
+
+First, understand what this specific document is actually about. The overview must be a direct, concrete 2-3 sentence description of the document's thesis, subject, mechanism, evidence, or implications. It must name the real topic and claims from the source, not give study advice or describe the act of studying. For example: "This presentation argues that Maglev trains could replace some air travel by using magnetic levitation for zero-contact travel, zero direct carbon emissions, and lower energy consumption." Do not write generic text such as "This document covers core ideas" or "This material provides evidence and examples."
+
+Then return 3-6 chapters with specific, source-grounded titles that describe the actual topics (never generic titles like "Core ideas", "Evidence & examples", or "Application & recall"), plus a 7-day plan, 10-15 multiple-choice questions, and 20-30 flashcards. Map questions and cards to chapter ids. Use syllabus objectives when present. Do not invent facts beyond the source. Questions and flashcards should test the document's actual claims, terms, examples, and relationships.
+
+Title: ${input.title}\\nSyllabus: ${input.syllabus || "Not provided"}\\nMaterial:\\n${source}`,
     });
     return res.json(GenerateKitResponse.parse(object));
   } catch (error) {
