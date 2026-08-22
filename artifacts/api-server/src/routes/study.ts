@@ -85,9 +85,9 @@ router.post("/generate-kit", async (req, res) => {
   const source = input.materials.map((material) => `${material.name}\n${material.text}`).join("\n\n").slice(0, 50000);
   try {
     const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-    if (!baseUrl || !apiKey) return res.json(GenerateKitResponse.parse(starterKit(input.title, source)));
-    const openai = createOpenAI({ baseURL: baseUrl, apiKey });
+    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) return res.json(GenerateKitResponse.parse(starterKit(input.title, source)));
+    const openai = createOpenAI(baseUrl ? { baseURL: baseUrl, apiKey } : { apiKey });
     const { object } = await generateObject({
       model: openai("gpt-5.6-terra"),
       schema: kitSchema,

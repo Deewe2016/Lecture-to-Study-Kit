@@ -4,6 +4,7 @@ import { Link, Route, Switch, useLocation, useParams } from 'wouter';
 import { useGenerateKit, useHealthCheck, getHealthCheckQueryKey } from '@workspace/api-client-react';
 import type { StudyKit, StudyKitInput } from '@workspace/api-client-react';
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { saveKit, saveProgress as saveIndexedProgress, loadKits, loadProgress } from '@/lib/kit-store';
 import {
   ArrowLeft, ArrowRight, BookOpen, Brain, CalendarDays, Check, CheckCircle2, ChevronLeft,
@@ -16,6 +17,8 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import './index.css';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 type Material = { name: string; kind: string; text: string; size?: string };
 type Progress = { reviewed: string[]; completedTasks: string[]; answers: Record<string, number>; lastOpened?: string };
