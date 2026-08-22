@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: study
+    description: AI study kit generation
 paths:
   /healthz:
     get:
@@ -24,6 +26,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /generate-kit:
+    post:
+      operationId: generateKit
+      tags: [study]
+      summary: Generate a structured study kit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StudyKitInput"
+      responses:
+        "200":
+          description: Generated study kit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudyKit"
+        "400":
+          description: Invalid study materials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Generation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +65,96 @@ components:
           type: string
       required:
         - status
+    StudyKitInput:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        materials:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              kind: { type: string }
+              text: { type: string }
+            required: [name, kind, text]
+        syllabus:
+          type: ["string", "null"]
+      required: [title, materials]
+    StudyKit:
+      type: object
+      properties:
+        title: { type: string }
+        courseLabel: { type: string }
+        overview: { type: string }
+        chapters:
+          type: array
+          items:
+            $ref: "#/components/schemas/Chapter"
+        reviewPlan:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewDay"
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PracticeQuestion"
+        flashcards:
+          type: array
+          items:
+            $ref: "#/components/schemas/Flashcard"
+      required: [title, courseLabel, overview, chapters, reviewPlan, questions, flashcards]
+    Chapter:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        keyPoints:
+          type: array
+          items: { type: string }
+        objective:
+          type: ["string", "null"]
+      required: [id, title, summary, keyPoints, objective]
+    ReviewDay:
+      type: object
+      properties:
+        day: { type: number }
+        label: { type: string }
+        focus: { type: string }
+        tasks:
+          type: array
+          items: { type: string }
+        minutes: { type: number }
+      required: [day, label, focus, tasks, minutes]
+    PracticeQuestion:
+      type: object
+      properties:
+        id: { type: string }
+        chapterId: { type: string }
+        prompt: { type: string }
+        options:
+          type: array
+          items: { type: string }
+        answer: { type: number }
+        explanation: { type: string }
+        difficulty: { type: string }
+      required: [id, chapterId, prompt, options, answer, explanation, difficulty]
+    Flashcard:
+      type: object
+      properties:
+        id: { type: string }
+        chapterId: { type: string }
+        front: { type: string }
+        back: { type: string }
+        hint:
+          type: ["string", "null"]
+      required: [id, chapterId, front, back, hint]
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+      required: [error]
 

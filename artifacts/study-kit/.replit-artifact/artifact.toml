@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Lecture-to-Study Kit"
+description = "A calm, local-first study workspace for college students that turns lecture materials into chapter summaries, a seven-day review plan, practice exams, and interactive flashcards."
+version = "1.0.0"
+id = "artifacts/study-kit"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22132
+
+[services.development]
+run = "pnpm --filter @workspace/study-kit run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/study-kit", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/study-kit/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22132"
+BASE_PATH = "/"

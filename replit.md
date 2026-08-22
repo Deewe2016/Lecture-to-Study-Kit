@@ -1,6 +1,6 @@
-# [Project name]
+# Lecture-to-Study Kit
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A local-first study workspace that turns lecture materials into a focused review plan, practice exam, and interactive flashcards.
 
 ## Run & Operate
 
@@ -22,15 +22,24 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/study-kit/src/App.tsx` — app routes and study modes
+- `artifacts/study-kit/src/lib/kit-store.ts` — IndexedDB persistence boundary
+- `lib/api-spec/openapi.yaml` — generation contract source of truth
+- `artifacts/api-server/src/routes/study.ts` — generation and tutor routes
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Kit content and progress are intentionally separate; content can be regenerated without resetting study state.
+- IndexedDB is the persistence boundary for a later server-backed storage migration; localStorage remains a compatibility fallback for the first browser load.
+- The API uses AI SDK structured generation when managed AI Gateway variables are available and a deterministic material-derived starter when they are not.
+- Lecture audio is intentionally disabled in the first release.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Upload slide PDFs, text notes, and pasted material; PDF text is extracted in-browser.
+- Generate chapter summaries, a seven-day review plan, mapped practice questions, and flashcards through `/api/generate-kit`.
+- Review progress is stored separately from kit content in the browser so regeneration does not erase checkboxes or scores.
+- A streaming `/api/tutor` route supports “explain differently” prompts.
 
 ## User preferences
 

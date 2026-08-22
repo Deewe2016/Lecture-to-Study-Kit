@@ -1,0 +1,1 @@
+- [AI Gateway fallback](ai-gateway-fallback.md) — keep generation schema-valid and usable when managed AI provisioning is unavailable.
