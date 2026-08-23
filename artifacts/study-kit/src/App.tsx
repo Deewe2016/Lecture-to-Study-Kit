@@ -20,6 +20,32 @@ import './index.css';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
+const PDF_METADATA_HEADER = /^\s*(Subject|Level|Target Use|Testing Tip)\s*:/i;
+
+function cleanPdfText(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !PDF_METADATA_HEADER.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function pdfItemsToLines(items: Array<{ str?: string; transform?: number[] }>) {
+  const lines = new Map<number, string[]>();
+  for (const item of items) {
+    if (!item.str?.trim()) continue;
+    const y = Math.round(item.transform?.[5] ?? 0);
+    const line = lines.get(y) ?? [];
+    line.push(item.str.trim());
+    lines.set(y, line);
+  }
+  return [...lines.entries()]
+    .sort(([a], [b]) => b - a)
+    .map(([, line]) => line.join(" "));
+}
+
 type Material = { name: string; kind: string; text: string; size?: string };
 type Progress = { reviewed: string[]; completedTasks: string[]; answers: Record<string, number>; lastOpened?: string };
 type LocalKit = StudyKit & { id: string; materials: Material[]; createdAt: string };
@@ -177,9 +203,13 @@ function NewPage() {
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
           const page = await pdf.getPage(pageNumber);
           const content = await page.getTextContent();
-          pages.push(content.items.map((item) => ('str' in item ? item.str : '')).join(' '));
+          const textItems = content.items.filter((item) => 'str' in item).map((item) => ({
+            str: item.str,
+            transform: Array.from(item.transform ?? []),
+          }));
+          pages.push(pdfItemsToLines(textItems).join("\n"));
         }
-        text = pages.join('\n\n') || `${file.name} contained no selectable text`;
+        text = cleanPdfText(pages.join('\n\n')) || `${file.name} contained no selectable text`;
       }
       next.push({ name: file.name, kind: file.type.includes('pdf') ? 'slides' : file.type.includes('presentation') ? 'slides' : 'notes', text, size: `${Math.max(1, Math.round(file.size / 1024))} KB` });
     }

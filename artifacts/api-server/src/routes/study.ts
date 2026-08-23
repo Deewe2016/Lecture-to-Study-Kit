@@ -29,11 +29,50 @@ const kitSchema = z.object({
   })),
 });
 
+const metadataHeaderPattern = /^\s*(Subject|Level|Target Use|Testing Tip)\s*:/i;
+const sectionHeadingPattern = /^\s*(\d+)\.\s+(.+?)\s*$/;
+
+function cleanDocumentText(source: string) {
+  return source
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !metadataHeaderPattern.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function documentSections(source: string) {
+  const sections: Array<{ number: string; title: string; text: string }> = [];
+  let current: { number: string; title: string; lines: string[] } | null = null;
+  for (const line of source.split(/\r?\n/)) {
+    const heading = line.match(sectionHeadingPattern);
+    if (heading) {
+      if (current) sections.push({ number: current.number, title: current.title, text: current.lines.join(" ").trim() });
+      current = { number: heading[1], title: heading[2], lines: [] };
+    } else if (current) {
+      current.lines.push(line.trim());
+    }
+  }
+  if (current) sections.push({ number: current.number, title: current.title, text: current.lines.join(" ").trim() });
+  return sections.filter((section) => section.text.length > 0);
+}
+
 function starterKit(title: string, source: string, planDays: number) {
   const topic = title.replace(/^week\s*\d+\s*[·:-]?\s*/i, "").trim() || "your lecture";
-  const facts = source.split(/[.!?]\s+/).map((line) => line.trim()).filter((line) => line.length > 12).slice(0, 8);
+  const cleanSource = cleanDocumentText(source);
+  const sections = documentSections(cleanSource);
+  const facts = cleanSource.split(/[.!?]\s+/).map((line) => line.trim()).filter((line) => line.length > 12).slice(0, 8);
   const firstLine = facts[0];
-  const chapters = [
+  const chapters = (sections.length >= 2 ? sections.slice(0, 6).map((section, index) => {
+    const sectionFacts = section.text.split(/[.!?]\s+/).map((line) => line.trim()).filter((line) => line.length > 12).slice(0, 3);
+    return {
+      id: `section-${section.number}`, title: `${section.number}. ${section.title}`,
+      summary: sectionFacts[0] || section.text,
+      keyPoints: sectionFacts.length ? sectionFacts : [section.text, `This section defines and develops ${section.title}.`, `The document applies ${section.title} to the examples that follow.`],
+      objective: `Explain the definitions and relationships presented in ${section.title}.`,
+    };
+  }) : [
     {
       id: "definitions", title: `${topic}: key definitions`,
       summary: firstLine || `This material introduces the main terms and definitions used to explain ${topic}.`,
@@ -52,7 +91,7 @@ function starterKit(title: string, source: string, planDays: number) {
       keyPoints: facts.slice(6, 8).length ? facts.slice(6, 8) : ["Concrete examples make the abstract idea observable.", "The same principle can appear in more than one situation.", "The implications follow from the definitions and relationships above."],
       objective: `Use a concrete example to explain an implication of ${topic}.`,
     },
-  ];
+  ]);
   const reviewPlan = Array.from({ length: planDays }, (_, index) => ({
     day: index + 1,
     label: index === 0 ? "Start here" : index === planDays - 1 ? "Ready check" : `Review ${index + 1}`,
@@ -83,7 +122,7 @@ router.post("/generate-kit", async (req, res) => {
   const parsed = GenerateKitBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Add a title and at least one valid material." });
   const input = parsed.data;
-  const source = input.materials.map((material) => `${material.name}\n${material.text}`).join("\n\n").slice(0, 50000);
+  const source = cleanDocumentText(input.materials.map((material) => material.text).join("\n\n")).slice(0, 50000);
   try {
     const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
     const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -96,7 +135,7 @@ router.post("/generate-kit", async (req, res) => {
 
 First, understand what this specific document is actually about. The overview must be a direct, concrete 2-3 sentence description of the material itself. State what the document teaches, defines, argues, or demonstrates using its actual nouns, terms, facts, examples, and relationships. For a geometry document, say things like "A line is a straight path extending in both directions" if that is what the source says. For example: "This presentation argues that Maglev trains could replace some air travel by using magnetic levitation for zero-contact travel, zero direct carbon emissions, and lower energy consumption." Do not write generic advice such as "connect each definition to an example", "the material becomes easier to remember", or "study the core ideas."
 
-Then return 3-6 chapters with specific, source-grounded titles that describe the actual topics (never generic titles like "Core ideas", "Evidence & examples", or "Application & recall"), plus a ${input.planDays}-day plan, 10-15 multiple-choice questions, and 20-30 flashcards. Map questions and cards to chapter ids. Use syllabus objectives when present. Do not invent facts beyond the source. Every chapter summary, flashcard answer, flashcard question, exam prompt, answer option, and explanation must contain facts or definitions from the material. Never turn these into generic learning advice. Make the correct exam answer the source-grounded statement, not a meta-study behavior.
+Then return 3-6 chapters with specific, source-grounded titles that describe the actual topics. When the document contains numbered section headings such as "1. Fundamental Definitions & Postulates", use those headings as the chapter titles (preserve the number and wording, but remove any metadata labels). Build flashcards and quiz questions from the content under the matching heading, not from raw document labels or formatting text. Never display or repeat metadata headers such as "Subject:", "Level:", "Target Use:", or "Testing Tip:". Use syllabus objectives when present. Do not invent facts beyond the source. Every chapter summary, flashcard answer, flashcard question, exam prompt, answer option, and explanation must contain facts or definitions from the material. Never turn these into generic learning advice. Make the correct exam answer the source-grounded statement, not a meta-study behavior.
 
 Title: ${input.title}\\nRequested plan length: ${input.planDays} days\\nSyllabus: ${input.syllabus || "Not provided"}\\nMaterial:\\n${source}`,
     });
