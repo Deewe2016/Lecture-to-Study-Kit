@@ -123,9 +123,13 @@ router.post("/generate-kit", async (req, res) => {
     const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
     const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) return res.json(GenerateKitResponse.parse(starterKit(input.title, source, input.planDays)));
-    const openai = createOpenAI(baseUrl ? { baseURL: baseUrl, apiKey } : { apiKey });
+    const isOpenRouterKey = apiKey.startsWith("sk-or-");
+    const openai = createOpenAI({
+      baseURL: baseUrl || (isOpenRouterKey ? "https://openrouter.ai/api/v1" : undefined),
+      apiKey,
+    });
     const { object } = await generateObject({
-      model: openai("gpt-5.6-terra"),
+      model: openai(isOpenRouterKey ? "openai/gpt-4o-mini" : "gpt-5.6-terra"),
       schema: kitSchema,
       prompt: `You are a careful college study coach and document analyst. Build a complete study kit from the supplied lecture material.
 
