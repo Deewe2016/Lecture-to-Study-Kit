@@ -31,6 +31,7 @@ const kitSchema = z.object({
 
 const metadataHeaderPattern = /^\s*(Subject|Level|Target Use|Testing Tip)\s*:/i;
 const sectionHeadingPattern = /^\s*(\d+)\.\s+(.+?)\s*$/;
+const plainHeadingPattern = /^[A-Z][A-Za-z0-9 &'()/,-]{1,79}$/;
 
 function cleanDocumentText(source: string) {
   return source
@@ -45,8 +46,15 @@ function cleanDocumentText(source: string) {
 function documentSections(source: string) {
   const sections: Array<{ number: string; title: string; text: string }> = [];
   let current: { number: string; title: string; lines: string[] } | null = null;
-  for (const line of source.split(/\r?\n/)) {
-    const heading = line.match(sectionHeadingPattern);
+  const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    const numberedHeading = line.match(sectionHeadingPattern);
+    const isPlainHeading = plainHeadingPattern.test(line) &&
+      line.split(/\s+/).length <= 8 &&
+      !/[.!?;:]$/.test(line) &&
+      Boolean(lines[lineIndex + 1]);
+    const heading = numberedHeading || (isPlainHeading ? ["", `${sections.length + 1}`, line] : null);
     if (heading) {
       if (current) sections.push({ number: current.number, title: current.title, text: current.lines.join(" ").trim() });
       current = { number: heading[1], title: heading[2], lines: [] };
@@ -64,32 +72,20 @@ function starterKit(title: string, source: string, planDays: number) {
   const sections = documentSections(cleanSource);
   const facts = cleanSource.split(/[.!?]\s+/).map((line) => line.trim()).filter((line) => line.length > 12).slice(0, 8);
   const firstLine = facts[0];
-  const chapters = (sections.length >= 2 ? sections.slice(0, 6).map((section, index) => {
+  const chapters = (sections.length >= 1 ? sections.slice(0, 6).map((section) => {
     const sectionFacts = section.text.split(/[.!?]\s+/).map((line) => line.trim()).filter((line) => line.length > 12).slice(0, 3);
     return {
-      id: `section-${section.number}`, title: `${section.number}. ${section.title}`,
+      id: `section-${section.number}`, title: section.title,
       summary: sectionFacts[0] || section.text,
       keyPoints: sectionFacts.length ? sectionFacts : [section.text, `This section defines and develops ${section.title}.`, `The document applies ${section.title} to the examples that follow.`],
       objective: `Explain the definitions and relationships presented in ${section.title}.`,
     };
   }) : [
     {
-      id: "definitions", title: `${topic}: key definitions`,
+      id: "source", title: topic,
       summary: firstLine || `This material introduces the main terms and definitions used to explain ${topic}.`,
       keyPoints: facts.slice(0, 3).length ? facts.slice(0, 3) : [`The material defines the main terms used in ${topic}.`, "Related terms describe different parts of the subject.", "Definitions become useful when applied to an example."],
       objective: `Define the central terms used in ${topic}.`,
-    },
-    {
-      id: "relationships", title: `${topic}: how the parts connect`,
-      summary: facts[1] || `The material explains how the main concepts in ${topic} relate to one another.`,
-      keyPoints: facts.slice(3, 6).length ? facts.slice(3, 6) : ["One concept can change how another concept is understood.", "The order or relationship between terms matters.", "Examples show where the concepts overlap or differ."],
-      objective: `Explain the relationships between the main concepts in ${topic}.`,
-    },
-    {
-      id: "examples", title: `${topic}: examples and implications`,
-      summary: facts[2] || `The material uses examples to show what ${topic} looks like in practice and why it matters.`,
-      keyPoints: facts.slice(6, 8).length ? facts.slice(6, 8) : ["Concrete examples make the abstract idea observable.", "The same principle can appear in more than one situation.", "The implications follow from the definitions and relationships above."],
-      objective: `Use a concrete example to explain an implication of ${topic}.`,
     },
   ]);
   const reviewPlan = Array.from({ length: planDays }, (_, index) => ({
@@ -112,8 +108,8 @@ function starterKit(title: string, source: string, planDays: number) {
     overview: `A focused starting map for ${topic}, shaped from the material you provided.`,
     chapters, reviewPlan, questions,
     flashcards: chapters.flatMap((chapter, index) => [
-      { id: `f${index * 2 + 1}`, chapterId: chapter.id, front: `What does the material say about ${chapter.title.toLowerCase()}?`, back: chapter.summary, hint: "Recall the sentence from the source." },
-      { id: `f${index * 2 + 2}`, chapterId: chapter.id, front: `Which statement is true about ${chapter.title.toLowerCase()}?`, back: chapter.keyPoints[1], hint: "Use the key point, not a study tip." },
+      { id: `f${index * 2 + 1}`, chapterId: chapter.id, front: chapter.title, back: chapter.summary, hint: "Recall the sentence from the source." },
+      { id: `f${index * 2 + 2}`, chapterId: chapter.id, front: `${chapter.title}: key fact`, back: chapter.keyPoints[1], hint: "Use the key point from this section." },
     ]),
   };
 }
@@ -135,7 +131,7 @@ router.post("/generate-kit", async (req, res) => {
 
 First, understand what this specific document is actually about. The overview must be a direct, concrete 2-3 sentence description of the material itself. State what the document teaches, defines, argues, or demonstrates using its actual nouns, terms, facts, examples, and relationships. For a geometry document, say things like "A line is a straight path extending in both directions" if that is what the source says. For example: "This presentation argues that Maglev trains could replace some air travel by using magnetic levitation for zero-contact travel, zero direct carbon emissions, and lower energy consumption." Do not write generic advice such as "connect each definition to an example", "the material becomes easier to remember", or "study the core ideas."
 
-Then return 3-6 chapters with specific, source-grounded titles that describe the actual topics. When the document contains numbered section headings such as "1. Fundamental Definitions & Postulates", use those headings as the chapter titles (preserve the number and wording, but remove any metadata labels). Build flashcards and quiz questions from the content under the matching heading, not from raw document labels or formatting text. Never display or repeat metadata headers such as "Subject:", "Level:", "Target Use:", or "Testing Tip:". Use syllabus objectives when present. Do not invent facts beyond the source. Every chapter summary, flashcard answer, flashcard question, exam prompt, answer option, and explanation must contain facts or definitions from the material. Never turn these into generic learning advice. Make the correct exam answer the source-grounded statement, not a meta-study behavior.
+Then return 3-6 chapters with specific, source-grounded titles taken from the document itself. Use actual slide or section headings exactly when available, including short headings such as "Vocabulary", "Science", and "Environment" or numbered headings such as "1. Fundamental Definitions & Postulates"; never prepend a subject name or replace them with labels like "key definitions", "how the parts connect", or "examples and implications". Build flashcard headers/fronts and quiz questions from the content under the matching heading, and use that heading as the card's organizing label. Never display or repeat metadata headers such as "Subject:", "Level:", "Target Use:", or "Testing Tip:". Use syllabus objectives when present. Do not invent facts beyond the source. Every chapter summary, flashcard answer, flashcard question, exam prompt, answer option, and explanation must contain facts or definitions from the material. Never turn these into generic learning advice. Make the correct exam answer the source-grounded statement, not a meta-study behavior.
 
 Title: ${input.title}\\nRequested plan length: ${input.planDays} days\\nSyllabus: ${input.syllabus || "Not provided"}\\nMaterial:\\n${source}`,
     });
