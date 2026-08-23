@@ -160,6 +160,7 @@ function NewPage() {
   const generate = useGenerateKit();
   const [title, setTitle] = useState('');
   const [syllabus, setSyllabus] = useState('');
+  const [planDays, setPlanDays] = useState(7);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [stage, setStage] = useState<'form' | 'generating' | 'error'>('form');
   const [progress, setProgress] = useState(0);
@@ -189,7 +190,7 @@ function NewPage() {
     setError(''); setStage('generating'); setProgress(12);
     const steps = [['Reading your material', 31], ['Finding the through-line', 55], ['Writing review prompts', 78], ['Setting your first week', 94]] as const;
     steps.forEach(([label, value], i) => window.setTimeout(() => { setStageLabel(label); setProgress(value); }, (i + 1) * 850));
-    const payload: StudyKitInput = { title: title.trim(), syllabus: syllabus.trim() || null, materials: materials.map(({ name, kind, text }) => ({ name, kind, text })) };
+    const payload: StudyKitInput = { title: title.trim(), planDays, syllabus: syllabus.trim() || null, materials: materials.map(({ name, kind, text }) => ({ name, kind, text })) };
     generate.mutate({ data: payload }, {
       onSuccess: result => {
         const kit: LocalKit = { ...result, id: makeId(), materials, createdAt: new Date().toISOString() };
@@ -203,14 +204,16 @@ function NewPage() {
     });
   };
   const useLocalFallback = () => {
-    const kit = { ...demoKit, id: makeId(), title: title.trim() || 'Untitled study kit', courseLabel: 'Personal study space', overview: 'A starting structure for your material. Refine it as you study.', materials, createdAt: new Date().toISOString() };
+    const reviewPlan = Array.from({ length: planDays }, (_, index) => ({ ...demoKit.reviewPlan[index % demoKit.reviewPlan.length], day: index + 1 }));
+    const kit = { ...demoKit, id: makeId(), title: title.trim() || 'Untitled study kit', courseLabel: 'Personal study space', overview: 'A starting structure for your material. Refine it as you study.', reviewPlan, materials, createdAt: new Date().toISOString() };
     saveKits([kit, ...readKits()]); setLocation(`/kit/${kit.id}`);
   };
   return <section className="mx-auto max-w-4xl px-5 py-10 sm:px-9 sm:py-14">
     <Link href="/" className="focus-ring inline-flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground" data-testid="link-back-library"><ArrowLeft size={14} /> Back to library</Link>
     {stage === 'form' || stage === 'error' ? <div className="slide-up mt-12"><div className="max-w-xl"><p className="font-mono text-[11px] uppercase tracking-[.2em] text-primary">New study kit</p><h1 className="mt-3 font-serif text-4xl tracking-[-.04em] sm:text-5xl">Bring a lecture.<br /><span className="text-primary">Leave with a plan.</span></h1><p className="mt-4 text-sm leading-6 text-muted-foreground">Add what you have. We’ll turn it into a calm, focused space for the week ahead.</p></div>
-      <div className="mt-12 space-y-8">
+       <div className="mt-12 space-y-8">
         <label className="block"><span className="mb-2 block text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">What are you studying?</span><input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Week 7 · Memory & Cognition" className="focus-ring h-12 w-full rounded-lg border border-input bg-card px-4 text-sm outline-none placeholder:text-muted-foreground/60" data-testid="input-kit-title" /></label>
+         <label className="block max-w-xs"><span className="mb-2 block text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">How many days do you have?</span><div className="flex items-center gap-3"><input type="number" min={1} max={30} value={planDays} onChange={e => setPlanDays(Math.min(30, Math.max(1, Number(e.target.value) || 1)))} className="focus-ring h-12 w-24 rounded-lg border border-input bg-card px-4 text-sm outline-none" data-testid="input-plan-days" /><span className="text-xs text-muted-foreground">day review plan</span></div></label>
         <div><div className="mb-2 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">Your material</span><span className="text-[11px] text-muted-foreground">{materials.length}/8 added</span></div><div className="grid gap-3 sm:grid-cols-2"><label className="focus-ring flex min-h-[122px] cursor-pointer flex-col justify-between rounded-xl border border-dashed border-primary/50 bg-primary/[.04] p-4 transition-colors hover:bg-primary/[.08]"><input type="file" multiple accept=".pdf,.ppt,.pptx,.txt,.md" className="sr-only" onChange={e => void addFiles(e.target.files)} data-testid="input-upload-materials" /><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 text-primary"><UploadCloud size={18} /></span><span><span className="block text-sm font-medium">Upload slides or notes</span><span className="mt-1 block text-xs text-muted-foreground">PDF, PowerPoint, TXT, or Markdown</span></span></label><button disabled className="flex min-h-[122px] cursor-not-allowed flex-col justify-between rounded-xl border border-border bg-card/40 p-4 text-left opacity-60" data-testid="button-audio-coming-soon"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground"><Volume2 size={18} /></span><span><span className="block text-sm font-medium">Lecture audio <span className="ml-1 rounded-full bg-secondary px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">Soon</span></span><span className="mt-1 block text-xs text-muted-foreground">Audio transcription is on its way</span></span></button></div>
           {materials.length > 0 && <div className="mt-3 space-y-2">{materials.map((m, i) => <div key={`${m.name}-${i}`} className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"><FileText size={15} className="text-primary" /><span className="min-w-0 flex-1 truncate text-xs">{m.name}</span><span className="font-mono text-[10px] text-emerald-300">Ready</span><button className="focus-ring rounded p-1 text-muted-foreground hover:text-foreground" onClick={() => setMaterials(materials.filter((_, j) => j !== i))} aria-label={`Remove ${m.name}`} data-testid={`button-remove-material-${i}`}><X size={14} /></button></div>)}</div>}
         </div>

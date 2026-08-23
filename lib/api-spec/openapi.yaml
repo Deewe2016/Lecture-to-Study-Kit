@@ -82,7 +82,11 @@ components:
             required: [name, kind, text]
         syllabus:
           type: ["string", "null"]
-      required: [title, materials]
+        planDays:
+          type: number
+          minimum: 1
+          maximum: 30
+      required: [title, materials, planDays]
     StudyKit:
       type: object
       properties:

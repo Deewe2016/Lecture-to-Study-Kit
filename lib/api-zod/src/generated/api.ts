@@ -21,6 +21,8 @@ export const HealthCheckResponse = zod.object({
  * @summary Generate a structured study kit
  */
 
+export const generateKitBodyPlanDaysMax = 30;
+
 
 
 export const GenerateKitBody = zod.object({
@@ -30,7 +32,8 @@ export const GenerateKitBody = zod.object({
   "kind": zod.string(),
   "text": zod.string()
 })),
-  "syllabus": zod.string().nullish()
+  "syllabus": zod.string().nullish(),
+  "planDays": zod.number().min(1).max(generateKitBodyPlanDaysMax)
 })
 
 export const GenerateKitResponse = zod.object({

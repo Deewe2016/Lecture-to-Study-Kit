@@ -21,6 +21,11 @@ export interface StudyKitInput {
   materials: StudyKitInputMaterialsItem[];
   /** @nullable */
   syllabus?: string | null;
+  /**
+     * @minimum 1
+     * @maximum 30
+     */
+  planDays: number;
 }
 
 export interface Chapter {

@@ -29,42 +29,43 @@ const kitSchema = z.object({
   })),
 });
 
-function starterKit(title: string, source: string) {
+function starterKit(title: string, source: string, planDays: number) {
   const topic = title.replace(/^week\s*\d+\s*[·:-]?\s*/i, "").trim() || "your lecture";
-  const firstLine = source.split(/\n+/).map((line) => line.trim()).find(Boolean);
+  const facts = source.split(/[.!?]\s+/).map((line) => line.trim()).filter((line) => line.length > 12).slice(0, 8);
+  const firstLine = facts[0];
   const chapters = [
     {
-      id: "core-ideas", title: "Core ideas",
-      summary: `The central argument of ${topic} is easier to hold when you connect each definition to an example and a consequence.`,
-      keyPoints: [firstLine || "Name the main concept in your own words.", "Notice the relationship between the key terms.", "Test the idea with a concrete example."],
-      objective: "Explain the lecture's main ideas and how they relate.",
+      id: "definitions", title: `${topic}: key definitions`,
+      summary: firstLine || `This material introduces the main terms and definitions used to explain ${topic}.`,
+      keyPoints: facts.slice(0, 3).length ? facts.slice(0, 3) : [`The material defines the main terms used in ${topic}.`, "Related terms describe different parts of the subject.", "Definitions become useful when applied to an example."],
+      objective: `Define the central terms used in ${topic}.`,
     },
     {
-      id: "evidence", title: "Evidence & examples",
-      summary: "The examples and evidence make the abstract material usable. Ask what each example proves and where it stops being useful.",
-      keyPoints: ["Separate claims from supporting evidence.", "Compare examples rather than memorizing them in isolation.", "Look for exceptions and boundary cases."],
-      objective: "Use examples to distinguish related concepts.",
+      id: "relationships", title: `${topic}: how the parts connect`,
+      summary: facts[1] || `The material explains how the main concepts in ${topic} relate to one another.`,
+      keyPoints: facts.slice(3, 6).length ? facts.slice(3, 6) : ["One concept can change how another concept is understood.", "The order or relationship between terms matters.", "Examples show where the concepts overlap or differ."],
+      objective: `Explain the relationships between the main concepts in ${topic}.`,
     },
     {
-      id: "application", title: "Application & recall",
-      summary: "Strong exam answers move from recall to application: identify the concept, justify the choice, and explain the result.",
-      keyPoints: ["Start with a retrieval cue.", "Explain why an answer is right, not only what it is.", "Practice with unfamiliar scenarios."],
-      objective: "Apply the material to a new scenario.",
+      id: "examples", title: `${topic}: examples and implications`,
+      summary: facts[2] || `The material uses examples to show what ${topic} looks like in practice and why it matters.`,
+      keyPoints: facts.slice(6, 8).length ? facts.slice(6, 8) : ["Concrete examples make the abstract idea observable.", "The same principle can appear in more than one situation.", "The implications follow from the definitions and relationships above."],
+      objective: `Use a concrete example to explain an implication of ${topic}.`,
     },
   ];
-  const reviewPlan = Array.from({ length: 7 }, (_, index) => ({
+  const reviewPlan = Array.from({ length: planDays }, (_, index) => ({
     day: index + 1,
-    label: ["Start here", "Connect", "Deepen", "Practice", "Repair", "Mix it up", "Ready check"][index],
+    label: index === 0 ? "Start here" : index === planDays - 1 ? "Ready check" : `Review ${index + 1}`,
     focus: chapters[index % chapters.length].title,
-    tasks: index === 0 ? ["Read the overview and chapter summaries", "Write the main idea from memory"] : ["Review the key points", index === 3 ? "Take the practice exam" : "Review yesterday's flashcards"],
-    minutes: [25, 30, 25, 35, 25, 30, 15][index],
+    tasks: index === 0 ? ["Read the overview and chapter summaries", "Write the main idea from memory"] : ["Review the key points", index === planDays - 1 ? "Take the practice exam" : "Review yesterday's flashcards"],
+    minutes: index === 0 ? 25 : index === planDays - 1 ? 35 : 25,
   }));
   const questions = chapters.map((chapter, index) => ({
     id: `q${index + 1}`, chapterId: chapter.id,
-    prompt: `Which approach best demonstrates understanding of ${chapter.title.toLowerCase()}?`,
-    options: ["Repeat the definition without context", "Connect the idea to evidence or a new example", "Skip the difficult part", "Memorize the heading only"],
-    answer: 1,
-    explanation: "Connecting a concept to evidence or a new example shows that you can retrieve and apply it.",
+    prompt: `According to the material, which statement best describes ${chapter.title.toLowerCase()}?`,
+    options: [chapter.keyPoints[0], chapter.keyPoints[1], "It is unrelated to the other concepts in the material.", "The material does not define or describe it."],
+    answer: 0,
+    explanation: `The material states: ${chapter.keyPoints[0]}`,
     difficulty: index === 2 ? "Stretch" : "Core",
   }));
   return {
@@ -72,8 +73,8 @@ function starterKit(title: string, source: string) {
     overview: `A focused starting map for ${topic}, shaped from the material you provided.`,
     chapters, reviewPlan, questions,
     flashcards: chapters.flatMap((chapter, index) => [
-      { id: `f${index * 2 + 1}`, chapterId: chapter.id, front: `What is the central question in ${chapter.title}?`, back: chapter.summary, hint: "Start with the chapter objective." },
-      { id: `f${index * 2 + 2}`, chapterId: chapter.id, front: `How would you apply ${chapter.title.toLowerCase()}?`, back: chapter.keyPoints[1], hint: "Think of a fresh scenario." },
+      { id: `f${index * 2 + 1}`, chapterId: chapter.id, front: `What does the material say about ${chapter.title.toLowerCase()}?`, back: chapter.summary, hint: "Recall the sentence from the source." },
+      { id: `f${index * 2 + 2}`, chapterId: chapter.id, front: `Which statement is true about ${chapter.title.toLowerCase()}?`, back: chapter.keyPoints[1], hint: "Use the key point, not a study tip." },
     ]),
   };
 }
@@ -86,23 +87,23 @@ router.post("/generate-kit", async (req, res) => {
   try {
     const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
     const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-    if (!apiKey) return res.json(GenerateKitResponse.parse(starterKit(input.title, source)));
+    if (!apiKey) return res.json(GenerateKitResponse.parse(starterKit(input.title, source, input.planDays)));
     const openai = createOpenAI(baseUrl ? { baseURL: baseUrl, apiKey } : { apiKey });
     const { object } = await generateObject({
       model: openai("gpt-5.6-terra"),
       schema: kitSchema,
       prompt: `You are a careful college study coach and document analyst. Build a complete study kit from the supplied lecture material.
 
-First, understand what this specific document is actually about. The overview must be a direct, concrete 2-3 sentence description of the document's thesis, subject, mechanism, evidence, or implications. It must name the real topic and claims from the source, not give study advice or describe the act of studying. For example: "This presentation argues that Maglev trains could replace some air travel by using magnetic levitation for zero-contact travel, zero direct carbon emissions, and lower energy consumption." Do not write generic text such as "This document covers core ideas" or "This material provides evidence and examples."
+First, understand what this specific document is actually about. The overview must be a direct, concrete 2-3 sentence description of the material itself. State what the document teaches, defines, argues, or demonstrates using its actual nouns, terms, facts, examples, and relationships. For a geometry document, say things like "A line is a straight path extending in both directions" if that is what the source says. For example: "This presentation argues that Maglev trains could replace some air travel by using magnetic levitation for zero-contact travel, zero direct carbon emissions, and lower energy consumption." Do not write generic advice such as "connect each definition to an example", "the material becomes easier to remember", or "study the core ideas."
 
-Then return 3-6 chapters with specific, source-grounded titles that describe the actual topics (never generic titles like "Core ideas", "Evidence & examples", or "Application & recall"), plus a 7-day plan, 10-15 multiple-choice questions, and 20-30 flashcards. Map questions and cards to chapter ids. Use syllabus objectives when present. Do not invent facts beyond the source. Questions and flashcards should test the document's actual claims, terms, examples, and relationships.
+Then return 3-6 chapters with specific, source-grounded titles that describe the actual topics (never generic titles like "Core ideas", "Evidence & examples", or "Application & recall"), plus a ${input.planDays}-day plan, 10-15 multiple-choice questions, and 20-30 flashcards. Map questions and cards to chapter ids. Use syllabus objectives when present. Do not invent facts beyond the source. Every chapter summary, flashcard answer, flashcard question, exam prompt, answer option, and explanation must contain facts or definitions from the material. Never turn these into generic learning advice. Make the correct exam answer the source-grounded statement, not a meta-study behavior.
 
-Title: ${input.title}\\nSyllabus: ${input.syllabus || "Not provided"}\\nMaterial:\\n${source}`,
+Title: ${input.title}\\nRequested plan length: ${input.planDays} days\\nSyllabus: ${input.syllabus || "Not provided"}\\nMaterial:\\n${source}`,
     });
     return res.json(GenerateKitResponse.parse(object));
   } catch (error) {
     req.log.error({ err: error }, "study kit generation failed");
-    return res.json(GenerateKitResponse.parse(starterKit(input.title, source)));
+    return res.json(GenerateKitResponse.parse(starterKit(input.title, source, input.planDays)));
   }
 });
 
