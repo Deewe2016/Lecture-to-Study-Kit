@@ -56,6 +56,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /study-kits/{id}:
+    delete:
+      operationId: deleteStudyKit
+      tags: [study]
+      summary: Permanently delete a study kit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Study kit deleted
+        "400":
+          description: Invalid study kit id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Deletion failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   schemas:
     HealthStatus:
@@ -69,6 +95,9 @@ components:
       type: object
       properties:
         title:
+          type: string
+          minLength: 1
+        id:
           type: string
           minLength: 1
         materials:

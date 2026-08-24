@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { GenerateKitBody, GenerateKitResponse } from "@workspace/api-zod";
+import { db, studyKits } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -114,6 +116,30 @@ function starterKit(title: string, source: string, planDays: number) {
   };
 }
 
+function randomizeQuestionAnswers(kit: z.infer<typeof kitSchema>) {
+  return {
+    ...kit,
+    questions: kit.questions.map((question) => {
+      const correctOption = question.options[question.answer] ?? question.options[0];
+      const options = [...question.options];
+      for (let index = options.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [options[index], options[swapIndex]] = [options[swapIndex], options[index]];
+      }
+      return { ...question, options, answer: Math.max(0, options.indexOf(correctOption)) };
+    }),
+  };
+}
+
+async function persistKit(id: string | undefined, kit: z.infer<typeof kitSchema>, req: { log: { warn: (data: unknown, message: string) => void } }) {
+  if (!id) return;
+  try {
+    await db.insert(studyKits).values({ id, payload: kit }).onConflictDoUpdate({ target: studyKits.id, set: { payload: kit } });
+  } catch (error) {
+    req.log.warn({ err: error }, "study kit persistence failed");
+  }
+}
+
 router.post("/generate-kit", async (req, res) => {
   const parsed = GenerateKitBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Add a title and at least one valid material." });
@@ -122,7 +148,11 @@ router.post("/generate-kit", async (req, res) => {
   try {
     const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
     const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-    if (!apiKey) return res.json(GenerateKitResponse.parse(starterKit(input.title, source, input.planDays)));
+    if (!apiKey) {
+      const kit = randomizeQuestionAnswers(GenerateKitResponse.parse(starterKit(input.title, source, input.planDays)));
+      await persistKit(input.id, kit, req);
+      return res.json(kit);
+    }
     const isOpenRouterKey = apiKey.startsWith("sk-or-");
     const openai = createOpenAI({
       baseURL: baseUrl || (isOpenRouterKey ? "https://openrouter.ai/api/v1" : undefined),
@@ -139,10 +169,26 @@ Then return 3-6 chapters with specific, source-grounded titles taken from the do
 
 Title: ${input.title}\\nRequested plan length: ${input.planDays} days\\nSyllabus: ${input.syllabus || "Not provided"}\\nMaterial:\\n${source}`,
     });
-    return res.json(GenerateKitResponse.parse(object));
+    const kit = randomizeQuestionAnswers(GenerateKitResponse.parse(object));
+    await persistKit(input.id, kit, req);
+    return res.json(kit);
   } catch (error) {
     req.log.error({ err: error }, "study kit generation failed");
-    return res.json(GenerateKitResponse.parse(starterKit(input.title, source, input.planDays)));
+    const kit = randomizeQuestionAnswers(GenerateKitResponse.parse(starterKit(input.title, source, input.planDays)));
+    await persistKit(input.id, kit, req);
+    return res.json(kit);
+  }
+});
+
+router.delete("/study-kits/:id", async (req, res) => {
+  const id = req.params.id?.trim();
+  if (!id) return res.status(400).json({ error: "A study kit id is required." });
+  try {
+    await db.delete(studyKits).where(eq(studyKits.id, id));
+    return res.status(204).send();
+  } catch (error) {
+    req.log.error({ err: error, kitId: id }, "study kit deletion failed");
+    return res.status(500).json({ error: "Could not delete the study kit." });
   }
 });
 

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, useParams } from 'wouter';
-import { useGenerateKit, useHealthCheck, getHealthCheckQueryKey } from '@workspace/api-client-react';
+import { deleteStudyKit, useGenerateKit, useHealthCheck, getHealthCheckQueryKey } from '@workspace/api-client-react';
 import type { StudyKit, StudyKitInput } from '@workspace/api-client-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { saveKit, saveProgress as saveIndexedProgress, loadKits, loadProgress } from '@/lib/kit-store';
+import { saveKit, deleteKit as deleteStoredKit, saveProgress as saveIndexedProgress, loadKits, loadProgress } from '@/lib/kit-store';
 import {
   ArrowLeft, ArrowRight, BookOpen, Brain, CalendarDays, Check, CheckCircle2, ChevronLeft,
   ChevronRight, Circle, CircleHelp, Clock3, FileText, GraduationCap, Home, Library,
@@ -154,7 +154,17 @@ function LibraryPage() {
       if (stored.length > 0) setKits(stored as LocalKit[]);
     });
   }, []);
-  const remove = (id: string) => { if (window.confirm('Remove this study kit from this browser?')) setKits(kits.filter(k => k.id !== id)); };
+  const remove = async (id: string) => {
+    if (!window.confirm('Permanently delete this study kit?')) return;
+    try {
+      await deleteStudyKit(id);
+      localStorage.removeItem(`${PROGRESS}-${id}`);
+      await deleteStoredKit(id);
+      setKits(prev => prev.filter(k => k.id !== id));
+    } catch {
+      window.alert('This study kit could not be deleted. Please try again.');
+    }
+  };
   return <section className="mx-auto max-w-6xl px-5 py-10 sm:px-9 sm:py-14">
     <div className="slide-up flex flex-col justify-between gap-6 sm:flex-row sm:items-end"><div><p className="font-mono text-[11px] uppercase tracking-[.2em] text-primary">Good afternoon, Alex</p><h1 className="mt-3 font-serif text-4xl leading-tight tracking-[-.04em] text-foreground sm:text-5xl">A little more<br /><span className="text-primary">remembering.</span></h1><p className="mt-4 max-w-md text-sm leading-6 text-muted-foreground">Your study space for the ideas worth keeping.</p></div><Link href="/new" className="focus-ring inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="link-create-kit"><Plus size={17} /> Create a study kit</Link></div>
     <div className="mt-14 flex items-center justify-between border-b border-border pb-3"><h2 className="text-sm font-semibold">Your kits <span className="ml-1 text-muted-foreground">{kits.length}</span></h2><button className="focus-ring flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground" onClick={() => setKits([...kits].sort((a, b) => a.title.localeCompare(b.title)))} data-testid="button-sort-kits"><Search size={14} /> Sort alphabetically</button></div>
@@ -220,10 +230,11 @@ function NewPage() {
     setError(''); setStage('generating'); setProgress(12);
     const steps = [['Reading your material', 31], ['Finding the through-line', 55], ['Writing review prompts', 78], ['Setting your first week', 94]] as const;
     steps.forEach(([label, value], i) => window.setTimeout(() => { setStageLabel(label); setProgress(value); }, (i + 1) * 850));
-    const payload: StudyKitInput = { title: title.trim(), planDays, syllabus: syllabus.trim() || null, materials: materials.map(({ name, kind, text }) => ({ name, kind, text })) };
+    const id = makeId();
+    const payload: StudyKitInput = { id, title: title.trim(), planDays, syllabus: syllabus.trim() || null, materials: materials.map(({ name, kind, text }) => ({ name, kind, text })) };
     generate.mutate({ data: payload }, {
       onSuccess: result => {
-        const kit: LocalKit = { ...result, id: makeId(), materials, createdAt: new Date().toISOString() };
+        const kit: LocalKit = { ...result, id, materials, createdAt: new Date().toISOString() };
         const kits = readKits().filter(k => k.id !== demoKit.id || k.title !== demoKit.title);
         saveKits([kit, ...kits]); setProgress(100); setStageLabel('Your kit is ready');
         window.setTimeout(() => setLocation(`/kit/${kit.id}`), 500);

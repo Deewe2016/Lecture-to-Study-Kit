@@ -17,4 +17,12 @@
 //   export type InsertPost = z.infer<typeof insertPostSchema>;
 //   export type Post = typeof postsTable.$inferSelect;
 
-export {}
+import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+
+export const studyKits = pgTable("study_kits", {
+  id: text("id").primaryKey(),
+  payload: jsonb("payload").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type StudyKitRecord = typeof studyKits.$inferSelect;

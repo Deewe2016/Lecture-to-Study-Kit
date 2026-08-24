@@ -202,3 +202,74 @@ export const useGenerateKit = <TError = ErrorType<Error>,
       return useMutation(getGenerateKitMutationOptions(options));
     }
 
+export const getDeleteStudyKitUrl = (id: string,) => {
+
+
+
+
+  return `/api/study-kits/${id}`
+}
+
+/**
+ * @summary Permanently delete a study kit
+ */
+export const deleteStudyKit = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteStudyKitUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteStudyKitMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteStudyKit>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteStudyKit>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['deleteStudyKit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteStudyKit>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteStudyKit(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteStudyKitMutationResult = NonNullable<Awaited<ReturnType<typeof deleteStudyKit>>>
+
+    export type DeleteStudyKitMutationError = ErrorType<Error>
+
+    /**
+ * @summary Permanently delete a study kit
+ */
+export const useDeleteStudyKit = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteStudyKit>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteStudyKit>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDeleteStudyKitMutationOptions(options));
+    }
+

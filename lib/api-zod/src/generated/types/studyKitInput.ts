@@ -10,6 +10,8 @@ import type { StudyKitInputMaterialsItem } from './studyKitInputMaterialsItem';
 export interface StudyKitInput {
   /** @minLength 1 */
   title: string;
+  /** @minLength 1 */
+  id?: string;
   materials: StudyKitInputMaterialsItem[];
   /** @nullable */
   syllabus?: string | null;

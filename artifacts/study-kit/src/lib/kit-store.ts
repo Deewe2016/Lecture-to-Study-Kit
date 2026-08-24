@@ -49,6 +49,19 @@ async function readAll<T>(storeName: 'kits' | 'progress'): Promise<T[]> {
 }
 
 export async function saveKit(kit: StoredKit) { try { await write('kits', kit); } catch { /* browser fallback remains available */ } }
+export async function deleteKit(id: string) {
+  try {
+    const db = await open();
+    await new Promise<void>((resolve, reject) => {
+      const request = db.transaction(['kits', 'progress'], 'readwrite');
+      request.objectStore('kits').delete(id);
+      request.objectStore('progress').delete(id);
+      request.oncomplete = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+  } catch { /* localStorage cleanup remains available */ }
+}
 export async function saveProgress(progress: StoredProgress) { try { await write('progress', progress); } catch { /* browser fallback remains available */ } }
 export async function loadKits() { try { return await readAll<StoredKit>('kits'); } catch { return []; } }
 export async function loadProgress(id: string) {

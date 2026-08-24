@@ -21,12 +21,14 @@ export const HealthCheckResponse = zod.object({
  * @summary Generate a structured study kit
  */
 
+
 export const generateKitBodyPlanDaysMax = 30;
 
 
 
 export const GenerateKitBody = zod.object({
   "title": zod.string().min(1),
+  "id": zod.string().min(1).optional(),
   "materials": zod.array(zod.object({
   "name": zod.string(),
   "kind": zod.string(),
@@ -71,5 +73,15 @@ export const GenerateKitResponse = zod.object({
   "hint": zod.string().nullable()
 }))
 })
+
+
+/**
+ * @summary Permanently delete a study kit
+ */
+export const DeleteStudyKitParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteStudyKitResponse = zod.void()
 
 
