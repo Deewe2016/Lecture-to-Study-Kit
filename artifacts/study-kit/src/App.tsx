@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, useParams } from 'wouter';
-import { deleteStudyKit, useGenerateKit, useHealthCheck, getHealthCheckQueryKey } from '@workspace/api-client-react';
+import { deleteStudyKit, transcribeVideo, useGenerateKit, useHealthCheck, getHealthCheckQueryKey } from '@workspace/api-client-react';
 import type { StudyKit, StudyKitInput } from '@workspace/api-client-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -10,7 +10,7 @@ import {
   ArrowLeft, ArrowRight, BookOpen, Brain, CalendarDays, Check, CheckCircle2, ChevronLeft,
   ChevronRight, Circle, CircleHelp, Clock3, FileText, GraduationCap, Home, Library,
   Menu, MoreHorizontal, PanelLeft, PenLine, Play, Plus, RotateCcw, Search, Sparkles,
-  Target, UploadCloud, Volume2, X
+  Target, UploadCloud, Video, Volume2, X
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -53,6 +53,8 @@ type LocalKit = StudyKit & { id: string; materials: Material[]; createdAt: strin
 const queryClient = new QueryClient();
 const STORAGE = 'lecture-study-kits';
 const PROGRESS = 'lecture-study-progress';
+const CALENDAR_STORAGE = 'lecture-study-calendar';
+type StudySession = { id: string; date: string; title: string; kitId?: string; minutes: number };
 
 const demoKit: LocalKit = {
   id: 'cognitive-science-demo',
@@ -104,6 +106,8 @@ function saveProgress(id: string, progress: Progress) {
   localStorage.setItem(`${PROGRESS}-${id}`, JSON.stringify(progress));
   void saveIndexedProgress({ ...progress, id });
 }
+function readSessions(): StudySession[] { try { return JSON.parse(localStorage.getItem(CALENDAR_STORAGE) || '[]'); } catch { return []; } }
+function saveSessions(sessions: StudySession[]) { localStorage.setItem(CALENDAR_STORAGE, JSON.stringify(sessions)); }
 function makeId() { return `kit-${Date.now()}`; }
 
 function Brand() {
@@ -120,6 +124,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const nav = [
     { href: '/', label: 'My kits', icon: Library },
     { href: '/new', label: 'New study kit', icon: Plus },
+    { href: '/calendar', label: 'Calendar', icon: CalendarDays },
   ];
   return <div className="grain min-h-[100dvh] bg-background text-foreground">
     <aside className={`fixed inset-y-0 left-0 z-30 w-[248px] border-r border-sidebar-border bg-sidebar px-5 py-6 transition-transform md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -198,6 +203,9 @@ function NewPage() {
   const [syllabus, setSyllabus] = useState('');
   const [planDays, setPlanDays] = useState(7);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [sourceMode, setSourceMode] = useState<'materials' | 'video'>('materials');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [stage, setStage] = useState<'form' | 'generating' | 'error'>('form');
   const [progress, setProgress] = useState(0);
   const [stageLabel, setStageLabel] = useState('Preparing your study space');
@@ -225,16 +233,32 @@ function NewPage() {
     }
     setMaterials(prev => [...prev, ...next]);
   };
-  const submit = () => {
-    if (!title.trim() || materials.length === 0) { setError('Add a title and at least one piece of material to continue.'); return; }
+  const submit = async () => {
+    if (!title.trim() || (sourceMode === 'materials' && materials.length === 0) || (sourceMode === 'video' && !videoUrl.trim() && !videoFile)) { setError('Add a title and a lecture source to continue.'); return; }
     setError(''); setStage('generating'); setProgress(12);
+    let generationMaterials = materials;
+    if (sourceMode === 'video') {
+      try {
+        let fileData: string | null = null;
+        if (videoFile) {
+          const buffer = await videoFile.arrayBuffer();
+          fileData = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        }
+        const transcript = await transcribeVideo({ url: videoUrl.trim() || null, fileName: videoFile?.name || null, fileData, mimeType: videoFile?.type || null });
+        generationMaterials = [{ name: transcript.title, kind: 'transcript', text: transcript.text }];
+      } catch (transcriptionError) {
+        setStage('error');
+        setError(transcriptionError instanceof Error ? transcriptionError.message : 'Could not transcribe this video.');
+        return;
+      }
+    }
     const steps = [['Reading your material', 31], ['Finding the through-line', 55], ['Writing review prompts', 78], ['Setting your first week', 94]] as const;
     steps.forEach(([label, value], i) => window.setTimeout(() => { setStageLabel(label); setProgress(value); }, (i + 1) * 850));
     const id = makeId();
-    const payload: StudyKitInput = { id, title: title.trim(), planDays, syllabus: syllabus.trim() || null, materials: materials.map(({ name, kind, text }) => ({ name, kind, text })) };
+    const payload: StudyKitInput = { id, title: title.trim(), planDays, syllabus: syllabus.trim() || null, materials: generationMaterials.map(({ name, kind, text }) => ({ name, kind, text })) };
     generate.mutate({ data: payload }, {
       onSuccess: result => {
-        const kit: LocalKit = { ...result, id, materials, createdAt: new Date().toISOString() };
+        const kit: LocalKit = { ...result, id, materials: generationMaterials, createdAt: new Date().toISOString() };
         const kits = readKits().filter(k => k.id !== demoKit.id || k.title !== demoKit.title);
         saveKits([kit, ...kits]); setProgress(100); setStageLabel('Your kit is ready');
         window.setTimeout(() => setLocation(`/kit/${kit.id}`), 500);
@@ -255,7 +279,7 @@ function NewPage() {
        <div className="mt-12 space-y-8">
         <label className="block"><span className="mb-2 block text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">What are you studying?</span><input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Week 7 · Memory & Cognition" className="focus-ring h-12 w-full rounded-lg border border-input bg-card px-4 text-sm outline-none placeholder:text-muted-foreground/60" data-testid="input-kit-title" /></label>
          <label className="block max-w-xs"><span className="mb-2 block text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">How many days do you have?</span><div className="flex items-center gap-3"><input type="number" min={1} max={30} value={planDays} onChange={e => setPlanDays(Math.min(30, Math.max(1, Number(e.target.value) || 1)))} className="focus-ring h-12 w-24 rounded-lg border border-input bg-card px-4 text-sm outline-none" data-testid="input-plan-days" /><span className="text-xs text-muted-foreground">day review plan</span></div></label>
-        <div><div className="mb-2 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">Your material</span><span className="text-[11px] text-muted-foreground">{materials.length}/8 added</span></div><div className="grid gap-3 sm:grid-cols-2"><label className="focus-ring flex min-h-[122px] cursor-pointer flex-col justify-between rounded-xl border border-dashed border-primary/50 bg-primary/[.04] p-4 transition-colors hover:bg-primary/[.08]"><input type="file" multiple accept=".pdf,.ppt,.pptx,.txt,.md" className="sr-only" onChange={e => void addFiles(e.target.files)} data-testid="input-upload-materials" /><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 text-primary"><UploadCloud size={18} /></span><span><span className="block text-sm font-medium">Upload slides or notes</span><span className="mt-1 block text-xs text-muted-foreground">PDF, PowerPoint, TXT, or Markdown</span></span></label><button disabled className="flex min-h-[122px] cursor-not-allowed flex-col justify-between rounded-xl border border-border bg-card/40 p-4 text-left opacity-60" data-testid="button-audio-coming-soon"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground"><Volume2 size={18} /></span><span><span className="block text-sm font-medium">Lecture audio <span className="ml-1 rounded-full bg-secondary px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">Soon</span></span><span className="mt-1 block text-xs text-muted-foreground">Audio transcription is on its way</span></span></button></div>
+        <div><div className="mb-2 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">Your source</span><span className="text-[11px] text-muted-foreground">{sourceMode === 'video' ? 'Video transcript' : `${materials.length}/8 added`}</span></div><div className="mb-3 flex gap-2"><button onClick={() => setSourceMode('materials')} className={`rounded-full border px-3 py-1.5 text-xs ${sourceMode === 'materials' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`} data-testid="button-source-materials">Slides & notes</button><button onClick={() => setSourceMode('video')} className={`rounded-full border px-3 py-1.5 text-xs ${sourceMode === 'video' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`} data-testid="button-source-video"><Video size={13} className="mr-1 inline" />Video</button></div>{sourceMode === 'video' ? <div className="grid gap-3 sm:grid-cols-2"><label className="rounded-xl border border-border bg-card p-4"><span className="text-sm font-medium">YouTube URL</span><input value={videoUrl} onChange={e => setVideoUrl(e.target.value)} placeholder="https://youtube.com/watch?v=..." className="focus-ring mt-3 h-10 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none" data-testid="input-youtube-url" /></label><label className="rounded-xl border border-dashed border-primary/50 bg-primary/[.04] p-4"><input type="file" accept="video/mp4,audio/*,.mp4" className="sr-only" onChange={e => setVideoFile(e.target.files?.[0] || null)} data-testid="input-upload-video" /><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 text-primary"><UploadCloud size={18} /></span><span className="mt-3 block text-sm font-medium">{videoFile?.name || 'Upload MP4 or audio'}</span><span className="mt-1 block text-xs text-muted-foreground">We’ll extract the transcript before building your kit.</span></label></div> : <div className="grid gap-3 sm:grid-cols-2"><label className="focus-ring flex min-h-[122px] cursor-pointer flex-col justify-between rounded-xl border border-dashed border-primary/50 bg-primary/[.04] p-4 transition-colors hover:bg-primary/[.08]"><input type="file" multiple accept=".pdf,.ppt,.pptx,.txt,.md" className="sr-only" onChange={e => void addFiles(e.target.files)} data-testid="input-upload-materials" /><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 text-primary"><UploadCloud size={18} /></span><span><span className="block text-sm font-medium">Upload slides or notes</span><span className="mt-1 block text-xs text-muted-foreground">PDF, PowerPoint, TXT, or Markdown</span></span></label><button disabled className="flex min-h-[122px] cursor-not-allowed flex-col justify-between rounded-xl border border-border bg-card/40 p-4 text-left opacity-60" data-testid="button-audio-coming-soon"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground"><Volume2 size={18} /></span><span><span className="block text-sm font-medium">Lecture audio <span className="ml-1 rounded-full bg-secondary px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">Soon</span></span><span className="mt-1 block text-xs text-muted-foreground">Audio transcription is on its way</span></span></button></div>}
           {materials.length > 0 && <div className="mt-3 space-y-2">{materials.map((m, i) => <div key={`${m.name}-${i}`} className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"><FileText size={15} className="text-primary" /><span className="min-w-0 flex-1 truncate text-xs">{m.name}</span><span className="font-mono text-[10px] text-emerald-300">Ready</span><button className="focus-ring rounded p-1 text-muted-foreground hover:text-foreground" onClick={() => setMaterials(materials.filter((_, j) => j !== i))} aria-label={`Remove ${m.name}`} data-testid={`button-remove-material-${i}`}><X size={14} /></button></div>)}</div>}
         </div>
         <label className="block"><span className="mb-2 block text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">Syllabus <span className="font-normal normal-case tracking-normal text-muted-foreground/70">optional</span></span><textarea value={syllabus} onChange={e => setSyllabus(e.target.value)} placeholder="Paste exam dates, learning goals, or a course outline…" rows={4} className="focus-ring w-full resize-none rounded-lg border border-input bg-card px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/60" data-testid="textarea-syllabus" /></label>
@@ -331,6 +355,31 @@ function ReviewPlan({ kit, progress, update }: { kit: LocalKit; progress: Progre
   return <div className="max-w-4xl"><div className="flex items-end justify-between"><div><p className="font-mono text-[10px] uppercase tracking-[.2em] text-primary">A week that compounds</p><h2 className="mt-3 font-serif text-3xl tracking-[-.03em]">Seven gentle steps.</h2><p className="mt-2 text-sm text-muted-foreground">Short sessions, spaced just enough to make the ideas stick.</p></div><span className="font-mono text-xs text-muted-foreground">{done}/{kit.reviewPlan.flatMap(d => d.tasks).length} tasks</span></div><div className="mt-8 space-y-3">{kit.reviewPlan.map(day => <div key={day.day} className={`rounded-xl border p-5 transition-colors ${day.day === 1 ? 'border-primary/40 bg-primary/[.05]' : 'border-border bg-card'}`}><div className="flex flex-col gap-4 sm:flex-row sm:items-start"><div className="flex items-center gap-3 sm:w-44"><span className={`flex h-9 w-9 items-center justify-center rounded-full font-mono text-xs ${day.day === 1 ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}>{String(day.day).padStart(2, '0')}</span><div><p className="text-[11px] text-muted-foreground">{day.label}</p><p className="text-sm font-semibold">{day.focus}</p></div></div><div className="flex-1 space-y-2">{day.tasks.map(task => <label key={task} className="flex cursor-pointer items-start gap-3 text-sm"><input type="checkbox" checked={progress.completedTasks.includes(task)} onChange={() => toggle(task)} className="peer sr-only" data-testid={`checkbox-task-${day.day}-${task.slice(0, 8)}`} /><span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${progress.completedTasks.includes(task) ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/50'}`}>{progress.completedTasks.includes(task) && <Check size={11} />}</span><span className={progress.completedTasks.includes(task) ? 'text-muted-foreground line-through' : 'text-foreground'}>{task}</span></label>)}</div><span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Clock3 size={13} /> {day.minutes} min</span></div></div>)}</div></div>;
 }
 
+function CalendarPage() {
+  const [kits] = useState(readKits);
+  const [sessions, setSessions] = useState<StudySession[]>(readSessions);
+  const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [title, setTitle] = useState('');
+  const [kitId, setKitId] = useState(kits[0]?.id || '');
+  const [minutes, setMinutes] = useState(30);
+  useEffect(() => saveSessions(sessions), [sessions]);
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const days = new Date(year, monthIndex + 1, 0).getDate();
+  const start = new Date(year, monthIndex, 1).getDay();
+  const dateKey = (day: number) => `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const addSession = () => {
+    if (!title.trim()) return;
+    setSessions(prev => [...prev, { id: makeId(), date: selectedDate, title: title.trim(), kitId: kitId || undefined, minutes }]);
+    setTitle('');
+  };
+  const selectedSessions = sessions.filter(session => session.date === selectedDate);
+  const upcoming = sessions.filter(session => session.date >= new Date().toISOString().slice(0, 10)).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 6);
+  const deadlines = kits.flatMap(kit => kit.reviewPlan.map(day => ({ date: new Date(Date.now() + (day.day - 1) * 86400000).toISOString().slice(0, 10), title: `${kit.title} · ${day.focus}` }))).filter(item => item.date >= new Date().toISOString().slice(0, 10)).slice(0, 5);
+  return <section className="mx-auto max-w-6xl px-5 py-10 sm:px-9 sm:py-14"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><p className="font-mono text-[11px] uppercase tracking-[.2em] text-primary">Study planner</p><h1 className="mt-3 font-serif text-4xl tracking-[-.04em] sm:text-5xl">Make room to remember.</h1><p className="mt-4 max-w-xl text-sm leading-6 text-muted-foreground">Schedule focused sessions, assign kits to dates, and keep upcoming reviews in view.</p></div><div className="flex items-center gap-2"><button onClick={() => setMonth(new Date(year, monthIndex - 1, 1))} className="rounded-lg border border-border px-3 py-2 text-xs">Previous</button><span className="min-w-32 text-center text-sm font-semibold">{month.toLocaleString(undefined, { month: 'long', year: 'numeric' })}</span><button onClick={() => setMonth(new Date(year, monthIndex + 1, 1))} className="rounded-lg border border-border px-3 py-2 text-xs">Next</button></div></div><div className="mt-10 grid gap-6 lg:grid-cols-[1.3fr_.7fr]"><div className="rounded-2xl border border-border bg-card p-5 sm:p-7"><div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase tracking-[.12em] text-muted-foreground">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day => <span key={day} className="py-2">{day}</span>)}{Array.from({ length: start }).map((_, i) => <span key={`blank-${i}`} />)}{Array.from({ length: days }, (_, i) => i + 1).map(day => { const date = dateKey(day); const count = sessions.filter(item => item.date === date).length; return <button key={date} onClick={() => setSelectedDate(date)} className={`min-h-16 rounded-lg border p-2 text-left text-xs transition-colors ${selectedDate === date ? 'border-primary bg-primary/10' : 'border-transparent hover:border-border hover:bg-secondary'}`}><span className="font-mono">{day}</span>{count > 0 && <span className="mt-2 block rounded bg-primary/20 px-1.5 py-1 text-[10px] text-primary">{count} session{count > 1 ? 's' : ''}</span>}</button>; })}</div><div className="mt-6 border-t border-border pt-5"><div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Sessions on {selectedDate}</h2><span className="text-xs text-muted-foreground">{selectedSessions.length} planned</span></div>{selectedSessions.length === 0 ? <p className="mt-4 text-xs text-muted-foreground">Nothing scheduled yet.</p> : <div className="mt-3 space-y-2">{selectedSessions.map(session => <div key={session.id} className="flex items-center gap-3 rounded-lg bg-secondary px-3 py-2.5 text-xs"><CalendarDays size={14} className="text-primary" /><span className="flex-1">{session.title}</span><span className="text-muted-foreground">{session.minutes} min</span><button onClick={() => setSessions(prev => prev.filter(item => item.id !== session.id))} className="text-muted-foreground hover:text-foreground" aria-label={`Remove ${session.title}`}>×</button></div>)}</div>}</div></div><aside className="space-y-4"><div className="rounded-xl border border-primary/25 bg-primary/[.07] p-5"><p className="font-mono text-[10px] uppercase tracking-[.16em] text-primary">Add a session</p><input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Review Vocabulary" className="focus-ring mt-4 h-10 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none" data-testid="input-session-title" /><select value={kitId} onChange={e => setKitId(e.target.value)} className="mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 text-xs" data-testid="select-session-kit"><option value="">No study kit</option>{kits.filter(kit => kit.id !== demoKit.id).map(kit => <option key={kit.id} value={kit.id}>{kit.title}</option>)}</select><div className="mt-2 flex gap-2"><input type="number" min={5} max={180} value={minutes} onChange={e => setMinutes(Number(e.target.value) || 30)} className="h-10 w-24 rounded-lg border border-input bg-background px-3 text-xs" /><button onClick={addSession} className="flex-1 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground" data-testid="button-add-session">Schedule for {selectedDate}</button></div></div><div className="rounded-xl border border-border bg-card p-5"><h2 className="text-sm font-semibold">Upcoming sessions</h2>{upcoming.length === 0 ? <p className="mt-3 text-xs text-muted-foreground">Your calendar is clear.</p> : <div className="mt-3 space-y-3">{upcoming.map(session => <button key={session.id} onClick={() => { setSelectedDate(session.date); const [y, m] = session.date.split('-').map(Number); setMonth(new Date(y, m - 1, 1)); }} className="flex w-full items-start gap-3 text-left text-xs"><span className="font-mono text-primary">{session.date.slice(5)}</span><span className="flex-1">{session.title}<span className="block mt-1 text-[10px] text-muted-foreground">{session.minutes} min</span></span></button>)}</div>}</div><div className="rounded-xl border border-border bg-card p-5"><h2 className="text-sm font-semibold">Review deadlines</h2><div className="mt-3 space-y-3">{deadlines.map(item => <div key={`${item.date}-${item.title}`} className="flex gap-3 text-xs"><span className="font-mono text-amber-300">{item.date.slice(5)}</span><span className="text-muted-foreground">{item.title}</span></div>)}</div></div></aside></div></section>;
+}
+
 function Flashcards({ kit, progress, update }: { kit: LocalKit; progress: Progress; update: (patch: Partial<Progress>) => void }) {
   const [index, setIndex] = useState(0); const [revealed, setRevealed] = useState(false);
   const card = kit.flashcards[index]; const reviewed = progress.reviewed.includes(card.id);
@@ -347,7 +396,7 @@ function PracticeExam({ kit, progress, update }: { kit: LocalKit; progress: Prog
 }
 
 function Router() {
-  return <ErrorBoundary><Shell><Switch><Route path="/" component={LibraryPage} /><Route path="/new" component={NewPage} /><Route path="/kit/:id" component={KitPage} /><Route component={NotFound} /></Switch></Shell></ErrorBoundary>;
+  return <ErrorBoundary><Shell><Switch><Route path="/" component={LibraryPage} /><Route path="/new" component={NewPage} /><Route path="/calendar" component={CalendarPage} /><Route path="/kit/:id" component={KitPage} /><Route component={NotFound} /></Switch></Shell></ErrorBoundary>;
 }
 function App() { return <QueryClientProvider client={queryClient}><TooltipProvider><Router /><Toaster /></TooltipProvider></QueryClientProvider>; }
 export default App;

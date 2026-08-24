@@ -23,7 +23,9 @@ import type {
   Error,
   HealthStatus,
   StudyKit,
-  StudyKitInput
+  StudyKitInput,
+  VideoTranscript,
+  VideoTranscriptInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -271,5 +273,76 @@ export const useDeleteStudyKit = <TError = ErrorType<Error>,
         TContext
       > => {
       return useMutation(getDeleteStudyKitMutationOptions(options));
+    }
+
+export const getTranscribeVideoUrl = () => {
+
+
+
+
+  return `/api/transcribe-video`
+}
+
+/**
+ * @summary Extract a transcript from a YouTube URL or uploaded media
+ */
+export const transcribeVideo = async (videoTranscriptInput: VideoTranscriptInput, options?: Parameters<typeof customFetch>[1]): Promise<VideoTranscript> => {
+
+  return customFetch<VideoTranscript>(getTranscribeVideoUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(videoTranscriptInput)
+  }
+);}
+
+
+
+
+
+export const getTranscribeVideoMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeVideo>>, TError,{data: BodyType<VideoTranscriptInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof transcribeVideo>>, TError,{data: BodyType<VideoTranscriptInput>}, TContext> => {
+
+const mutationKey = ['transcribeVideo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof transcribeVideo>>, {data: BodyType<VideoTranscriptInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  transcribeVideo(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TranscribeVideoMutationResult = NonNullable<Awaited<ReturnType<typeof transcribeVideo>>>
+    export type TranscribeVideoMutationBody = BodyType<VideoTranscriptInput>
+    export type TranscribeVideoMutationError = ErrorType<Error>
+
+    /**
+ * @summary Extract a transcript from a YouTube URL or uploaded media
+ */
+export const useTranscribeVideo = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeVideo>>, TError,{data: BodyType<VideoTranscriptInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof transcribeVideo>>,
+        TError,
+        {data: BodyType<VideoTranscriptInput>},
+        TContext
+      > => {
+      return useMutation(getTranscribeVideoMutationOptions(options));
     }
 

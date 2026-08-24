@@ -15,3 +15,5 @@ export * from './reviewDay';
 export * from './studyKit';
 export * from './studyKitInput';
 export * from './studyKitInputMaterialsItem';
+export * from './videoTranscript';
+export * from './videoTranscriptInput';

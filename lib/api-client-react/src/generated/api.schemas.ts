@@ -30,6 +30,22 @@ export interface StudyKitInput {
   planDays: number;
 }
 
+export interface VideoTranscriptInput {
+  /** @nullable */
+  url: string | null;
+  /** @nullable */
+  fileName: string | null;
+  /** @nullable */
+  fileData: string | null;
+  /** @nullable */
+  mimeType: string | null;
+}
+
+export interface VideoTranscript {
+  text: string;
+  title: string;
+}
+
 export interface Chapter {
   id: string;
   title: string;

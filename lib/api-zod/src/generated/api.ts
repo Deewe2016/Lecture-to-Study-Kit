@@ -85,3 +85,19 @@ export const DeleteStudyKitParams = zod.object({
 export const DeleteStudyKitResponse = zod.void()
 
 
+/**
+ * @summary Extract a transcript from a YouTube URL or uploaded media
+ */
+export const TranscribeVideoBody = zod.object({
+  "url": zod.string().nullable(),
+  "fileName": zod.string().nullable(),
+  "fileData": zod.string().nullable(),
+  "mimeType": zod.string().nullable()
+})
+
+export const TranscribeVideoResponse = zod.object({
+  "text": zod.string(),
+  "title": zod.string()
+})
+
+

@@ -34,6 +34,12 @@ const kitSchema = z.object({
 const metadataHeaderPattern = /^\s*(Subject|Level|Target Use|Testing Tip)\s*:/i;
 const sectionHeadingPattern = /^\s*(\d+)\.\s+(.+?)\s*$/;
 const plainHeadingPattern = /^[A-Z][A-Za-z0-9 &'()/,-]{1,79}$/;
+const videoTranscriptBody = z.object({
+  url: z.string().url().nullable(),
+  fileName: z.string().nullable(),
+  fileData: z.string().nullable(),
+  mimeType: z.string().nullable(),
+});
 
 function cleanDocumentText(source: string) {
   return source
@@ -189,6 +195,53 @@ router.delete("/study-kits/:id", async (req, res) => {
   } catch (error) {
     req.log.error({ err: error, kitId: id }, "study kit deletion failed");
     return res.status(500).json({ error: "Could not delete the study kit." });
+  }
+});
+
+function decodeHtml(value: string) {
+  return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+}
+
+async function youtubeTranscript(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("YouTube video could not be loaded.");
+  const html = await response.text();
+  const match = html.match(/"captionTracks":(\[.*?\]),"audioTracks"/s);
+  if (!match) throw new Error("This YouTube video does not expose captions.");
+  const tracks = JSON.parse(match[1].replace(/\\"/g, '"'));
+  const track = tracks.find((item: { baseUrl?: string; languageCode?: string }) => item.languageCode?.startsWith("en")) || tracks[0];
+  if (!track?.baseUrl) throw new Error("No readable caption track was found.");
+  const captionResponse = await fetch(track.baseUrl);
+  const xml = await captionResponse.text();
+  const text = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)].map((item) => decodeHtml(item[1].replace(/<[^>]+>/g, " "))).join(" ").replace(/\s+/g, " ").trim();
+  if (!text) throw new Error("The caption track was empty.");
+  return text;
+}
+
+async function uploadedMediaTranscript(fileData: string, fileName: string, mimeType: string) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey || apiKey.startsWith("sk-or-")) throw new Error("Uploaded media transcription requires an OpenAI transcription key.");
+  const form = new FormData();
+  form.append("file", new Blob([Buffer.from(fileData, "base64")], { type: mimeType || "application/octet-stream" }), fileName || "lecture-media");
+  form.append("model", "gpt-4o-mini-transcribe");
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form });
+  if (!response.ok) throw new Error("The media transcription service rejected this file.");
+  const result = await response.json() as { text?: string };
+  if (!result.text?.trim()) throw new Error("No speech was detected in this media.");
+  return result.text.trim();
+}
+
+router.post("/transcribe-video", async (req, res) => {
+  const parsed = videoTranscriptBody.safeParse(req.body);
+  if (!parsed.success || (!parsed.data.url && !parsed.data.fileData)) return res.status(400).json({ error: "Add a YouTube URL or upload an audio/video file." });
+  try {
+    const text = parsed.data.url
+      ? await youtubeTranscript(parsed.data.url)
+      : await uploadedMediaTranscript(parsed.data.fileData!, parsed.data.fileName || "lecture-media", parsed.data.mimeType || "application/octet-stream");
+    return res.json({ text, title: parsed.data.url ? "YouTube lecture transcript" : parsed.data.fileName || "Uploaded lecture transcript" });
+  } catch (error) {
+    req.log.error({ err: error }, "video transcription failed");
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Could not transcribe this source." });
   }
 });
 

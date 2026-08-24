@@ -82,6 +82,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /transcribe-video:
+    post:
+      operationId: transcribeVideo
+      tags: [study]
+      summary: Extract a transcript from a YouTube URL or uploaded media
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoTranscriptInput"
+      responses:
+        "200":
+          description: Extracted transcript
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoTranscript"
+        "400":
+          description: Invalid video source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Transcription failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   schemas:
     HealthStatus:
@@ -116,6 +146,20 @@ components:
           minimum: 1
           maximum: 30
       required: [title, materials, planDays]
+    VideoTranscriptInput:
+      type: object
+      properties:
+        url: { type: ["string", "null"] }
+        fileName: { type: ["string", "null"] }
+        fileData: { type: ["string", "null"] }
+        mimeType: { type: ["string", "null"] }
+      required: [url, fileName, fileData, mimeType]
+    VideoTranscript:
+      type: object
+      properties:
+        text: { type: string }
+        title: { type: string }
+      required: [text, title]
     StudyKit:
       type: object
       properties:
