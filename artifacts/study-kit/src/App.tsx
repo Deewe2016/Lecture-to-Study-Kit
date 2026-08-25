@@ -109,6 +109,16 @@ function saveProgress(id: string, progress: Progress) {
 function readSessions(): StudySession[] { try { return JSON.parse(localStorage.getItem(CALENDAR_STORAGE) || '[]'); } catch { return []; } }
 function saveSessions(sessions: StudySession[]) { localStorage.setItem(CALENDAR_STORAGE, JSON.stringify(sessions)); }
 function makeId() { return `kit-${Date.now()}`; }
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const end = Math.min(offset + chunkSize, bytes.length);
+    for (let index = offset; index < end; index += 1) binary += String.fromCharCode(bytes[index]);
+  }
+  return btoa(binary);
+}
 
 function Brand() {
   return <Link href="/" className="focus-ring flex items-center gap-3" data-testid="link-brand">
@@ -242,7 +252,7 @@ function NewPage() {
         let fileData: string | null = null;
         if (videoFile) {
           const buffer = await videoFile.arrayBuffer();
-          fileData = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+          fileData = arrayBufferToBase64(buffer);
         }
         const transcript = await transcribeVideo({ url: videoUrl.trim() || null, fileName: videoFile?.name || null, fileData, mimeType: videoFile?.type || null });
         generationMaterials = [{ name: transcript.title, kind: 'transcript', text: transcript.text }];
@@ -330,7 +340,8 @@ function Overview({ kit, onTab }: { kit: LocalKit; onTab: (tab: 'plan' | 'flashc
     if (!prompt.trim()) return;
     setAsking(true); setAnswer('');
     try {
-      const response = await fetch('/api/tutor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt.trim(), context: kit.overview }) });
+      const context = JSON.stringify({ title: kit.title, overview: kit.overview, chapters: kit.chapters, flashcards: kit.flashcards, questions: kit.questions });
+      const response = await fetch('/api/tutor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt.trim(), context }) });
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       while (reader) {

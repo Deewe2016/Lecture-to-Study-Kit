@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { generateObject } from "ai";
+import { experimental_transcribe, generateObject, generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { GenerateKitBody, GenerateKitResponse } from "@workspace/api-zod";
 import { db, studyKits } from "@workspace/db";
@@ -207,28 +207,55 @@ async function youtubeTranscript(url: string) {
   if (!response.ok) throw new Error("YouTube video could not be loaded.");
   const html = await response.text();
   const match = html.match(/"captionTracks":(\[.*?\]),"audioTracks"/s);
-  if (!match) throw new Error("This YouTube video does not expose captions.");
-  const tracks = JSON.parse(match[1].replace(/\\"/g, '"'));
-  const track = tracks.find((item: { baseUrl?: string; languageCode?: string }) => item.languageCode?.startsWith("en")) || tracks[0];
-  if (!track?.baseUrl) throw new Error("No readable caption track was found.");
-  const captionResponse = await fetch(track.baseUrl);
-  const xml = await captionResponse.text();
-  const text = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)].map((item) => decodeHtml(item[1].replace(/<[^>]+>/g, " "))).join(" ").replace(/\s+/g, " ").trim();
-  if (!text) throw new Error("The caption track was empty.");
-  return text;
+  if (match) {
+    try {
+      const tracks = JSON.parse(match[1].replace(/\\"/g, '"'));
+      const track = tracks.find((item: { baseUrl?: string; languageCode?: string }) => item.languageCode?.startsWith("en")) || tracks[0];
+      if (track?.baseUrl) {
+        const captionResponse = await fetch(track.baseUrl);
+        const xml = await captionResponse.text();
+        const parts: string[] = [];
+        const captionPattern = /<text[^>]*>([\s\S]*?)<\/text>/g;
+        let captionMatch: RegExpExecArray | null;
+        while ((captionMatch = captionPattern.exec(xml)) !== null) {
+          parts.push(decodeHtml(captionMatch[1].replace(/<[^>]+>/g, " ")));
+        }
+        const text = parts.join(" ").replace(/\s+/g, " ").trim();
+        if (text) return text;
+      }
+    } catch (error) {
+      // A malformed or inaccessible caption track should use the audio fallback.
+    }
+  }
+  return youtubeAudioFallback(html);
 }
 
-async function uploadedMediaTranscript(fileData: string, fileName: string, mimeType: string) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || apiKey.startsWith("sk-or-")) throw new Error("Uploaded media transcription requires an OpenAI transcription key.");
-  const form = new FormData();
-  form.append("file", new Blob([Buffer.from(fileData, "base64")], { type: mimeType || "application/octet-stream" }), fileName || "lecture-media");
-  form.append("model", "gpt-4o-mini-transcribe");
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form });
-  if (!response.ok) throw new Error("The media transcription service rejected this file.");
-  const result = await response.json() as { text?: string };
+async function transcribeAudioBuffer(buffer: Buffer, mimeType: string) {
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  if (!apiKey) throw new Error("Speech-to-text is not configured.");
+  const isOpenRouterKey = apiKey.startsWith("sk-or-");
+  if (isOpenRouterKey && !baseUrl) throw new Error("Speech-to-text requires an OpenAI-compatible AI connection.");
+  const openai = createOpenAI({ baseURL: baseUrl || undefined, apiKey });
+  const result = await experimental_transcribe({ model: openai.transcription("gpt-4o-mini-transcribe"), audio: buffer, providerOptions: { openai: { mimeType } } });
   if (!result.text?.trim()) throw new Error("No speech was detected in this media.");
   return result.text.trim();
+}
+
+async function uploadedMediaTranscript(fileData: string, _fileName: string, mimeType: string) {
+  return transcribeAudioBuffer(Buffer.from(fileData, "base64"), mimeType || "application/octet-stream");
+}
+
+async function youtubeAudioFallback(html: string) {
+  const match = html.match(/"adaptiveFormats":(\[.*?\])/s);
+  if (!match) throw new Error("This YouTube video has no captions or downloadable audio track.");
+  let formats: Array<{ mimeType?: string; url?: string; audioQuality?: string }> = [];
+  try { formats = JSON.parse(match[1].replace(/\\"/g, '"')); } catch { throw new Error("YouTube audio metadata could not be read."); }
+  const audio = formats.find((format) => format.mimeType?.startsWith("audio/") && format.url) || formats.find((format) => format.mimeType?.startsWith("audio/"));
+  if (!audio?.url) throw new Error("This YouTube video has no captions or accessible audio track.");
+  const audioResponse = await fetch(audio.url);
+  if (!audioResponse.ok) throw new Error("YouTube audio could not be downloaded for transcription.");
+  return transcribeAudioBuffer(Buffer.from(await audioResponse.arrayBuffer()), audio.mimeType || "audio/mp4");
 }
 
 router.post("/transcribe-video", async (req, res) => {
@@ -251,10 +278,31 @@ router.post("/tutor", async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  const answer = `Try this angle: ${prompt} Start with the simplest definition, connect it to one concrete example, then ask what would change if one part of the example changed.`;
-  for (const word of answer.split(" ")) {
-    res.write(`data: ${JSON.stringify({ content: `${word} ` })}\n\n`);
-    await new Promise((resolve) => setTimeout(resolve, 12));
+  const context = typeof req.body?.context === "string" ? req.body.context.slice(0, 30000) : "";
+  const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  try {
+    let answer = "";
+    if (apiKey) {
+      const isOpenRouterKey = apiKey.startsWith("sk-or-");
+      const openai = createOpenAI({ baseURL: baseUrl || (isOpenRouterKey ? "https://openrouter.ai/api/v1" : undefined), apiKey });
+      const result = await generateText({
+        model: openai(isOpenRouterKey ? "openai/gpt-4o-mini" : "gpt-5.6-terra"),
+        prompt: `You are the tutor inside a college study app. Answer the student's question directly using only the study-kit context below. Define the relevant idea, connect it to a source-grounded example, and correct likely confusion. Do not talk about prompts, angles, studying strategies, or what the student should try. If the context lacks the answer, say so plainly.
+
+Student question: ${prompt}
+
+Study-kit context:
+${context}`,
+      });
+      answer = result.text.trim();
+    } else {
+      answer = `The study kit does not have an AI tutor connection configured, so I cannot answer “${prompt}” from the lecture context yet.`;
+    }
+    res.write(`data: ${JSON.stringify({ content: answer })}\n\n`);
+  } catch (error) {
+    req.log.error({ err: error }, "tutor generation failed");
+    res.write(`data: ${JSON.stringify({ content: "I couldn't generate an answer from this study kit right now. Please try the question again." })}\n\n`);
   }
   res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
   return res.end();
