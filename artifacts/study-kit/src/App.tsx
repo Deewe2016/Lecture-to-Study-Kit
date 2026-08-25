@@ -109,17 +109,6 @@ function saveProgress(id: string, progress: Progress) {
 function readSessions(): StudySession[] { try { return JSON.parse(localStorage.getItem(CALENDAR_STORAGE) || '[]'); } catch { return []; } }
 function saveSessions(sessions: StudySession[]) { localStorage.setItem(CALENDAR_STORAGE, JSON.stringify(sessions)); }
 function makeId() { return `kit-${Date.now()}`; }
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    const end = Math.min(offset + chunkSize, bytes.length);
-    for (let index = offset; index < end; index += 1) binary += String.fromCharCode(bytes[index]);
-  }
-  return btoa(binary);
-}
-
 function Brand() {
   return <Link href="/" className="focus-ring flex items-center gap-3" data-testid="link-brand">
     <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground"><GraduationCap size={19} /></span>
@@ -249,12 +238,21 @@ function NewPage() {
     let generationMaterials = materials;
     if (sourceMode === 'video') {
       try {
-        let fileData: string | null = null;
+        let transcript;
         if (videoFile) {
-          const buffer = await videoFile.arrayBuffer();
-          fileData = arrayBufferToBase64(buffer);
+          const uploadResponse = await fetch('/api/transcribe-video-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': videoFile.type || 'application/octet-stream', 'X-File-Name': videoFile.name },
+            body: videoFile,
+          });
+          if (!uploadResponse.ok) {
+            const payload = await uploadResponse.json().catch(() => null) as { error?: string } | null;
+            throw new Error(payload?.error || 'Could not transcribe this upload.');
+          }
+          transcript = await uploadResponse.json() as { text: string; title: string };
+        } else {
+          transcript = await transcribeVideo({ url: videoUrl.trim() || null, fileName: null, fileData: null, mimeType: null });
         }
-        const transcript = await transcribeVideo({ url: videoUrl.trim() || null, fileName: videoFile?.name || null, fileData, mimeType: videoFile?.type || null });
         generationMaterials = [{ name: transcript.title, kind: 'transcript', text: transcript.text }];
       } catch (transcriptionError) {
         setStage('error');

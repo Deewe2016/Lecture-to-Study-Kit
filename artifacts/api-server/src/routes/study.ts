@@ -1,12 +1,17 @@
-import { Router, type IRouter } from "express";
+import express, { Router, type IRouter } from "express";
 import { experimental_transcribe, generateObject, generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { GenerateKitBody, GenerateKitResponse } from "@workspace/api-zod";
 import { db, studyKits } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 
 const router: IRouter = Router();
+const execFileAsync = promisify(execFile);
 
 const kitSchema = z.object({
   title: z.string(),
@@ -246,6 +251,19 @@ async function uploadedMediaTranscript(fileData: string, _fileName: string, mime
   return transcribeAudioBuffer(Buffer.from(fileData, "base64"), mimeType || "application/octet-stream");
 }
 
+async function extractAudioFromVideo(buffer: Buffer, fileName: string) {
+  const directory = await mkdtemp(`${tmpdir()}/study-kit-`);
+  const inputPath = `${directory}/${fileName.replace(/[^a-zA-Z0-9._-]/g, "_") || "lecture.mp4"}`;
+  const outputPath = `${directory}/lecture.wav`;
+  try {
+    await writeFile(inputPath, buffer);
+    await execFileAsync("ffmpeg", ["-y", "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", outputPath], { maxBuffer: 1024 * 1024 });
+    return await readFile(outputPath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 async function youtubeAudioFallback(html: string) {
   const match = html.match(/"adaptiveFormats":(\[.*?\])/s);
   if (!match) throw new Error("This YouTube video has no captions or downloadable audio track.");
@@ -269,6 +287,23 @@ router.post("/transcribe-video", async (req, res) => {
   } catch (error) {
     req.log.error({ err: error }, "video transcription failed");
     return res.status(500).json({ error: error instanceof Error ? error.message : "Could not transcribe this source." });
+  }
+});
+
+router.post("/transcribe-video-upload", express.raw({
+  limit: "500mb",
+  type: ["video/mp4", "video/*", "audio/*", "application/octet-stream"],
+}), async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: "Upload an audio or MP4 file." });
+  const fileName = typeof req.headers["x-file-name"] === "string" ? req.headers["x-file-name"] : "lecture-media";
+  const mimeType = typeof req.headers["content-type"] === "string" ? req.headers["content-type"] : "application/octet-stream";
+  try {
+    const audio = mimeType.startsWith("video/") ? await extractAudioFromVideo(req.body, fileName) : req.body;
+    const text = await transcribeAudioBuffer(audio, mimeType.startsWith("video/") ? "audio/wav" : mimeType);
+    return res.json({ text, title: fileName });
+  } catch (error) {
+    req.log.error({ err: error }, "uploaded media transcription failed");
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Could not transcribe this upload." });
   }
 });
 
