@@ -274,7 +274,24 @@ router.post("/transcribe-video", async (req, res) => {
     return res.status(500).json({ error: error instanceof Error ? error.message : "Could not transcribe this source." });
   }
 });
+async function extractAudioFromVideo(buffer: Buffer, fileName: string): Promise<Buffer> {
+  const directory = await mkdtemp(path.join(tmpdir(), "study-kit-"));
+  const inputPath = path.join(directory, fileName.replace(/[^a-zA-Z0-9._-]/g, "_") || "lecture.mp4");
+  const outputPath = path.join(directory, "lecture.wav");
 
+  try {
+    await writeFile(inputPath, buffer);
+    await execFileAsync("ffmpeg", ["-y", "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", outputPath], {
+      maxBuffer: 1024 * 1024 * 50,
+    });
+    return await readFile(outputPath);
+  } catch (error) {
+    console.error("FFmpeg failed, using raw buffer:", error);
+    return buffer;
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
+  }
+}
 router.post("/transcribe-video-upload", express.raw({
   limit: "500mb",
   type: ["video/mp4", "video/*", "audio/*", "application/octet-stream"],
