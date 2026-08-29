@@ -211,71 +211,56 @@ async function youtubeTranscript(url: string) {
   const response = await fetch(url);
   if (!response.ok) throw new Error("YouTube video could not be loaded.");
   const html = await response.text();
-  const match = html.match(/"captionTracks":(\[.*?\]),"audioTracks"/s);
+
+  const match = html.match(/"captionTracks":\s*(\[.*?\])/);
   if (match) {
     try {
-      const tracks = JSON.parse(match[1].replace(/\\"/g, '"'));
-      const track = tracks.find((item: { baseUrl?: string; languageCode?: string }) => item.languageCode?.startsWith("en")) || tracks[0];
+      const tracks = JSON.parse(match[1]);
+      const track = tracks.find((item: any) => item.languageCode?.startsWith("en")) || tracks[0];
+
       if (track?.baseUrl) {
         const captionResponse = await fetch(track.baseUrl);
         const xml = await captionResponse.text();
         const parts: string[] = [];
         const captionPattern = /<text[^>]*>([\s\S]*?)<\/text>/g;
-        let captionMatch: RegExpExecArray | null;
-        while ((captionMatch = captionPattern.exec(xml)) !== null) {
-          parts.push(decodeHtml(captionMatch[1].replace(/<[^>]+>/g, " ")));
+        let matchResult;
+        while ((matchResult = captionPattern.exec(xml)) !== null) {
+          parts.push(decodeHtml(matchResult[1].replace(/<[^>]+>/g, "")));
         }
-        const text = parts.join(" ").replace(/\s+/g, " ").trim();
-        if (text) return text;
+        return parts.join(" ").trim();
       }
-    } catch (error) {
-      // A malformed or inaccessible caption track should use the audio fallback.
+    } catch (e) {
+      console.error("Failed to parse YouTube caption tracks", e);
     }
   }
-  return youtubeAudioFallback(html);
+  throw new Error("This YouTube video has no captions or downloadable audio track.");
 }
 
 async function transcribeAudioBuffer(buffer: Buffer, mimeType: string) {
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  const baseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  if (!apiKey) throw new Error("Speech-to-text is not configured.");
-  const isOpenRouterKey = apiKey.startsWith("sk-or-");
-  if (isOpenRouterKey && !baseUrl) throw new Error("Speech-to-text requires an OpenAI-compatible AI connection.");
-  const openai = createOpenAI({ baseURL: baseUrl || undefined, apiKey });
-  const result = await experimental_transcribe({ model: openai.transcription("gpt-4o-mini-transcribe"), audio: buffer, providerOptions: { openai: { mimeType } } });
-  if (!result.text?.trim()) throw new Error("No speech was detected in this media.");
-  return result.text.trim();
-}
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("GROQ_API_KEY is not configured in Secrets.");
 
-async function uploadedMediaTranscript(fileData: string, _fileName: string, mimeType: string) {
-  return transcribeAudioBuffer(Buffer.from(fileData, "base64"), mimeType || "application/octet-stream");
-}
+  const formData = new FormData();
+  formData.append("file", new Blob([buffer], { type: mimeType }), "audio.wav");
+  formData.append("model", "whisper-large-v3-turbo");
 
-async function extractAudioFromVideo(buffer: Buffer, fileName: string) {
-  const directory = await mkdtemp(`${tmpdir()}/study-kit-`);
-  const inputPath = `${directory}/${fileName.replace(/[^a-zA-Z0-9._-]/g, "_") || "lecture.mp4"}`;
-  const outputPath = `${directory}/lecture.wav`;
-  try {
-    await writeFile(inputPath, buffer);
-    await execFileAsync("ffmpeg", ["-y", "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", outputPath], { maxBuffer: 1024 * 1024 });
-    return await readFile(outputPath);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+  const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Groq transcription failed: ${errText}`);
   }
-}
 
-async function youtubeAudioFallback(html: string) {
-  const match = html.match(/"adaptiveFormats":(\[.*?\])/s);
-  if (!match) throw new Error("This YouTube video has no captions or downloadable audio track.");
-  let formats: Array<{ mimeType?: string; url?: string; audioQuality?: string }> = [];
-  try { formats = JSON.parse(match[1].replace(/\\"/g, '"')); } catch { throw new Error("YouTube audio metadata could not be read."); }
-  const audio = formats.find((format) => format.mimeType?.startsWith("audio/") && format.url) || formats.find((format) => format.mimeType?.startsWith("audio/"));
-  if (!audio?.url) throw new Error("This YouTube video has no captions or accessible audio track.");
-  const audioResponse = await fetch(audio.url);
-  if (!audioResponse.ok) throw new Error("YouTube audio could not be downloaded for transcription.");
-  return transcribeAudioBuffer(Buffer.from(await audioResponse.arrayBuffer()), audio.mimeType || "audio/mp4");
+  const data = await response.json();
+  if (!data.text?.trim()) throw new Error("No speech was detected in this media.");
+  return data.text.trim();
 }
-
 router.post("/transcribe-video", async (req, res) => {
   const parsed = videoTranscriptBody.safeParse(req.body);
   if (!parsed.success || (!parsed.data.url && !parsed.data.fileData)) return res.status(400).json({ error: "Add a YouTube URL or upload an audio/video file." });
