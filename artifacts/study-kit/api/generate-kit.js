@@ -2,101 +2,69 @@ function cleanText(value) {
   return String(value || "")
     .replace(/\r/g, "")
     .split("\n")
-    .map((line) => line.trim())
+    .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean)
     .filter((line) => !/^\s*(Subject|Level|Target Use|Testing Tip)\s*:/i.test(line))
+    .filter((line) => !/^(published\s*:|global environmental assessment series|climate policy\s*&?\s*science division)$/i.test(line))
+    .filter((line) => !/^page\s+\d+$/i.test(line))
     .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
     .slice(0, 60000);
 }
 
-function sentences(text) {
-  return String(text || "")
-    .replace(/\s+/g, " ")
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 25);
-}
-
-function sourceSections(source) {
-  const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const sections = [];
-  let current = null;
-  const numbered = /^(?:chapter\s+)?\d+[.)]\s+(.+)$/i;
-  const heading = /^[A-Z][A-Za-z0-9 &'()/,:—–-]{1,100}$/;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const numberedMatch = line.match(numbered);
-    const isHeading = heading.test(line) && line.split(/\s+/).length <= 12 && !/[.!?]$/.test(line) && lines[i + 1];
-    const title = numberedMatch ? numberedMatch[1].trim() : isHeading ? line : null;
-    if (title) {
-      if (current && current.text.length > 40) sections.push(current);
-      current = { title, text: "" };
-    } else if (current) {
-      current.text += `${current.text ? " " : ""}${line}`;
-    }
-  }
-  if (current && current.text.length > 40) sections.push(current);
-  return sections.slice(0, 8);
-}
+const badMetadata = /(published\s*:\s*\d{4}|global environmental assessment series|climate policy\s*&?\s*science division|comprehensive analysis\s*&?\s*insight|understanding climate change published)/i;
 
 function cleanGeneratedKit(kit) {
   if (!kit || typeof kit !== "object") return null;
   const chapters = Array.isArray(kit.chapters) ? kit.chapters : [];
-  const chapterIds = new Set(chapters.map((c) => c.id));
-  const flashcards = (Array.isArray(kit.flashcards) ? kit.flashcards : []).filter((card) => {
-    const front = String(card.front || "").trim();
-    const back = String(card.back || "").trim();
-    const looksLikeLabel = /^(chapter|topic|section|key fact|key points?)\s*[:#-]?/i.test(front) || front.length < 12;
-    return chapterIds.has(card.chapterId) && front.endsWith("?") && !looksLikeLabel && back.length > 15 && !/[•\n]/.test(back);
-  }).map((card, i) => ({ ...card, id: card.id || `f${i + 1}`, hint: card.hint ? String(card.hint).replace(/\s+/g, " ").trim() : null, back: String(card.back).replace(/\s+/g, " ").trim() }));
+  const chapterIds = new Set(chapters.map((c) => String(c.id)));
+  if (chapters.length < 3 || chapters.length > 6) return null;
 
-  if (chapters.length < 3 || flashcards.length < Math.min(6, chapters.length * 2)) return null;
-  return { ...kit, flashcards };
-}
-
-function fallbackKit(title, source, days) {
-  const sections = sourceSections(source);
-  const allFacts = sentences(source);
-  const usable = sections.length ? sections : [{ title: title || "Study Material", text: allFacts.slice(0, 15).join(" ") }];
-  const chapters = usable.map((section, index) => {
-    const facts = sentences(section.text).slice(0, 5);
-    const keyPoints = facts.slice(0, 3);
-    while (keyPoints.length < 3) keyPoints.push(`The supplied material develops the ideas presented in ${section.title}.`);
-    return {
-      id: `chapter-${index + 1}`,
-      title: section.title,
-      summary: facts.slice(0, 2).join(" ") || `This section explains ${section.title}.`,
-      keyPoints,
-      objective: `Explain the main ideas, evidence, and relationships presented in ${section.title}.`,
-    };
-  });
-
-  const overviewParts = chapters.slice(0, 4).map((chapter) => `${chapter.title}: ${chapter.summary}`).join(" ");
-  const overview = overviewParts || `This document presents the main ideas and relationships in ${title || "the supplied material"}.`;
-  const reviewDays = Math.max(1, Math.min(30, Number(days) || 7));
-  const reviewPlan = Array.from({ length: reviewDays }, (_, i) => ({
-    day: i + 1,
-    label: i === 0 ? "Start here" : i === reviewDays - 1 ? "Ready check" : `Review ${i + 1}`,
-    focus: chapters[i % chapters.length].title,
-    tasks: i === 0 ? ["Read the overview and chapter summaries", "Recall the main ideas without looking"] : ["Review the chapter key points", i === reviewDays - 1 ? "Take the practice exam" : "Review the flashcards"],
-    minutes: i === reviewDays - 1 ? 35 : 25,
+  const cleanedChapters = chapters.map((chapter, i) => ({
+    ...chapter,
+    id: String(chapter.id || `chapter-${i + 1}`),
+    title: String(chapter.title || "").replace(/\s+/g, " ").trim(),
+    summary: String(chapter.summary || "").replace(/\s+/g, " ").trim(),
+    keyPoints: Array.isArray(chapter.keyPoints)
+      ? chapter.keyPoints.map((p) => String(p).replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 5)
+      : [],
+    objective: String(chapter.objective || "").replace(/\s+/g, " ").trim(),
   }));
-  const questions = chapters.map((chapter, i) => ({
-    id: `q${i + 1}`,
-    chapterId: chapter.id,
-    prompt: `Which statement accurately describes ${chapter.title}?`,
-    options: [chapter.keyPoints[0], chapter.keyPoints[1], "The material does not address this topic.", "The material says this topic is unrelated to the others."],
-    answer: 0,
-    explanation: chapter.keyPoints[0],
-    difficulty: i >= 2 ? "Stretch" : "Core",
-  }));
-  const flashcards = chapters.flatMap((chapter, i) => [
-    { id: `f${i * 2 + 1}`, chapterId: chapter.id, front: `What is the main idea of ${chapter.title}?`, back: chapter.summary, hint: "Recall the central idea." },
-    { id: `f${i * 2 + 2}`, chapterId: chapter.id, front: `What is one important fact about ${chapter.title}?`, back: chapter.keyPoints[1], hint: "Recall a supporting detail." },
-  ]);
-  return { title: title || "Study Kit", courseLabel: "Personal study space", overview, chapters, reviewPlan, questions, flashcards };
+
+  const flashcards = (Array.isArray(kit.flashcards) ? kit.flashcards : [])
+    .map((card, i) => ({
+      ...card,
+      id: String(card.id || `f${i + 1}`),
+      chapterId: String(card.chapterId || ""),
+      front: String(card.front || "").replace(/\s+/g, " ").trim(),
+      back: String(card.back || "").replace(/\s+/g, " ").trim(),
+      hint: card.hint == null ? null : String(card.hint).replace(/\s+/g, " ").trim(),
+    }))
+    .filter((card) => {
+      if (!chapterIds.has(card.chapterId)) return false;
+      if (!card.front.endsWith("?")) return false;
+      if (card.front.length < 15 || card.front.length > 180) return false;
+      if (card.back.length < 20 || card.back.length > 450) return false;
+      if (badMetadata.test(card.front) || badMetadata.test(card.back)) return false;
+      if (/what (does|is) (this|the) (chapter|section|document) (cover|about)|main idea of .*(document|lecture|chapter)/i.test(card.front)) return false;
+      if (/^(key fact|key point|topic|chapter|section)\s*[:#-]/i.test(card.front)) return false;
+      if (/[•\n]/.test(card.back)) return false;
+      return true;
+    });
+
+  if (flashcards.length < chapters.length * 2) return null;
+
+  const overview = String(kit.overview || "").replace(/\s+/g, " ").trim();
+  if (!overview || overview.length > 600 || badMetadata.test(overview)) return null;
+
+  return {
+    title: String(kit.title || "Study Kit").replace(/\s+/g, " ").trim(),
+    courseLabel: String(kit.courseLabel || "Personal study space").replace(/\s+/g, " ").trim(),
+    overview,
+    chapters: cleanedChapters,
+    reviewPlan: Array.isArray(kit.reviewPlan) ? kit.reviewPlan : [],
+    questions: Array.isArray(kit.questions) ? kit.questions : [],
+    flashcards: flashcards.slice(0, 30),
+  };
 }
 
 const schema = {
@@ -107,46 +75,72 @@ const schema = {
     title: { type: "string" },
     courseLabel: { type: "string" },
     overview: { type: "string" },
-    chapters: { type: "array", minItems: 3, maxItems: 6, items: { type: "object", additionalProperties: false, required: ["id", "title", "summary", "keyPoints", "objective"], properties: { id: { type: "string" }, title: { type: "string" }, summary: { type: "string" }, keyPoints: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } }, objective: { type: "string" } } } },
-    reviewPlan: { type: "array", items: { type: "object", additionalProperties: false, required: ["day", "label", "focus", "tasks", "minutes"], properties: { day: { type: "number" }, label: { type: "string" }, focus: { type: "string" }, tasks: { type: "array", items: { type: "string" } }, minutes: { type: "number" } } } },
-    questions: { type: "array", minItems: 3, items: { type: "object", additionalProperties: false, required: ["id", "chapterId", "prompt", "options", "answer", "explanation", "difficulty"], properties: { id: { type: "string" }, chapterId: { type: "string" }, prompt: { type: "string" }, options: { type: "array", minItems: 4, maxItems: 4, items: { type: "string" } }, answer: { type: "number" }, explanation: { type: "string" }, difficulty: { type: "string" } } } },
-    flashcards: { type: "array", minItems: 6, items: { type: "object", additionalProperties: false, required: ["id", "chapterId", "front", "back", "hint"], properties: { id: { type: "string" }, chapterId: { type: "string" }, front: { type: "string" }, back: { type: "string" }, hint: { type: ["string", "null"] } } } },
+    chapters: {
+      type: "array", minItems: 3, maxItems: 6,
+      items: { type: "object", additionalProperties: false, required: ["id", "title", "summary", "keyPoints", "objective"], properties: {
+        id: { type: "string" }, title: { type: "string" }, summary: { type: "string" },
+        keyPoints: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } }, objective: { type: "string" }
+      }}
+    },
+    reviewPlan: { type: "array", items: { type: "object", additionalProperties: false, required: ["day", "label", "focus", "tasks", "minutes"], properties: {
+      day: { type: "number" }, label: { type: "string" }, focus: { type: "string" }, tasks: { type: "array", items: { type: "string" } }, minutes: { type: "number" }
+    }}},
+    questions: { type: "array", minItems: 3, items: { type: "object", additionalProperties: false, required: ["id", "chapterId", "prompt", "options", "answer", "explanation", "difficulty"], properties: {
+      id: { type: "string" }, chapterId: { type: "string" }, prompt: { type: "string" }, options: { type: "array", minItems: 4, maxItems: 4, items: { type: "string" } }, answer: { type: "number" }, explanation: { type: "string" }, difficulty: { type: "string" }
+    }}},
+    flashcards: { type: "array", minItems: 6, items: { type: "object", additionalProperties: false, required: ["id", "chapterId", "front", "back", "hint"], properties: {
+      id: { type: "string" }, chapterId: { type: "string" }, front: { type: "string" }, back: { type: "string" }, hint: { type: ["string", "null"] }
+    }}},
   },
 };
 
 async function generateWithOpenAI(title, source, syllabus, days) {
   const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_API_KEY is not configured");
+  if (!key) throw new Error("OPENAI_API_KEY is not configured on the deployed app");
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-      temperature: 0.15,
+      temperature: 0.1,
       response_format: { type: "json_schema", json_schema: { name: "study_kit", strict: true, schema } },
       messages: [
         {
           role: "system",
-          content: `You are a document analyst creating a study kit from a lecture, textbook chapter, slide deck, or notes. You MUST synthesize the source rather than mechanically copying or concatenating its sentences.
+          content: `You are an expert teacher and document analyst. You are given extracted text from a lecture or slide deck. Your job is to UNDERSTAND the material and teach it back, not to rearrange its text.
 
-FIRST mentally analyze the entire source: identify the major topics, what each topic is saying, the relationships between ideas, important causes/effects, definitions, targets, evidence, and examples. THEN write the output from that understanding.
+Do this internally before writing the JSON:
+1. Ignore cover-page metadata, publication details, series names, page numbers, repeated headers/footers, and decorative text.
+2. Reconstruct the intended meaning when PDF extraction has mixed columns, bullets, or slide fragments together.
+3. Identify the 3-6 real concepts the lecture teaches and the relationships among them.
+4. Only then write the study kit in your own words.
 
-OVERVIEW: Write 2-4 polished sentences explaining the document as a whole. It should answer: what is this material about, what are its major ideas, and how do those ideas relate? Do not merely place the first few source sentences next to each other. Do not mention studying or the study kit.
+OVERVIEW: Exactly 1-2 polished sentences, ideally 35-70 words. Summarize the whole lecture, not the first slide. Never mention the document's publication information.
 
-CHAPTERS: Identify 3-6 genuine major topics. Use the source's meaningful headings when available, but synthesize the content underneath them. Each summary should explain the topic rather than quote it. Key points should be concrete facts or relationships, not fragments.
+CHAPTERS: Use 3-6 genuine concepts. Chapter titles must be meaningful concepts such as 'Greenhouse Gases and Human Drivers', not 'Introduction', 'Overview', 'Chapter 1', or the document title. Summaries explain what the concept means and why it matters. Key points are concrete facts, mechanisms, cause/effect relationships, comparisons, targets, or examples.
 
-FLASHCARDS: Create at least 2 cards per major topic. Every front MUST be a natural, specific question ending in '?'. Each card must test exactly one useful idea. Never use a heading, category, title, fragment, or phrase as a front. The back must directly answer the question in 1-3 sentences of normal prose. NEVER use bullets, newline lists, slide-column fragments, or multiple unrelated facts in a back. If the source contains a list, turn the list into a focused question and answer rather than copying the list. Avoid questions like 'What is the main idea of this chapter?' unless the chapter genuinely has no more specific testable content.
+FLASHCARDS: Create 2-4 cards for EACH chapter. Every front is a specific question that tests one useful idea and ends with '?'. Ask about definitions, mechanisms, causes/effects, comparisons, consequences, targets, or important relationships. Never ask about the document, its title, publication year, publisher, chapter structure, or 'the main idea of this chapter'. Never use a heading or fragment as a front.
 
-IMPORTANT: The uploaded source may contain slide-layout artifacts where two columns were extracted beside each other. Reconstruct the intended meaning from the surrounding material; do not reproduce those artifacts.
+Each flashcard back must directly answer its question in 1-3 concise sentences. It must be written as normal prose. NEVER paste a bullet list, slide text, column fragments, metadata, or several unrelated facts. If the source has a list, convert it into a focused question and explain the relevant relationship instead of copying the list.
 
-Never invent information absent from the source. Never copy metadata such as Subject, Level, Target Use, or Testing Tip. The review plan may contain study actions, but its focuses must be actual source topics.
+Examples of GOOD cards:
+- 'Why does ocean acidification threaten marine ecosystems?' -> a concise explanation of the chemical/ecological relationship supported by the source.
+- 'What human activities are identified as major drivers of climate change?' -> a concise answer naming and explaining the activities.
+- 'Why is the 1.5°C target important in the lecture?' -> a concise explanation of its significance.
 
-Return only the JSON matching the schema.`
+Examples of BAD cards:
+- 'What is the main idea of Understanding Climate Change?'
+- 'What does Chapter 1 cover?'
+- 'What is one important fact about Climate Change?'
+- A front that is just a heading.
+- A back containing copied slide fragments such as 'Published: 2026 Global Environmental Assessment Series'.
+
+Use ONLY information supported by the source. Do not invent facts. The result should feel like a teacher made the cards after reading the entire lecture.`
         },
         {
           role: "user",
-          content: `Document title: ${title}\nReview-plan length: ${days} days\nSyllabus/objectives: ${syllabus || "Not provided"}\n\nFULL SOURCE MATERIAL:\n${source}`
+          content: `Student title: ${title}\nReview plan: ${days} days\nSyllabus: ${syllabus || "Not provided"}\n\nSOURCE MATERIAL START\n${source}\nSOURCE MATERIAL END\n\nNow synthesize the material and return only the requested JSON.`
         }
       ],
     }),
@@ -154,35 +148,32 @@ Return only the JSON matching the schema.`
 
   if (!response.ok) {
     const details = await response.text().catch(() => "");
-    throw new Error(`OpenAI returned HTTP ${response.status}${details ? `: ${details.slice(0, 300)}` : ""}`);
+    throw new Error(`OpenAI returned HTTP ${response.status}${details ? `: ${details.slice(0, 400)}` : ""}`);
   }
   const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
+  const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new Error("OpenAI returned no content");
-  const parsed = JSON.parse(content);
-  return cleanGeneratedKit(parsed);
+  return cleanGeneratedKit(JSON.parse(content));
 }
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed." });
+
   const body = req.body || {};
   const title = typeof body.title === "string" ? body.title.trim() : "";
   const materials = Array.isArray(body.materials) ? body.materials : [];
   const source = cleanText(materials.map((m) => m && m.text ? m.text : "").join("\n\n"));
   const days = Math.max(1, Math.min(30, Number(body.planDays) || 7));
   const syllabus = typeof body.syllabus === "string" ? body.syllabus : "";
+
   if (!title || !source) return res.status(400).json({ error: "Add a title and at least one valid material." });
 
   try {
-    try {
-      const kit = await generateWithOpenAI(title, source, syllabus, days);
-      if (kit) return res.status(200).json(kit);
-    } catch (error) {
-      console.warn("AI generation failed; using source-aware fallback:", error?.message || error);
-    }
-    return res.status(200).json(fallbackKit(title, source, days));
+    const kit = await generateWithOpenAI(title, source, syllabus, days);
+    if (!kit) return res.status(502).json({ error: "The AI returned a study kit that did not pass the content-quality checks. Please try again." });
+    return res.status(200).json(kit);
   } catch (error) {
-    console.error("Study kit generation failed", error);
-    return res.status(500).json({ error: "Could not generate a study kit." });
+    console.error("Study kit generation failed:", error?.message || error);
+    return res.status(502).json({ error: error?.message || "Could not generate a study kit." });
   }
 }
