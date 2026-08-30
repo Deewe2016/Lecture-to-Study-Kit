@@ -75,8 +75,8 @@ function fallbackKit(title, source, days) {
       difficulty: i === 2 ? "Stretch" : "Core"
     })),
     flashcards: chapters.flatMap((chapter, i) => [
-      { id: `f${i * 2 + 1}`, chapterId: chapter.id, front: chapter.title, back: chapter.summary, hint: "Recall the main idea." },
-      { id: `f${i * 2 + 2}`, chapterId: chapter.id, front: `${chapter.title}: key fact`, back: chapter.keyPoints[1], hint: "Recall the supporting detail." }
+      { id: `f${i * 2 + 1}`, chapterId: chapter.id, front: `What is the main idea of ${chapter.title}?`, back: chapter.summary, hint: "Recall the main idea." },
+      { id: `f${i * 2 + 2}`, chapterId: chapter.id, front: `What is one important point about ${chapter.title}?`, back: chapter.keyPoints[1], hint: "Recall the supporting detail." }
     ])
   };
 }
@@ -129,6 +129,18 @@ CHAPTER RULES:
 - Do not copy large blocks of source text. Synthesize it.
 - Never repeat metadata such as Subject, Level, Target Use, or Testing Tip.
 - Never invent facts that are absent from the source.
+
+FLASHCARD RULES — VERY IMPORTANT:
+- Create at least 2 useful flashcards per major chapter/topic, with each card testing ONE concept, fact, relationship, definition, target, or cause/effect idea.
+- The FRONT must be a clear, answerable question. Examples: "What are the main human activities that intensify the greenhouse effect?", "Why does glacial melting contribute to sea-level rise?", "What temperature target does the Paris Agreement seek to keep warming below?"
+- Never use a chapter title, section heading, category label, or fragment as the front by itself. NEVER make fronts like "Physical Climate Systems Human & Ecological Systems", "Key Drivers", "Chapter 1", or "Topic: Climate Change".
+- Avoid vague fronts such as "What is this chapter about?" when a specific factual question can be asked.
+- The BACK must directly answer the question in 1-3 clear sentences. It must be self-contained, concise, and source-grounded.
+- Never put multiple bullet points, slide fragments, separate headings, or unrelated concepts on the back. Do not use bullet characters (•, -, *) or newline-separated lists in a flashcard back.
+- If the source contains a list, turn that list into a focused question and answer in normal prose rather than dumping the list onto the card.
+- Do not copy presentation layout artifacts or text-column headings into flashcards.
+- Keep wording natural for studying: a student should be able to look only at the front and know exactly what they are expected to recall.
+- Hints should be short and useful, not a restatement of the answer.
 
 STUDY-ITEM RULES:
 - Questions, answers, explanations, flashcards, and review-plan focuses must be based on the actual source content.
