@@ -4,47 +4,80 @@ function cleanText(value) {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
+    .filter((line) => !/^\s*(Subject|Level|Target Use|Testing Tip)\s*:/i.test(line))
     .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
     .slice(0, 50000);
 }
 
-function fallbackKit(title, source, days) {
-  const sentences = source.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).filter((s) => s.length > 20);
-  const points = sentences.slice(0, 6);
-  const chapter = {
-    id: "source",
-    title: title || "Study Material",
-    summary: points[0] || "Review the material you provided.",
-    keyPoints: [points[0], points[1], points[2]].filter(Boolean),
-    objective: "Explain the main ideas in the supplied material."
-  };
-  while (chapter.keyPoints.length < 3) chapter.keyPoints.push("Review this material and explain it in your own words.");
+function sentenceList(source) {
+  return source.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length > 20);
+}
 
+function sourceSections(source) {
+  const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const sections = [];
+  let current = null;
+  const numbered = /^\d+\.\s+(.+)$/;
+  const heading = /^[A-Z][A-Za-z0-9 &'()/,-]{1,79}$/;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const numberedMatch = line.match(numbered);
+    const plainHeading = heading.test(line) && line.split(/\s+/).length <= 8 && !/[.!?;:]$/.test(line) && lines[i + 1];
+    const title = numberedMatch ? numberedMatch[1].trim() : plainHeading ? line : null;
+    if (title) {
+      if (current && current.text.length > 20) sections.push(current);
+      current = { title, text: "" };
+    } else if (current) {
+      current.text += `${current.text ? " " : ""}${line}`;
+    }
+  }
+  if (current && current.text.length > 20) sections.push(current);
+  return sections.slice(0, 6);
+}
+
+function fallbackKit(title, source, days) {
+  const facts = sentenceList(source);
+  const sections = sourceSections(source);
+  const chapters = (sections.length ? sections : [{ title: title || "Study Material", text: facts.slice(0, 8).join(" ") }]).map((section, index) => {
+    const points = sentenceList(section.text).slice(0, 3);
+    const keyPoints = [points[0], points[1], points[2]].filter(Boolean);
+    while (keyPoints.length < 3) keyPoints.push("This section develops the concepts described in the supplied material.");
+    return {
+      id: `chapter-${index + 1}`,
+      title: section.title,
+      summary: points[0] || section.text,
+      keyPoints,
+      objective: `Explain the concepts and relationships presented in ${section.title}.`
+    };
+  });
+  const reviewDays = Math.max(1, Math.min(30, Number(days) || 7));
   return {
     title: title || "Study Kit",
     courseLabel: "Personal study space",
-    overview: sentences.slice(0, 2).join(" ") || "A study kit based on your supplied material.",
-    chapters: [chapter],
-    reviewPlan: Array.from({ length: Math.max(1, Math.min(30, days)) }, (_, i) => ({
+    overview: facts.slice(0, 2).join(" ") || `A study guide based on ${title || "the supplied material"}.`,
+    chapters,
+    reviewPlan: Array.from({ length: reviewDays }, (_, i) => ({
       day: i + 1,
-      label: i === 0 ? "Start here" : i === days - 1 ? "Ready check" : `Review ${i + 1}`,
-      focus: chapter.title,
-      tasks: ["Review the key points", i === days - 1 ? "Take the practice exam" : "Review the flashcards"],
-      minutes: i === days - 1 ? 35 : 25
+      label: i === 0 ? "Start here" : i === reviewDays - 1 ? "Ready check" : `Review ${i + 1}`,
+      focus: chapters[i % chapters.length].title,
+      tasks: i === 0 ? ["Read the overview and chapter summaries", "Recall the main ideas without looking"] : ["Review the key points", i === reviewDays - 1 ? "Take the practice exam" : "Review the flashcards"],
+      minutes: i === reviewDays - 1 ? 35 : 25
     })),
-    questions: [{
-      id: "q1",
-      chapterId: "source",
-      prompt: `Which statement is supported by the material about ${chapter.title.toLowerCase()}?`,
-      options: [chapter.keyPoints[0], chapter.keyPoints[1], "The material does not discuss this topic.", "None of the above."],
+    questions: chapters.map((chapter, i) => ({
+      id: `q${i + 1}`,
+      chapterId: chapter.id,
+      prompt: `Which statement is supported by the material about ${chapter.title}?`,
+      options: [chapter.keyPoints[0], chapter.keyPoints[1], "The material does not discuss this topic.", "It is unrelated to the other concepts."],
       answer: 0,
       explanation: chapter.keyPoints[0],
-      difficulty: "Core"
-    }],
-    flashcards: [
-      { id: "f1", chapterId: "source", front: `What does ${chapter.title} cover?`, back: chapter.summary, hint: "Recall the chapter summary." },
-      { id: "f2", chapterId: "source", front: `${chapter.title}: key fact`, back: chapter.keyPoints[1], hint: "Recall a key point." }
-    ]
+      difficulty: i === 2 ? "Stretch" : "Core"
+    })),
+    flashcards: chapters.flatMap((chapter, i) => [
+      { id: `f${i * 2 + 1}`, chapterId: chapter.id, front: chapter.title, back: chapter.summary, hint: "Recall the main idea." },
+      { id: `f${i * 2 + 2}`, chapterId: chapter.id, front: `${chapter.title}: key fact`, back: chapter.keyPoints[1], hint: "Recall the supporting detail." }
+    ])
   };
 }
 
@@ -56,10 +89,10 @@ const schema = {
     title: { type: "string" },
     courseLabel: { type: "string" },
     overview: { type: "string" },
-    chapters: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "title", "summary", "keyPoints", "objective"], properties: { id: { type: "string" }, title: { type: "string" }, summary: { type: "string" }, keyPoints: { type: "array", items: { type: "string" } }, objective: { type: "string" } } } },
+    chapters: { type: "array", minItems: 3, maxItems: 6, items: { type: "object", additionalProperties: false, required: ["id", "title", "summary", "keyPoints", "objective"], properties: { id: { type: "string" }, title: { type: "string" }, summary: { type: "string" }, keyPoints: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } }, objective: { type: "string" } } } },
     reviewPlan: { type: "array", items: { type: "object", additionalProperties: false, required: ["day", "label", "focus", "tasks", "minutes"], properties: { day: { type: "number" }, label: { type: "string" }, focus: { type: "string" }, tasks: { type: "array", items: { type: "string" } }, minutes: { type: "number" } } } },
-    questions: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "chapterId", "prompt", "options", "answer", "explanation", "difficulty"], properties: { id: { type: "string" }, chapterId: { type: "string" }, prompt: { type: "string" }, options: { type: "array", items: { type: "string" } }, answer: { type: "number" }, explanation: { type: "string" }, difficulty: { type: "string" } } } },
-    flashcards: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "chapterId", "front", "back", "hint"], properties: { id: { type: "string" }, chapterId: { type: "string" }, front: { type: "string" }, back: { type: "string" }, hint: { type: ["string", "null"] } } } }
+    questions: { type: "array", minItems: 3, items: { type: "object", additionalProperties: false, required: ["id", "chapterId", "prompt", "options", "answer", "explanation", "difficulty"], properties: { id: { type: "string" }, chapterId: { type: "string" }, prompt: { type: "string" }, options: { type: "array", minItems: 4, maxItems: 4, items: { type: "string" } }, answer: { type: "number" }, explanation: { type: "string" }, difficulty: { type: "string" } } } },
+    flashcards: { type: "array", minItems: 6, items: { type: "object", additionalProperties: false, required: ["id", "chapterId", "front", "back", "hint"], properties: { id: { type: "string" }, chapterId: { type: "string" }, front: { type: "string" }, back: { type: "string" }, hint: { type: ["string", "null"] } } } }
   }
 };
 
@@ -74,12 +107,48 @@ async function generateWithOpenAI(title, source, syllabus, days) {
       temperature: 0.2,
       response_format: { type: "json_schema", json_schema: { name: "study_kit", strict: true, schema } },
       messages: [
-        { role: "system", content: "Create a complete study kit using only information supported by the supplied lecture material. Do not invent facts. Include useful chapters, a multi-day review plan, practice questions, and flashcards." },
-        { role: "user", content: `Title: ${title}\nPlan length: ${days} days\nSyllabus: ${syllabus || "Not provided"}\n\nLecture material:\n${source}` }
+        {
+          role: "system",
+          content: `You are a careful document analyst and study coach. Build the study kit from the supplied lecture material itself. The quality target is a concise, source-grounded chapter map like a well-designed textbook outline, NOT a generic summary.
+
+IMPORTANT CHAPTER RULES:
+- Identify 3-6 major topics/sections actually taught by the source.
+- Use the document's real section, chapter, slide, or topic headings when they exist. Preserve meaningful wording from those headings.
+- Do NOT use the uploaded document title as the chapter title unless the entire document is genuinely one topic.
+- Do NOT invent generic headings such as "Key Definitions", "How the Parts Connect", "Examples and Implications", or "Core Concepts" when the source provides more specific topics.
+- A chapter title should describe the actual content: for climate change, examples could be "Key Drivers of Global Climate Change", "Environmental & Socioeconomic Impacts", "The Paris Agreement Target", and "Mitigation & Adaptation Strategies" if those are the topics in the source.
+
+OVERVIEW RULES:
+- Write a concise 2-3 sentence overview of what THIS document teaches, argues, defines, or demonstrates.
+- Use concrete nouns, facts, concepts, and relationships from the source.
+- Never fill the overview with study advice, memory advice, or generic phrases such as "this material helps students understand".
+
+CHAPTER RULES:
+- For every chapter, write a short 1-3 sentence summary explaining what that specific section teaches.
+- Give 3-5 concrete key points drawn from that section.
+- Do not copy large blocks of source text. Synthesize it.
+- Never repeat metadata such as Subject, Level, Target Use, or Testing Tip.
+- Never invent facts that are absent from the source.
+
+STUDY-ITEM RULES:
+- Questions, answers, explanations, flashcards, and review-plan focuses must be based on the actual source content.
+- Correct quiz answers must be factual statements from the source, not meta-study advice.
+- Keep chapter IDs stable and use the matching chapter ID in questions and flashcards.
+- The review plan may contain study actions, but its focus must be a real chapter/topic from the source.
+
+Return only the JSON required by the schema.`
+        },
+        {
+          role: "user",
+          content: `Document title: ${title}\nRequested review-plan length: ${days} days\nSyllabus/objectives: ${syllabus || "Not provided"}\n\nSOURCE MATERIAL:\n${source}`
+        }
       ]
     })
   });
-  if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}`);
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw new Error(`OpenAI returned HTTP ${response.status}${details ? `: ${details.slice(0, 300)}` : ""}`);
+  }
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("OpenAI returned no content");
@@ -93,14 +162,15 @@ export default async function handler(req, res) {
   const materials = Array.isArray(body.materials) ? body.materials : [];
   const source = cleanText(materials.map((m) => m && m.text ? m.text : "").join("\n\n"));
   const days = Math.max(1, Math.min(30, Number(body.planDays) || 7));
+  const syllabus = typeof body.syllabus === "string" ? body.syllabus : "";
   if (!title || !source) return res.status(400).json({ error: "Add a title and at least one valid material." });
 
   try {
     let kit = null;
     try {
-      kit = await generateWithOpenAI(title, source, typeof body.syllabus === "string" ? body.syllabus : "", days);
+      kit = await generateWithOpenAI(title, source, syllabus, days);
     } catch (error) {
-      console.warn("AI generation failed; using fallback generator.", error);
+      console.warn("AI generation failed; using source-based fallback.", error?.message || error);
     }
     return res.status(200).json(kit || fallbackKit(title, source, days));
   } catch (error) {
