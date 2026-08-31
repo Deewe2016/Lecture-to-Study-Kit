@@ -1,49 +1,37 @@
 function clean(value) {
-  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 12000);
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 30000);
 }
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed." });
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: "GROQ_API_KEY is not configured in Vercel." });
 
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) {
-    return res.status(503).json({ error: "The AI tutor is not configured on this deployment yet." });
-  }
-
-  const body = req.body || {};
-  const prompt = clean(body.prompt);
-  const context = clean(body.context);
+  const prompt = clean(req.body?.prompt);
+  const context = clean(req.body?.context);
   if (!prompt) return res.status(400).json({ error: "Ask a question first." });
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-        temperature: 0.3,
+        model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+        temperature: 0.2,
         stream: true,
         messages: [
-          {
-            role: "system",
-            content: "You are the tutor inside a study-kit app. Answer the student's question using the supplied study-kit context. Explain clearly and simply, but do not oversimplify scientific or academic concepts. Stay grounded in the material; if the answer is not in the material, say so and distinguish that from outside knowledge. Do not talk about being an AI. Keep answers focused and reasonably short.",
-          },
-          {
-            role: "user",
-            content: `STUDY KIT CONTEXT:\n${context}\n\nSTUDENT QUESTION:\n${prompt}`,
-          },
-        ],
-      }),
+          { role: "system", content: "You are a concise study tutor. Answer using ONLY the supplied study-kit context. Explain clearly in your own words. Do not invent information. If the context is insufficient, say so. Keep the answer focused and useful for studying." },
+          { role: "user", content: `STUDY KIT CONTEXT:\n${context}\n\nSTUDENT QUESTION:\n${prompt}` }
+        ]
+      })
     });
 
     if (!response.ok) {
       const details = await response.text().catch(() => "");
-      return res.status(502).json({ error: `Tutor service returned HTTP ${response.status}${details ? `: ${details.slice(0, 250)}` : ""}` });
+      return res.status(502).json({ error: `Groq HTTP ${response.status}: ${details.slice(0, 300)}` });
     }
 
+    res.statusCode = 200;
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
@@ -57,25 +45,23 @@ export default async function handler(req, res) {
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n");
-      buffer = events.pop() || "";
-      for (const line of events) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") continue;
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
         try {
           const parsed = JSON.parse(data);
-          const content = parsed.choices?.[0]?.delta?.content;
+          const content = parsed?.choices?.[0]?.delta?.content;
           if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
-        } catch {
-          // Ignore incomplete/non-JSON SSE lines.
-        }
+        } catch {}
       }
     }
     res.end();
   } catch (error) {
-    console.error("Tutor request failed", error);
-    if (!res.headersSent) return res.status(500).json({ error: "The tutor could not answer right now." });
+    console.error("Tutor request failed:", error);
+    if (!res.headersSent) return res.status(502).json({ error: error instanceof Error ? error.message : "Tutor unavailable." });
     res.end();
   }
 }
