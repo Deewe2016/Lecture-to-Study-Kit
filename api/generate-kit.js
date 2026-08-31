@@ -11,121 +11,59 @@ function cleanText(value) {
     .trim();
 }
 
-function sentences(source) {
-  return source.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length > 30);
-}
-
-function meaningfulSentences(source) {
-  return sentences(source).filter((s) => {
-    const lower = s.toLowerCase();
-    return !lower.includes("global environmental assessment series") &&
-      !lower.includes("climate policy & science division") &&
-      !/^published\s*:/i.test(s) &&
-      !/^understanding climate change$/i.test(s);
-  });
-}
-
-function starterKit(title, source, planDays) {
-  const facts = meaningfulSentences(source).slice(0, 24);
-  const topic = title || "Your Lecture";
-  const topicSentences = facts.length ? facts : [`This material explains the main concepts in ${topic}.`];
-  const chapters = [];
-  const chapterCount = Math.min(5, Math.max(3, Math.ceil(topicSentences.length / 4)));
-  for (let i = 0; i < chapterCount; i++) {
-    const start = Math.floor(i * topicSentences.length / chapterCount);
-    const end = Math.floor((i + 1) * topicSentences.length / chapterCount);
-    const group = topicSentences.slice(start, Math.max(start + 1, end));
-    const first = group[0];
-    const heading = first.split(/[:.!?]/)[0].trim();
-    chapters.push({
-      id: `chapter-${i + 1}`,
-      title: heading.length >= 8 && heading.length <= 70 ? heading : `${topic} · Topic ${i + 1}`,
-      summary: group.slice(0, 2).join(" "),
-      keyPoints: group.slice(0, 3),
-      objective: `Explain the main ideas in this part of ${topic}.`
-    });
-  }
-
-  const days = Math.max(1, Math.min(30, Number(planDays) || 7));
-  const reviewPlan = Array.from({ length: days }, (_, i) => ({
-    day: i + 1,
-    label: i === 0 ? "Start here" : i === days - 1 ? "Ready check" : `Review ${i + 1}`,
-    focus: chapters[i % chapters.length].title,
-    tasks: i === 0 ? ["Read the overview and chapter summaries", "Recall the three biggest ideas"] : ["Review key points", i === days - 1 ? "Take the practice exam" : "Review the flashcards"],
-    minutes: i === days - 1 ? 35 : 25
-  }));
-
-  const flashcards = chapters.flatMap((chapter, i) => chapter.keyPoints.slice(0, 2).map((point, j) => ({
-    id: `f${i * 2 + j + 1}`,
-    chapterId: chapter.id,
-    front: `What is the key point about ${chapter.title}?`,
-    back: point,
-    hint: "Answer in your own words before revealing it."
-  })));
-
-  const questions = chapters.map((chapter, i) => ({
-    id: `q${i + 1}`,
-    chapterId: chapter.id,
-    prompt: `Which statement best matches the material about ${chapter.title}?`,
-    options: [chapter.keyPoints[0], chapter.keyPoints[1] || chapter.summary, "The material does not address this idea.", "The topic is unrelated to the lecture."],
-    answer: 0,
-    explanation: chapter.keyPoints[0],
-    difficulty: "Core"
-  }));
-
-  return {
-    title: topic,
-    courseLabel: "Personal study space",
-    overview: topicSentences.slice(0, 2).join(" ").slice(0, 420),
-    chapters,
-    reviewPlan,
-    questions,
-    flashcards
-  };
-}
-
-function normalizeKit(kit, title, source, planDays) {
+function normalizeKit(kit, title) {
   if (!kit || typeof kit !== "object") return null;
+  const bad = /(published\s*:\s*\d{4}|global environmental assessment series|climate policy\s*&?\s*science division)/i;
   const chapters = Array.isArray(kit.chapters) ? kit.chapters : [];
   const cards = Array.isArray(kit.flashcards) ? kit.flashcards : [];
+
+  const normalizedChapters = chapters
+    .filter((c) => c && typeof c === "object")
+    .slice(0, 6)
+    .map((c, i) => ({
+      id: String(c.id || `chapter-${i + 1}`),
+      title: String(c.title || `Topic ${i + 1}`).replace(/\s+/g, " ").trim(),
+      summary: String(c.summary || "").replace(/\s+/g, " ").trim().slice(0, 420),
+      keyPoints: Array.isArray(c.keyPoints) ? c.keyPoints.map((p) => String(p).replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 4) : [],
+      objective: String(c.objective || "").replace(/\s+/g, " ").trim().slice(0, 220),
+    }))
+    .filter((c) => c.summary && c.keyPoints.length >= 2);
+
+  const normalizedCards = cards
+    .filter((c) => c && typeof c === "object")
+    .map((c, i) => ({
+      id: String(c.id || `f${i + 1}`),
+      chapterId: String(c.chapterId || ""),
+      front: String(c.front || "").replace(/\s+/g, " ").trim(),
+      back: String(c.back || "").replace(/\s+/g, " ").trim(),
+      hint: String(c.hint || "Recall the concept before revealing the answer.").replace(/\s+/g, " ").trim(),
+    }))
+    .filter((c) => {
+      if (!c.chapterId || !c.front.endsWith("?") || c.front.length < 15 || c.front.length > 180) return false;
+      if (!c.back || c.back.length < 15 || c.back.length > 350) return false;
+      if (bad.test(c.front) || bad.test(c.back)) return false;
+      if (/what is the main idea of/i.test(c.front)) return false;
+      if (/^(what does (this|the) (lecture|chapter|document) say|what is this (lecture|chapter) about)/i.test(c.front)) return false;
+      return true;
+    })
+    .slice(0, 24);
+
   const overview = String(kit.overview || "").replace(/\s+/g, " ").trim();
+  const overviewSentences = overview.split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 2).join(" ").slice(0, 500);
+  if (normalizedChapters.length < 3 || normalizedCards.length < 6 || !overviewSentences || overviewSentences.split(/\s+/).length > 90) return null;
 
-  // Reject the kind of output that caused the broken cards: title/metadata questions,
-  // copied publication information, or answers that are essentially source dumps.
-  const badMetadata = /(published\s*:\s*\d{4}|global environmental assessment series|climate policy\s*&?\s*science division|comprehensive analysis\s*&?\s*insight)/i;
-  const validCards = cards.filter((card) => {
-    const front = String(card?.front || "").replace(/\s+/g, " ").trim();
-    const back = String(card?.back || "").replace(/\s+/g, " ").trim();
-    if (!front || !back || front.length < 10 || back.length < 8) return false;
-    if (!/[?]$/.test(front)) return false;
-    if (badMetadata.test(front) || badMetadata.test(back)) return false;
-    if (/what is the main idea of\s+[^?]+\?/i.test(front)) return false;
-    if (back.length > 450) return false;
-    if (front.length > 180) return false;
-    return true;
-  }).map((card, i) => ({
-    ...card,
-    id: String(card.id || `f${i + 1}`),
-    front: String(card.front).replace(/\s+/g, " ").trim(),
-    back: String(card.back).replace(/\s+/g, " ").trim(),
-    hint: String(card.hint || "Recall the concept before revealing the answer.").replace(/\s+/g, " ").trim()
-  }));
-
-  if (chapters.length < 3 || validCards.length < Math.min(6, chapters.length * 2) || overview.length > 500) return null;
+  const chapterIds = new Set(normalizedChapters.map((c) => c.id));
+  const cardsForRealChapters = normalizedCards.filter((c) => chapterIds.has(c.chapterId));
+  if (cardsForRealChapters.length < 6) return null;
 
   return {
-    ...kit,
-    title: String(kit.title || title).trim(),
-    overview: overview.split(/(?<=[.!?])\s+/).slice(0, 2).join(" ").slice(0, 500),
-    chapters: chapters.slice(0, 6).map((chapter, i) => ({
-      ...chapter,
-      id: String(chapter.id || `chapter-${i + 1}`),
-      title: String(chapter.title || `Topic ${i + 1}`).replace(/\s+/g, " ").trim(),
-      summary: String(chapter.summary || "").replace(/\s+/g, " ").trim().slice(0, 500),
-      keyPoints: Array.isArray(chapter.keyPoints) ? chapter.keyPoints.map((p) => String(p).replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 4) : [],
-      objective: String(chapter.objective || "").replace(/\s+/g, " ").trim()
-    })),
-    flashcards: validCards.slice(0, 24)
+    title: String(kit.title || title).replace(/\s+/g, " ").trim(),
+    courseLabel: String(kit.courseLabel || "Personal study space").replace(/\s+/g, " ").trim(),
+    overview: overviewSentences,
+    chapters: normalizedChapters,
+    reviewPlan: Array.isArray(kit.reviewPlan) ? kit.reviewPlan.slice(0, 30) : [],
+    questions: Array.isArray(kit.questions) ? kit.questions.slice(0, 12) : [],
+    flashcards: cardsForRealChapters,
   };
 }
 
@@ -133,6 +71,7 @@ function shuffleAnswers(kit) {
   return {
     ...kit,
     questions: (kit.questions || []).map((question) => {
+      if (!Array.isArray(question.options) || question.options.length < 2) return question;
       const correct = question.options[question.answer] || question.options[0];
       const options = [...question.options];
       for (let i = options.length - 1; i > 0; i--) {
@@ -140,104 +79,115 @@ function shuffleAnswers(kit) {
         [options[i], options[j]] = [options[j], options[i]];
       }
       return { ...question, options, answer: Math.max(0, options.indexOf(correct)) };
-    })
+    }),
   };
 }
 
-async function generateWithOpenAI(title, source, syllabus, planDays) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
+function buildReviewPlan(chapters, days) {
+  return Array.from({ length: days }, (_, i) => ({
+    day: i + 1,
+    label: i === 0 ? "Start here" : i === days - 1 ? "Ready check" : `Review ${i + 1}`,
+    focus: chapters[i % chapters.length].title,
+    tasks: i === 0
+      ? ["Read the overview and chapter summaries", "Recall the three biggest ideas"]
+      : i === days - 1
+        ? ["Review your weak spots", "Take the practice exam"]
+        : ["Review the key points", "Test yourself with flashcards"],
+    minutes: i === days - 1 ? 35 : 25,
+  }));
+}
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+async function generateWithGroq(title, source, syllabus, planDays) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("GROQ_API_KEY is not configured in Vercel.");
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-      temperature: 0.15,
+      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      temperature: 0.1,
       response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
-          content: `You are an expert educational content designer. Your job is to UNDERSTAND the lecture, identify its concepts, and then teach those concepts. Do NOT copy, concatenate, or rearrange chunks of the source.
+          content: `You are an expert educational content designer. You must UNDERSTAND the source before creating the study kit. Never make the output by copying, concatenating, or rearranging source chunks.
 
-Return ONLY valid JSON with exactly these top-level keys: title, courseLabel, overview, chapters, reviewPlan, questions, flashcards.
+Return ONLY valid JSON with these top-level keys: title, courseLabel, overview, chapters, reviewPlan, questions, flashcards.
 
-CRITICAL CONTENT RULES:
-1. Ignore cover-page metadata, publication information, page numbers, repeated headers/footers, and decorative text. Never make a flashcard about the document title, publication year, publisher/series, or the phrase 'main idea of [document]'.
-2. The overview must be a SYNTHESIS of the entire lecture in exactly 1–2 concise sentences and no more than 70 words.
-3. Identify 3–6 distinct concepts/topics that are actually taught in the material. Chapter titles must name concepts, not generic labels like 'Introduction', 'Overview', or the document title.
-4. Each chapter summary must explain the concept in your own words. Each key point must be a meaningful fact, relationship, mechanism, consequence, example, or distinction from the lecture.
-5. Create 2–4 flashcards PER chapter. A flashcard front MUST be a specific study question about a concept, mechanism, relationship, cause/effect, comparison, or important fact. Good examples: 'Why does ocean acidification threaten marine ecosystems?' or 'How does methane differ from carbon dioxide as a climate driver?'. Bad examples: 'What is the main idea of Understanding Climate Change?', 'What does Chapter 1 cover?', 'key fact', or questions about the document itself.
-6. Every flashcard back must directly answer its front in 1–3 concise sentences. NEVER paste slide headers, publication metadata, unrelated text, or a collection of source fragments. Do not answer a question with a heading followed by another heading.
-7. Questions should test understanding, not document structure. Avoid asking 'What does the lecture say?' or 'What is this chapter about?'.
-8. If PDF extraction has text from two columns mixed together, reconstruct the meaning from context rather than reproducing the mixed text.
-9. Use ONLY information supported by the lecture. Do not invent facts.
+HARD RULES:
+- Ignore cover-page metadata, publication details, repeated headers/footers, page numbers, navigation text, and decorative text.
+- Never create a flashcard about the document title, publication year, publisher, series, author, or "main idea of [document]".
+- The overview must synthesize the whole lecture in exactly 1–2 concise sentences and at most 70 words.
+- Identify 3–6 REAL concepts taught by the source. Chapter titles must name those concepts.
+- Each chapter summary must explain the concept in your own words. Key points must be facts, mechanisms, relationships, causes/effects, examples, or distinctions supported by the source.
+- Create 2–4 flashcards for EACH chapter. Every front must be a specific question that tests understanding of a concept, mechanism, relationship, comparison, cause/effect, or important fact.
+- Good card: "Why does increased atmospheric CO2 affect ocean chemistry?"
+- Bad card: "What is the main idea of Understanding Climate Change?"
+- Bad card: "What does Chapter 1 cover?"
+- Every back must directly answer its question in 1–3 concise sentences. Never paste slide headings, metadata, or unrelated source fragments.
+- Do not use headings or labels as answers.
+- Practice questions must test understanding, not document structure.
+- If PDF extraction mixed columns, reconstruct meaning from context.
+- Use ONLY information supported by the source. Do not invent facts.
 
-Schema details:
-- chapter: {id,title,summary,keyPoints,objective}
-- reviewPlan item: {day,label,focus,tasks,minutes}
-- question: {id,chapterId,prompt,options,answer,explanation,difficulty}
-- flashcard: {id,chapterId,front,back,hint}`
+Schemas:
+chapter={id,title,summary,keyPoints,objective}
+reviewPlan item={day,label,focus,tasks,minutes}
+question={id,chapterId,prompt,options,answer,explanation,difficulty}
+flashcard={id,chapterId,front,back,hint}`,
         },
         {
           role: "user",
-          content: `Create a study kit from this material.
-
+          content: `Create the study kit now.
 Student title: ${title}
 Plan length: ${planDays} days
-Syllabus (optional): ${syllabus || "Not provided"}
+Syllabus: ${syllabus || "Not provided"}
 
 SOURCE MATERIAL START
 ${source.slice(0, 50000)}
 SOURCE MATERIAL END
 
-Before producing the JSON, mentally separate the source into its real concepts and discard document metadata. The flashcards must teach the concepts, not the file.`
-        }
-      ]
-    })
+First identify the concepts mentally. Then write original teaching-oriented content. The final flashcards must test knowledge from those concepts, not the file itself.`,
+        },
+      ],
+    }),
   });
 
-  if (!response.ok) throw new Error(`OpenAI HTTP ${response.status}`);
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Groq HTTP ${response.status}: ${body.slice(0, 300)}`);
+  }
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error("OpenAI returned no content");
+  if (!content) throw new Error("Groq returned no content.");
   return JSON.parse(content);
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed." });
-    return;
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed." });
 
   const input = req.body || {};
   const title = typeof input.title === "string" ? input.title.trim() : "";
   const materials = Array.isArray(input.materials) ? input.materials : [];
-  const source = cleanText(materials.map((m) => m && m.text ? m.text : "").join("\n\n")).slice(0, 50000);
+  const source = cleanText(materials.map((m) => m?.text || "").join("\n\n")).slice(0, 50000);
   const planDays = Math.max(1, Math.min(30, Number(input.planDays) || 7));
   const syllabus = typeof input.syllabus === "string" ? input.syllabus : "";
 
-  if (!title || !source) {
-    res.status(400).json({ error: "Add a title and at least one valid material." });
-    return;
-  }
+  if (!title || !source) return res.status(400).json({ error: "Add a title and at least one valid material." });
 
   try {
-    let kit = null;
-    try {
-      const generated = await generateWithOpenAI(title, source, syllabus, planDays);
-      kit = normalizeKit(generated, title, source, planDays);
-      if (!kit) console.warn("AI output failed quality checks; using structured fallback.");
-    } catch (error) {
-      console.warn("AI generation failed; using structured fallback.", error?.message || error);
-    }
-    if (!kit) kit = starterKit(title, source, planDays);
-    res.status(200).json(shuffleAnswers(kit));
+    const generated = await generateWithGroq(title, source, syllabus, planDays);
+    const kit = normalizeKit(generated, title);
+    if (!kit) return res.status(502).json({ error: "Groq returned a study kit that did not pass the quality checks. Please try again." });
+
+    kit.reviewPlan = buildReviewPlan(kit.chapters, planDays);
+    return res.status(200).json(shuffleAnswers(kit));
   } catch (error) {
-    console.error("Study kit generation failed", error);
-    res.status(500).json({ error: "Could not generate a study kit." });
+    console.error("Study kit generation failed:", error);
+    return res.status(502).json({ error: error instanceof Error ? error.message : "Could not generate a study kit." });
   }
 }
