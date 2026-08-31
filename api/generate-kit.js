@@ -97,9 +97,16 @@ function buildReviewPlan(chapters, days) {
   }));
 }
 
-async function generateWithGroq(title, source, syllabus, planDays) {
+async function generateWithGroq(title, source, syllabus, planDays, overviewLevel = "standard") {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("GROQ_API_KEY is not configured in Vercel.");
+
+  const level = ["beginner", "standard", "advanced"].includes(overviewLevel) ? overviewLevel : "standard";
+  const levelInstructions = {
+    beginner: `Use beginner-friendly language. Assume the student may not know specialized vocabulary. When a necessary academic term appears, explain it in plain language the first time. Prefer concrete wording and short sentences. Do not remove important concepts just because they are difficult.`,
+    standard: `Use normal academic language appropriate for a student studying the subject. Explain uncommon or specialized terms briefly when needed.`,
+    advanced: `Use precise subject-specific terminology and include useful nuance, relationships, and distinctions. Assume the student already understands the basic vocabulary.`,
+  }[level];
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -108,13 +115,16 @@ async function generateWithGroq(title, source, syllabus, planDays) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
       temperature: 0.1,
       response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
           content: `You are an expert educational content designer. You must UNDERSTAND the source before creating the study kit. Never make the output by copying, concatenating, or rearranging source chunks.
+
+The requested explanation level is: ${level.toUpperCase()}.
+${levelInstructions}
 
 Return ONLY valid JSON with these top-level keys: title, courseLabel, overview, chapters, reviewPlan, questions, flashcards.
 
@@ -133,6 +143,7 @@ HARD RULES:
 - Practice questions must test understanding, not document structure.
 - If PDF extraction mixed columns, reconstruct meaning from context.
 - Use ONLY information supported by the source. Do not invent facts.
+- Do not output Markdown, HTML, SVG, XML, code fences, or UI markup inside any field. All fields must contain plain text only.
 
 Schemas:
 chapter={id,title,summary,keyPoints,objective}
@@ -145,6 +156,7 @@ flashcard={id,chapterId,front,back,hint}`,
           content: `Create the study kit now.
 Student title: ${title}
 Plan length: ${planDays} days
+Requested explanation level: ${level}
 Syllabus: ${syllabus || "Not provided"}
 
 SOURCE MATERIAL START
@@ -176,11 +188,12 @@ export default async function handler(req, res) {
   const source = cleanText(materials.map((m) => m?.text || "").join("\n\n")).slice(0, 50000);
   const planDays = Math.max(1, Math.min(30, Number(input.planDays) || 7));
   const syllabus = typeof input.syllabus === "string" ? input.syllabus : "";
+  const overviewLevel = typeof input.overviewLevel === "string" ? input.overviewLevel.toLowerCase() : "standard";
 
   if (!title || !source) return res.status(400).json({ error: "Add a title and at least one valid material." });
 
   try {
-    const generated = await generateWithGroq(title, source, syllabus, planDays);
+    const generated = await generateWithGroq(title, source, syllabus, planDays, overviewLevel);
     const kit = normalizeKit(generated, title);
     if (!kit) return res.status(502).json({ error: "Groq returned a study kit that did not pass the quality checks. Please try again." });
 
