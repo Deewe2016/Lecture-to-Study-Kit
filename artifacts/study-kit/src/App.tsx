@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, useParams } from 'wouter';
 import { deleteStudyKit, transcribeVideo, useGenerateKit, useHealthCheck, getHealthCheckQueryKey } from '@workspace/api-client-react';
@@ -54,6 +54,7 @@ const queryClient = new QueryClient();
 const STORAGE = 'lecture-study-kits';
 const PROGRESS = 'lecture-study-progress';
 const CALENDAR_STORAGE = 'lecture-study-calendar';
+const DELETED_KITS = 'lecture-study-deleted-kits';
 type StudySession = { id: string; date: string; title: string; kitId?: string; minutes: number };
 
 const demoKit: LocalKit = {
@@ -92,12 +93,27 @@ const demoKit: LocalKit = {
   createdAt: new Date().toISOString(),
 };
 
-function readKits(): LocalKit[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE) || 'null') || [demoKit]; } catch { return [demoKit]; }
+function getDeletedKitIds(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(DELETED_KITS) || '[]')); } catch { return new Set(); }
 }
+
+function readKits(): LocalKit[] {
+  const deleted = getDeletedKitIds();
+  try {
+    const raw = localStorage.getItem(STORAGE);
+    const parsed = raw === null ? [demoKit] : JSON.parse(raw);
+    const kits = Array.isArray(parsed) ? parsed : [demoKit];
+    return kits.filter((kit): kit is LocalKit => Boolean(kit?.id) && !deleted.has(kit.id));
+  } catch {
+    return [demoKit].filter((kit) => !deleted.has(kit.id));
+  }
+}
+
 function saveKits(kits: LocalKit[]) {
-  localStorage.setItem(STORAGE, JSON.stringify(kits));
-  kits.forEach((kit) => void saveKit(kit));
+  const deleted = getDeletedKitIds();
+  const active = kits.filter((kit) => !deleted.has(kit.id));
+  localStorage.setItem(STORAGE, JSON.stringify(active));
+  active.forEach((kit) => void saveKit(kit));
 }
 function readProgress(id: string): Progress {
   try { return JSON.parse(localStorage.getItem(`${PROGRESS}-${id}`) || 'null') || { reviewed: [], completedTasks: [], answers: {} }; } catch { return { reviewed: [], completedTasks: [], answers: {} }; }
@@ -151,22 +167,46 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function LibraryPage() {
   const [, setLocation] = useLocation();
-  const [kits, setKits] = useState<LocalKit[]>(readKits);
-  useEffect(() => saveKits(kits), [kits]);
+  const [kits, setKits] = useState<LocalKit[]>([]);
+  const [kitsReady, setKitsReady] = useState(false);
+  const deletedDuringLoad = useRef<Set<string>>(new Set());
+
   useEffect(() => {
+    let cancelled = false;
+    const localSnapshot = readKits();
+    setKits(localSnapshot);
+
     void loadKits().then((stored) => {
-      if (stored.length > 0) setKits(stored as LocalKit[]);
+      if (cancelled) return;
+      const deleted = deletedDuringLoad.current;
+      const next = (stored as LocalKit[]).filter((kit) => !deleted.has(kit.id) && !getDeletedKitIds().has(kit.id));
+      setKits(next.length > 0 ? next : localSnapshot.filter((kit) => !deleted.has(kit.id) && !getDeletedKitIds().has(kit.id)));
+      setKitsReady(true);
     });
+
+    return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!kitsReady) return;
+    saveKits(kits);
+  }, [kits, kitsReady]);
+
   const remove = async (id: string) => {
     if (!window.confirm('Permanently delete this study kit?')) return;
+
+    // The local tombstone, localStorage removal, IndexedDB cleanup, and React
+    // state update all happen before the server request. Server availability
+    // must never decide whether a local deletion is real.
+    deletedDuringLoad.current.add(id);
+    deleteStoredKit(id);
+    setKits(prev => prev.filter(k => k.id !== id));
+
     try {
       await deleteStudyKit(id);
-      localStorage.removeItem(`${PROGRESS}-${id}`);
-      await deleteStoredKit(id);
-      setKits(prev => prev.filter(k => k.id !== id));
     } catch {
-      window.alert('This study kit could not be deleted. Please try again.');
+      // The server is best-effort. The local kit remains deleted regardless of
+      // a network/API failure, and the tombstone blocks stale re-saves/loads.
     }
   };
   return <section className="mx-auto max-w-6xl px-5 py-10 sm:px-9 sm:py-14">
