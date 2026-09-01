@@ -27,12 +27,6 @@ function markDeleted(id: string) {
   localStorage.setItem(DELETED_KEY, JSON.stringify([...ids]));
 }
 
-function unmarkDeleted(id: string) {
-  const ids = deletedIds();
-  ids.delete(id);
-  localStorage.setItem(DELETED_KEY, JSON.stringify([...ids]));
-}
-
 const open = () => new Promise<IDBDatabase>((resolve, reject) => {
   if (!('indexedDB' in window)) return reject(new Error('IndexedDB unavailable'));
   const request = indexedDB.open(DB_NAME, VERSION);
@@ -79,12 +73,16 @@ function normalizeKit(kit: StoredKit): StoredKit {
 }
 
 export async function saveKit(kit: StoredKit) {
+  // A deleted kit must never be recreated by the background local-storage
+  // synchronization in App.tsx. New kits use fresh IDs, so there is no need
+  // to clear a deletion tombstone here.
   if (deletedIds().has(kit.id)) return;
-  unmarkDeleted(kit.id);
   try { await write('kits', normalizeKit(kit)); } catch { /* localStorage fallback remains available */ }
 }
 
 export async function deleteKit(id: string) {
+  // Mark first, then remove from IndexedDB. This makes deletion durable even
+  // if another save effect is running at the same time.
   markDeleted(id);
   try {
     const db = await open();
