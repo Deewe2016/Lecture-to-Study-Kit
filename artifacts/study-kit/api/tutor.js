@@ -16,11 +16,11 @@ export default async function handler(req, res) {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+        model: process.env.GROQ_TUTOR_MODEL || process.env.GROQ_MODEL || "openai/gpt-oss-20b",
         temperature: 0.2,
         stream: true,
         messages: [
-          { role: "system", content: "You are a concise study tutor. Answer using ONLY the supplied study-kit context. Explain clearly in your own words. Do not invent information. If the context is insufficient, say so. Keep the answer focused and useful for studying." },
+          { role: "system", content: "You are a concise study tutor. Answer using ONLY the supplied study-kit context. Explain clearly in your own words. Define unfamiliar academic terms when useful. Do not invent information. If the context is insufficient, say so. Keep the answer focused and useful for studying." },
           { role: "user", content: `STUDY KIT CONTEXT:\n${context}\n\nSTUDENT QUESTION:\n${prompt}` }
         ]
       })
@@ -28,7 +28,8 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const details = await response.text().catch(() => "");
-      return res.status(502).json({ error: `Groq HTTP ${response.status}: ${details.slice(0, 300)}` });
+      console.error("Groq tutor HTTP error:", response.status, details);
+      return res.status(502).json({ error: `Groq HTTP ${response.status}: ${details.slice(0, 500)}` });
     }
 
     res.statusCode = 200;
@@ -55,7 +56,9 @@ export default async function handler(req, res) {
           const parsed = JSON.parse(data);
           const content = parsed?.choices?.[0]?.delta?.content;
           if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
-        } catch {}
+        } catch (parseError) {
+          console.error("Tutor stream parse error:", parseError);
+        }
       }
     }
     res.end();
