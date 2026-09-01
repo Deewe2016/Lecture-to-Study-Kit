@@ -15,6 +15,24 @@ export type StoredProgress = { id: string; reviewed: string[]; completedTasks: s
 
 const DB_NAME = 'lecture-study-kit';
 const VERSION = 1;
+const DELETED_KEY = 'lecture-study-deleted-kits';
+
+function deletedIds(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(DELETED_KEY) || '[]')); } catch { return new Set(); }
+}
+
+function markDeleted(id: string) {
+  const ids = deletedIds();
+  ids.add(id);
+  localStorage.setItem(DELETED_KEY, JSON.stringify([...ids]));
+}
+
+function unmarkDeleted(id: string) {
+  const ids = deletedIds();
+  ids.delete(id);
+  localStorage.setItem(DELETED_KEY, JSON.stringify([...ids]));
+}
+
 const open = () => new Promise<IDBDatabase>((resolve, reject) => {
   if (!('indexedDB' in window)) return reject(new Error('IndexedDB unavailable'));
   const request = indexedDB.open(DB_NAME, VERSION);
@@ -48,8 +66,26 @@ async function readAll<T>(storeName: 'kits' | 'progress'): Promise<T[]> {
   return values;
 }
 
-export async function saveKit(kit: StoredKit) { try { await write('kits', kit); } catch { /* browser fallback remains available */ } }
+function normalizeKit(kit: StoredKit): StoredKit {
+  return {
+    ...kit,
+    overview: typeof kit.overview === 'string' ? kit.overview : '',
+    chapters: Array.isArray(kit.chapters) ? kit.chapters : [],
+    reviewPlan: Array.isArray(kit.reviewPlan) ? kit.reviewPlan : [],
+    questions: Array.isArray(kit.questions) ? kit.questions : [],
+    flashcards: Array.isArray(kit.flashcards) ? kit.flashcards : [],
+    materials: Array.isArray(kit.materials) ? kit.materials : [],
+  };
+}
+
+export async function saveKit(kit: StoredKit) {
+  if (deletedIds().has(kit.id)) return;
+  unmarkDeleted(kit.id);
+  try { await write('kits', normalizeKit(kit)); } catch { /* localStorage fallback remains available */ }
+}
+
 export async function deleteKit(id: string) {
+  markDeleted(id);
   try {
     const db = await open();
     await new Promise<void>((resolve, reject) => {
@@ -60,10 +96,23 @@ export async function deleteKit(id: string) {
       request.onerror = () => reject(request.error);
     });
     db.close();
-  } catch { /* localStorage cleanup remains available */ }
+  } catch { /* deletion tombstone prevents stale IndexedDB data from returning */ }
 }
-export async function saveProgress(progress: StoredProgress) { try { await write('progress', progress); } catch { /* browser fallback remains available */ } }
-export async function loadKits() { try { return await readAll<StoredKit>('kits'); } catch { return []; } }
+
+export async function saveProgress(progress: StoredProgress) {
+  if (deletedIds().has(progress.id)) return;
+  try { await write('progress', progress); } catch { /* browser fallback remains available */ }
+}
+
+export async function loadKits() {
+  try {
+    const deleted = deletedIds();
+    const kits = await readAll<StoredKit>('kits');
+    return kits.filter((kit) => !deleted.has(kit.id)).map(normalizeKit);
+  } catch { return []; }
+}
+
 export async function loadProgress(id: string) {
+  if (deletedIds().has(id)) return null;
   try { return (await readAll<StoredProgress>('progress')).find((item) => item.id === id) ?? null; } catch { return null; }
 }
