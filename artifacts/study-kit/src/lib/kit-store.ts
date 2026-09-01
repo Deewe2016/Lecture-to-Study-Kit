@@ -79,11 +79,10 @@ export async function saveKit(kit: StoredKit) {
   try { await write('kits', normalizeKit(kit)); } catch { /* localStorage remains the primary UI fallback */ }
 }
 
-// Deletion is intentionally local-first and non-blocking. The UI must never
-// wait on IndexedDB (or a locked browser database) before removing a kit.
+// Deletion is local-first and synchronous from the caller's perspective.
+// The tombstone is written before any async cleanup so late saves/loads can
+// never make this kit live again.
 export function deleteKit(id: string) {
-  // Write the tombstone synchronously first. This prevents every other save or
-  // load effect from resurrecting this kit while the database cleanup runs.
   markDeleted(id);
 
   try {
@@ -94,13 +93,10 @@ export function deleteKit(id: string) {
     }
     localStorage.removeItem(`${LOCAL_PROGRESS_PREFIX}${id}`);
   } catch {
-    // The tombstone is already written, so a localStorage parse failure cannot
-    // cause the kit to be recreated by IndexedDB synchronization.
+    // The tombstone is already durable, so a localStorage failure cannot allow
+    // IndexedDB synchronization to resurrect the kit.
   }
 
-  // Clean IndexedDB in the background. Do not await this operation: some
-  // browsers can leave an IndexedDB request pending indefinitely, which used
-  // to make the delete button appear to do nothing.
   void (async () => {
     try {
       const db = await open();
@@ -114,8 +110,8 @@ export function deleteKit(id: string) {
       });
       db.close();
     } catch {
-      // Tombstone + localStorage removal are sufficient to keep the deleted
-      // kit out of the UI even if IndexedDB cleanup is unavailable.
+      // Tombstone + localStorage removal keep the kit deleted even when the
+      // IndexedDB cleanup cannot complete.
     }
   })();
 }
@@ -126,8 +122,23 @@ export async function saveProgress(progress: StoredProgress) {
 }
 
 export async function loadKits() {
+  const deleted = deletedIds();
+
+  // localStorage is the authoritative current snapshot when it exists. This
+  // prevents an older IndexedDB snapshot from overwriting a newer deletion.
   try {
-    const deleted = deletedIds();
+    const raw = localStorage.getItem(LOCAL_KITS_KEY);
+    if (raw !== null) {
+      const local = JSON.parse(raw) as StoredKit[];
+      if (Array.isArray(local)) {
+        return local.filter((kit) => kit && !deleted.has(kit.id)).map(normalizeKit);
+      }
+    }
+  } catch {
+    // Fall through to IndexedDB if the local snapshot is unreadable.
+  }
+
+  try {
     const kits = await readAll<StoredKit>('kits');
     return kits.filter((kit) => !deleted.has(kit.id)).map(normalizeKit);
   } catch { return []; }
