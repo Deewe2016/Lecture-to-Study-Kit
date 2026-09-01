@@ -1,6 +1,6 @@
 const STORAGE_KEY = 'study-kit-overview-level';
-const OPTIONS_KEY = 'study-kit-content-options';
 const LAST_KIT_KEY = 'study-kit-last-options';
+const KIT_OPTIONS_KEY = 'study-kit-content-options-by-id';
 const LEVELS = [
   { value: 'beginner', label: 'Beginner', description: 'Simpler vocabulary and brief explanations for unfamiliar terms.', instruction: 'Use simple vocabulary. Define unavoidable academic terms in plain language the first time they appear. Prefer short sentences and concrete explanations.' },
   { value: 'standard', label: 'Standard', description: 'Normal academic language with brief explanations when needed.', instruction: 'Use normal academic vocabulary. Briefly define specialized terms when they are important to understanding the concept.' },
@@ -17,15 +17,41 @@ let selectedLevel = localStorage.getItem(STORAGE_KEY) || 'standard';
 if (!LEVELS.some((level) => level.value === selectedLevel)) selectedLevel = 'standard';
 let selectedOptions = readOptions();
 
-function readOptions() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(OPTIONS_KEY) || 'null');
-    if (saved && typeof saved === 'object') return Object.fromEntries(CONTENT_OPTIONS.map(({ key }) => [key, saved[key] !== false]));
-  } catch {}
+function allOptions() {
   return Object.fromEntries(CONTENT_OPTIONS.map(({ key }) => [key, true]));
 }
 
-function saveOptions() { localStorage.setItem(OPTIONS_KEY, JSON.stringify(selectedOptions)); }
+function readOptions() {
+  // Content choices are draft settings for the NEW kit currently being created.
+  // They must not be global, otherwise choosing "Flashcards only" once would
+  // incorrectly hide every older kit too.
+  return allOptions();
+}
+
+function readKitOptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(KIT_OPTIONS_KEY) || 'null');
+    return saved && typeof saved === 'object' ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveKitOptions(id, options) {
+  if (!id) return;
+  const all = readKitOptions();
+  all[id] = { ...allOptions(), ...options };
+  localStorage.setItem(KIT_OPTIONS_KEY, JSON.stringify(all));
+}
+
+function getKitIdFromPath() {
+  const match = location.pathname.match(/\/kit\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function saveOptions() {
+  // Intentionally do not persist draft choices globally.
+}
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
@@ -39,7 +65,7 @@ window.fetch = async (input, init) => {
         body.overviewLevel = selectedLevel;
         body.include = { ...selectedOptions };
         body.syllabus = `${body.syllabus || ''}\n\nEXPLANATION LEVEL PREFERENCE: ${level.label}. ${level.instruction}`.trim();
-        generationConfig = { title: body.title, planDays: Number(body.planDays), include: { ...selectedOptions } };
+        generationConfig = { id: body.id, title: body.title, planDays: Number(body.planDays), include: { ...selectedOptions } };
         init = { ...init, body: JSON.stringify(body) };
       }
     }
@@ -51,11 +77,15 @@ window.fetch = async (input, init) => {
   try {
     const data = await response.clone().json();
     const include = generationConfig.include;
-    if (include.overview === false) { data.overview = ''; data.chapters = []; }
-    if (include.plan === false) data.reviewPlan = [];
-    if (include.flashcards === false) data.flashcards = [];
-    if (include.quiz === false) data.questions = [];
-    sessionStorage.setItem(LAST_KIT_KEY, JSON.stringify({ ...generationConfig, generatedTitle: data.title || generationConfig.title }));
+
+    // Save the selection against THIS kit, not as a global setting.
+    const generatedId = data.id || generationConfig.id || generationConfig.title;
+    saveKitOptions(generatedId, include);
+    sessionStorage.setItem(LAST_KIT_KEY, JSON.stringify({ ...generationConfig, generatedId, generatedTitle: data.title || generationConfig.title }));
+
+    // The UI stores the generated response locally. Keep the generated kit
+    // internally complete, and let the per-kit UI preference control visibility.
+    data.contentOptions = { ...include };
     return new Response(JSON.stringify(data), { status: response.status, statusText: response.statusText, headers: response.headers });
   } catch {
     return response;
@@ -109,16 +139,18 @@ function addControl() {
   const includeStatus = document.createElement('div');
   includeStatus.style.cssText = 'margin-top:8px;font-size:11px;color:#b45309;min-height:16px;';
 
+  // Always start a fresh kit with all four components selected.
+  selectedOptions = allOptions();
   CONTENT_OPTIONS.forEach(({ key, label, description: copy }) => {
     const item = document.createElement('label');
     item.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid #e4e4e7;border-radius:10px;background:rgba(255,255,255,.35);cursor:pointer;';
     const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox'; checkbox.checked = selectedOptions[key]; checkbox.dataset.contentKey = key;
+    checkbox.type = 'checkbox'; checkbox.checked = true; checkbox.dataset.contentKey = key;
     checkbox.style.cssText = 'margin-top:2px;accent-color:#18181b;';
     checkbox.addEventListener('change', () => {
       const checkedCount = Object.values(selectedOptions).filter(Boolean).length;
       if (!checkbox.checked && checkedCount <= 1) { checkbox.checked = true; includeStatus.textContent = 'Keep at least one part of the kit selected.'; return; }
-      selectedOptions[key] = checkbox.checked; saveOptions(); includeStatus.textContent = '';
+      selectedOptions[key] = checkbox.checked; includeStatus.textContent = '';
     });
     const text = document.createElement('span');
     text.innerHTML = `<strong style="display:block;font-size:12px;color:#18181b;font-weight:600">${label}</strong><span style="display:block;margin-top:3px;font-size:10px;line-height:1.4;color:#71717a">${copy}</span>`;
@@ -132,23 +164,46 @@ function addControl() {
 
 function applyKitControls() {
   if (location.pathname.startsWith('/new') || !location.pathname.startsWith('/kit/')) return;
-  let config = null;
-  try { config = JSON.parse(sessionStorage.getItem(LAST_KIT_KEY) || 'null'); } catch {}
-  if (!config) return;
+  const kitId = getKitIdFromPath();
+  if (!kitId) return;
+
+  const savedOptions = readKitOptions()[kitId];
+  const selected = savedOptions && typeof savedOptions === 'object' ? { ...allOptions(), ...savedOptions } : allOptions();
+
   const tabs = {
     overview: document.querySelector('[data-testid="button-tab-overview"]'),
     plan: document.querySelector('[data-testid="button-tab-plan"]'),
     flashcards: document.querySelector('[data-testid="button-tab-flashcards"]'),
     quiz: document.querySelector('[data-testid="button-tab-exam"]'),
   };
-  const selected = config.include || {};
-  Object.entries(tabs).forEach(([key, button]) => { if (button) button.style.display = selected[key] === false ? 'none' : ''; });
-  if (tabs.plan && selected.plan !== false) tabs.plan.textContent = `${config.planDays}-day plan`;
-  const firstVisible = Object.entries(tabs).find(([key, button]) => selected[key] !== false && button && button.style.display !== 'none');
-  if (selected.overview === false && firstVisible?.[1]) firstVisible[1].click();
+
+  Object.entries(tabs).forEach(([key, button]) => {
+    if (button) button.style.display = selected[key] === false ? 'none' : '';
+  });
+  if (tabs.plan && selected.plan !== false) {
+    const dayCount = savedOptions?.planDays;
+    tabs.plan.textContent = `${Number(dayCount) || 7}-day plan`;
+  }
+
+  const firstVisible = Object.entries(tabs).find(([, button]) => button && button.style.display !== 'none');
+  if (firstVisible && firstVisible[1] && !firstVisible[1].dataset.studyKitActivated) {
+    firstVisible[1].dataset.studyKitActivated = 'true';
+    // If the overview is hidden, select the first allowed tab.
+    if (tabs.overview?.style.display === 'none') firstVisible[1].click();
+  }
 }
 
-const observer = new MutationObserver(() => { addControl(); applyKitControls(); });
+// Handle navigation between /new, /, and /kit/:id without carrying the
+// previous kit's selection into the next one.
+let lastPathname = location.pathname;
+const observer = new MutationObserver(() => {
+  if (location.pathname !== lastPathname) {
+    lastPathname = location.pathname;
+    if (location.pathname.endsWith('/new')) selectedOptions = allOptions();
+  }
+  addControl();
+  applyKitControls();
+});
 observer.observe(document.documentElement, { childList: true, subtree: true });
 addControl();
 applyKitControls();
