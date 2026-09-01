@@ -34,15 +34,20 @@
   @keyframes slide-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 }
 
-/* Use the uploaded Flexus F mark for the existing brand container without changing the layout. */
+/* Use the complete uploaded Flexus F mark in the brand slot. */
 [data-testid="link-brand"] > span:first-child {
-  background-color: transparent !important;
+  width: 44px !important;
+  height: 44px !important;
+  flex: 0 0 44px !important;
+  border-radius: 10px !important;
+  background-color: #0B101A !important;
   background-image: url('/flexus-logo.svg') !important;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: contain;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-size: 100% 100% !important;
   color: transparent !important;
+  overflow: hidden !important;
 }
 [data-testid="link-brand"] > span:first-child > svg {
-  display: none;
+  display: none !important;
 }
