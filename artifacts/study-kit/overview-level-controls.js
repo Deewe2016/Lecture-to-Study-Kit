@@ -2,9 +2,9 @@ const STORAGE_KEY = 'study-kit-overview-level';
 const OPTIONS_KEY = 'study-kit-content-options';
 const LAST_KIT_KEY = 'study-kit-last-options';
 const LEVELS = [
-  { value: 'beginner', label: 'Beginner', description: 'Simpler vocabulary and brief explanations for unfamiliar terms.' },
-  { value: 'standard', label: 'Standard', description: 'Normal academic language with brief explanations when needed.' },
-  { value: 'advanced', label: 'Advanced', description: 'More precise terminology, nuance, and deeper connections.' }
+  { value: 'beginner', label: 'Beginner', description: 'Simpler vocabulary and brief explanations for unfamiliar terms.', instruction: 'Use simple vocabulary. Define unavoidable academic terms in plain language the first time they appear. Prefer short sentences and concrete explanations.' },
+  { value: 'standard', label: 'Standard', description: 'Normal academic language with brief explanations when needed.', instruction: 'Use normal academic vocabulary. Briefly define specialized terms when they are important to understanding the concept.' },
+  { value: 'advanced', label: 'Advanced', description: 'More precise terminology, nuance, and deeper connections.', instruction: 'Use precise academic terminology, nuanced explanations, and deeper connections between concepts. Do not oversimplify established terms.' }
 ];
 const CONTENT_OPTIONS = [
   { key: 'overview', label: 'Overview', description: 'Concept map and chapter explanations' },
@@ -35,8 +35,10 @@ window.fetch = async (input, init) => {
     if (method === 'POST' && init?.body && typeof init.body === 'string') {
       const body = JSON.parse(init.body);
       if (body && Array.isArray(body.materials) && body.planDays) {
+        const level = LEVELS.find((item) => item.value === selectedLevel) || LEVELS[1];
         body.overviewLevel = selectedLevel;
         body.include = { ...selectedOptions };
+        body.syllabus = `${body.syllabus || ''}\n\nEXPLANATION LEVEL PREFERENCE: ${level.label}. ${level.instruction}`.trim();
         generationConfig = { title: body.title, planDays: Number(body.planDays), include: { ...selectedOptions } };
         init = { ...init, body: JSON.stringify(body) };
       }
@@ -54,11 +56,7 @@ window.fetch = async (input, init) => {
     if (include.flashcards === false) data.flashcards = [];
     if (include.quiz === false) data.questions = [];
     sessionStorage.setItem(LAST_KIT_KEY, JSON.stringify({ ...generationConfig, generatedTitle: data.title || generationConfig.title }));
-    return new Response(JSON.stringify(data), {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    });
+    return new Response(JSON.stringify(data), { status: response.status, statusText: response.statusText, headers: response.headers });
   } catch {
     return response;
   }
@@ -81,7 +79,6 @@ function addControl() {
   const title = document.createElement('div');
   title.textContent = 'How should your kit explain things?';
   title.style.cssText = 'margin-bottom:8px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.14em;color:#71717a;';
-
   const row = document.createElement('div');
   row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
   const description = document.createElement('div');
