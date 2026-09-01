@@ -16,6 +16,8 @@ export type StoredProgress = { id: string; reviewed: string[]; completedTasks: s
 const DB_NAME = 'lecture-study-kit';
 const VERSION = 1;
 const DELETED_KEY = 'lecture-study-deleted-kits';
+const LOCAL_KITS_KEY = 'lecture-study-kits';
+const LOCAL_PROGRESS_PREFIX = 'lecture-study-progress-';
 
 function deletedIds(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(DELETED_KEY) || '[]')); } catch { return new Set(); }
@@ -73,17 +75,27 @@ function normalizeKit(kit: StoredKit): StoredKit {
 }
 
 export async function saveKit(kit: StoredKit) {
-  // A deleted kit must never be recreated by the background local-storage
-  // synchronization in App.tsx. New kits use fresh IDs, so there is no need
-  // to clear a deletion tombstone here.
+  // A deleted kit must never be recreated by background synchronization.
   if (deletedIds().has(kit.id)) return;
-  try { await write('kits', normalizeKit(kit)); } catch { /* localStorage fallback remains available */ }
+  try { await write('kits', normalizeKit(kit)); } catch { /* localStorage remains the primary UI fallback */ }
 }
 
 export async function deleteKit(id: string) {
-  // Mark first, then remove from IndexedDB. This makes deletion durable even
-  // if another save effect is running at the same time.
+  // Make the tombstone first so concurrent save effects cannot resurrect the kit.
   markDeleted(id);
+
+  // Remove the browser-local source used by App.tsx immediately. This is
+  // important because App.tsx initializes its library from localStorage before
+  // IndexedDB finishes loading.
+  try {
+    const raw = localStorage.getItem(LOCAL_KITS_KEY);
+    if (raw) {
+      const kits = JSON.parse(raw) as Array<{ id: string }>;
+      localStorage.setItem(LOCAL_KITS_KEY, JSON.stringify(kits.filter((kit) => kit.id !== id)));
+    }
+    localStorage.removeItem(`${LOCAL_PROGRESS_PREFIX}${id}`);
+  } catch { /* continue with IndexedDB cleanup */ }
+
   try {
     const db = await open();
     await new Promise<void>((resolve, reject) => {
@@ -92,9 +104,13 @@ export async function deleteKit(id: string) {
       request.objectStore('progress').delete(id);
       request.oncomplete = () => resolve();
       request.onerror = () => reject(request.error);
+      request.onabort = () => reject(request.error || new Error('Delete transaction aborted'));
     });
     db.close();
-  } catch { /* deletion tombstone prevents stale IndexedDB data from returning */ }
+  } catch {
+    // The tombstone plus localStorage removal still prevents the deleted kit
+    // from returning if IndexedDB is unavailable or its delete transaction fails.
+  }
 }
 
 export async function saveProgress(progress: StoredProgress) {
