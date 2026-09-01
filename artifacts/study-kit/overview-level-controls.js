@@ -15,14 +15,10 @@ const CONTENT_OPTIONS = [
 
 let selectedLevel = localStorage.getItem(STORAGE_KEY) || 'standard';
 if (!LEVELS.some((level) => level.value === selectedLevel)) selectedLevel = 'standard';
-let selectedOptions = readOptions();
+let selectedOptions = allOptions();
 
 function allOptions() {
   return Object.fromEntries(CONTENT_OPTIONS.map(({ key }) => [key, true]));
-}
-
-function readOptions() {
-  return allOptions();
 }
 
 function readKitOptions() {
@@ -46,6 +42,26 @@ function getKitIdFromPath() {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function getLocalKits() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('lecture-study-kits') || 'null');
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistLocalDelete(id) {
+  const kits = getLocalKits().filter((kit) => kit?.id !== id);
+  localStorage.setItem('lecture-study-kits', JSON.stringify(kits));
+  localStorage.removeItem(`lecture-study-progress-${id}`);
+  const options = readKitOptions();
+  delete options[id];
+  localStorage.setItem(KIT_OPTIONS_KEY, JSON.stringify(options));
+}
+
+// Add the selected difficulty/content configuration to the generation request.
+// This is deliberately limited to POST requests that look like kit generation.
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   let generationConfig = null;
@@ -69,16 +85,10 @@ window.fetch = async (input, init) => {
 
   try {
     const data = await response.clone().json();
-    const include = generationConfig.include;
     const generatedId = data.id || generationConfig.id || generationConfig.title;
-
-    // Save the selection against THIS kit, not as a global setting.
-    saveKitOptions(generatedId, include, generationConfig.planDays);
+    saveKitOptions(generatedId, generationConfig.include, generationConfig.planDays);
     sessionStorage.setItem(LAST_KIT_KEY, JSON.stringify({ ...generationConfig, generatedId, generatedTitle: data.title || generationConfig.title }));
-
-    // Keep the generated response complete. The saved per-kit preference controls
-    // which tabs are shown; older kits are unaffected.
-    data.contentOptions = { ...include };
+    data.contentOptions = { ...generationConfig.include };
     return new Response(JSON.stringify(data), { status: response.status, statusText: response.statusText, headers: response.headers });
   } catch {
     return response;
@@ -132,7 +142,6 @@ function addControl() {
   const includeStatus = document.createElement('div');
   includeStatus.style.cssText = 'margin-top:8px;font-size:11px;color:#b45309;min-height:16px;';
 
-  // A new kit starts with all four components selected.
   selectedOptions = allOptions();
   CONTENT_OPTIONS.forEach(({ key, label, description: copy }) => {
     const item = document.createElement('label');
@@ -155,44 +164,107 @@ function addControl() {
   refresh();
 }
 
+let lastAppliedKit = null;
 function applyKitControls() {
-  if (location.pathname.startsWith('/new') || !location.pathname.startsWith('/kit/')) return;
+  if (!location.pathname.startsWith('/kit/')) return;
   const kitId = getKitIdFromPath();
-  if (!kitId) return;
+  if (!kitId || kitId === lastAppliedKit) return;
 
   const savedOptions = readKitOptions()[kitId];
   const selected = savedOptions && typeof savedOptions === 'object' ? { ...allOptions(), ...savedOptions } : allOptions();
-
   const tabs = {
     overview: document.querySelector('[data-testid="button-tab-overview"]'),
     plan: document.querySelector('[data-testid="button-tab-plan"]'),
     flashcards: document.querySelector('[data-testid="button-tab-flashcards"]'),
     quiz: document.querySelector('[data-testid="button-tab-exam"]'),
   };
+  if (!Object.values(tabs).some(Boolean)) return;
 
   Object.entries(tabs).forEach(([key, button]) => {
     if (button) button.style.display = selected[key] === false ? 'none' : '';
   });
   if (tabs.plan && selected.plan !== false) {
-    tabs.plan.textContent = `${Number(savedOptions?.planDays) || 7}-day plan`;
+    const label = `${Number(savedOptions?.planDays) || 7}-day plan`;
+    if (tabs.plan.textContent !== label) tabs.plan.textContent = label;
   }
 
-  const firstVisible = Object.entries(tabs).find(([, button]) => button && button.style.display !== 'none');
-  if (firstVisible && firstVisible[1] && !firstVisible[1].dataset.studyKitActivated) {
-    firstVisible[1].dataset.studyKitActivated = 'true';
-    if (tabs.overview?.style.display === 'none') firstVisible[1].click();
+  lastAppliedKit = kitId;
+  if (tabs.overview?.style.display === 'none') {
+    const first = Object.entries(tabs).find(([, button]) => button && button.style.display !== 'none');
+    if (first?.[1]) first[1].click();
   }
 }
 
-let lastPathname = location.pathname;
-const observer = new MutationObserver(() => {
-  if (location.pathname !== lastPathname) {
-    lastPathname = location.pathname;
-    if (location.pathname.endsWith('/new')) selectedOptions = allOptions();
+function resetRouteState() {
+  if (!location.pathname.startsWith('/kit/')) lastAppliedKit = null;
+  if (location.pathname.endsWith('/new')) {
+    lastAppliedKit = null;
+    selectedOptions = allOptions();
   }
-  addControl();
-  applyKitControls();
+}
+
+// The previous implementation observed every DOM mutation and then changed the
+// DOM from inside the observer. That creates a feedback loop and can make the
+// app appear frozen. This observer only schedules a single lightweight pass.
+let scheduled = false;
+const observer = new MutationObserver(() => {
+  if (scheduled) return;
+  scheduled = true;
+  requestAnimationFrame(() => {
+    scheduled = false;
+    resetRouteState();
+    addControl();
+    applyKitControls();
+    patchNavigationAndDelete();
+  });
 });
 observer.observe(document.documentElement, { childList: true, subtree: true });
+
+let lastPathname = location.pathname;
+setInterval(() => {
+  if (location.pathname !== lastPathname) {
+    lastPathname = location.pathname;
+    resetRouteState();
+    addControl();
+    applyKitControls();
+  }
+  patchNavigationAndDelete();
+}, 250);
+
+function patchNavigationAndDelete() {
+  if (document.documentElement.dataset.studyKitHandlers === 'true') return;
+  document.documentElement.dataset.studyKitHandlers = 'true';
+
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target.closest('button') : null;
+    if (!target) return;
+
+    const openMatch = target.getAttribute('data-testid')?.match(/^button-open-kit-(.+)$/);
+    if (openMatch) {
+      const id = openMatch[1];
+      const kits = getLocalKits();
+      const kitExists = kits.some((kit) => kit?.id === id);
+      if (kitExists) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        window.location.assign(`/kit/${encodeURIComponent(id)}`);
+        return;
+      }
+    }
+
+    const removeMatch = target.getAttribute('data-testid')?.match(/^button-remove-kit-(.+)$/);
+    if (removeMatch) {
+      const id = removeMatch[1];
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const confirmed = window.confirm('Permanently delete this study kit?');
+      if (!confirmed) return;
+      persistLocalDelete(id);
+      window.location.reload();
+    }
+  }, true);
+}
+
 addControl();
 applyKitControls();
+patchNavigationAndDelete();
