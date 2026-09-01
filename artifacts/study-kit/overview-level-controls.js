@@ -20,16 +20,12 @@ let selectedOptions = readOptions();
 function readOptions() {
   try {
     const saved = JSON.parse(localStorage.getItem(OPTIONS_KEY) || 'null');
-    if (saved && typeof saved === 'object') {
-      return Object.fromEntries(CONTENT_OPTIONS.map(({ key }) => [key, saved[key] !== false]));
-    }
+    if (saved && typeof saved === 'object') return Object.fromEntries(CONTENT_OPTIONS.map(({ key }) => [key, saved[key] !== false]));
   } catch {}
   return Object.fromEntries(CONTENT_OPTIONS.map(({ key }) => [key, true]));
 }
 
-function saveOptions() {
-  localStorage.setItem(OPTIONS_KEY, JSON.stringify(selectedOptions));
-}
+function saveOptions() { localStorage.setItem(OPTIONS_KEY, JSON.stringify(selectedOptions)); }
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
@@ -48,14 +44,24 @@ window.fetch = async (input, init) => {
   } catch {}
 
   const response = await originalFetch(input, init);
-  if (generationConfig) {
-    try {
-      const clone = response.clone();
-      const data = await clone.json();
-      sessionStorage.setItem(LAST_KIT_KEY, JSON.stringify({ ...generationConfig, generatedTitle: data.title || generationConfig.title }));
-    } catch {}
+  if (!generationConfig) return response;
+
+  try {
+    const data = await response.clone().json();
+    const include = generationConfig.include;
+    if (include.overview === false) { data.overview = ''; data.chapters = []; }
+    if (include.plan === false) data.reviewPlan = [];
+    if (include.flashcards === false) data.flashcards = [];
+    if (include.quiz === false) data.questions = [];
+    sessionStorage.setItem(LAST_KIT_KEY, JSON.stringify({ ...generationConfig, generatedTitle: data.title || generationConfig.title }));
+    return new Response(JSON.stringify(data), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  } catch {
+    return response;
   }
-  return response;
 };
 
 function buttonStyle(active) {
@@ -78,30 +84,18 @@ function addControl() {
 
   const row = document.createElement('div');
   row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
-
   const description = document.createElement('div');
   description.style.cssText = 'margin-top:8px;font-size:11px;line-height:1.5;color:#71717a;';
-
   const refresh = () => {
-    row.querySelectorAll('button').forEach((button) => {
-      button.style.cssText = buttonStyle(button.dataset.level === selectedLevel);
-    });
+    row.querySelectorAll('button').forEach((button) => { button.style.cssText = buttonStyle(button.dataset.level === selectedLevel); });
     description.textContent = (LEVELS.find((level) => level.value === selectedLevel) || LEVELS[1]).description;
   };
-
   LEVELS.forEach((level) => {
     const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = level.label;
-    button.dataset.level = level.value;
-    button.addEventListener('click', () => {
-      selectedLevel = level.value;
-      localStorage.setItem(STORAGE_KEY, selectedLevel);
-      refresh();
-    });
+    button.type = 'button'; button.textContent = level.label; button.dataset.level = level.value;
+    button.addEventListener('click', () => { selectedLevel = level.value; localStorage.setItem(STORAGE_KEY, selectedLevel); refresh(); });
     row.appendChild(button);
   });
-
   wrapper.append(title, row, description);
 
   const include = document.createElement('div');
@@ -122,27 +116,17 @@ function addControl() {
     const item = document.createElement('label');
     item.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid #e4e4e7;border-radius:10px;background:rgba(255,255,255,.35);cursor:pointer;';
     const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = selectedOptions[key];
-    checkbox.dataset.contentKey = key;
+    checkbox.type = 'checkbox'; checkbox.checked = selectedOptions[key]; checkbox.dataset.contentKey = key;
     checkbox.style.cssText = 'margin-top:2px;accent-color:#18181b;';
     checkbox.addEventListener('change', () => {
       const checkedCount = Object.values(selectedOptions).filter(Boolean).length;
-      if (!checkbox.checked && checkedCount <= 1) {
-        checkbox.checked = true;
-        includeStatus.textContent = 'Keep at least one part of the kit selected.';
-        return;
-      }
-      selectedOptions[key] = checkbox.checked;
-      saveOptions();
-      includeStatus.textContent = '';
+      if (!checkbox.checked && checkedCount <= 1) { checkbox.checked = true; includeStatus.textContent = 'Keep at least one part of the kit selected.'; return; }
+      selectedOptions[key] = checkbox.checked; saveOptions(); includeStatus.textContent = '';
     });
     const text = document.createElement('span');
     text.innerHTML = `<strong style="display:block;font-size:12px;color:#18181b;font-weight:600">${label}</strong><span style="display:block;margin-top:3px;font-size:10px;line-height:1.4;color:#71717a">${copy}</span>`;
-    item.append(checkbox, text);
-    includeGrid.appendChild(item);
+    item.append(checkbox, text); includeGrid.appendChild(item);
   });
-
   include.append(includeTitle, includeHelp, includeGrid, includeStatus);
   wrapper.appendChild(include);
   daysLabel.parentElement.insertAdjacentElement('afterend', wrapper);
@@ -154,7 +138,6 @@ function applyKitControls() {
   let config = null;
   try { config = JSON.parse(sessionStorage.getItem(LAST_KIT_KEY) || 'null'); } catch {}
   if (!config) return;
-
   const tabs = {
     overview: document.querySelector('[data-testid="button-tab-overview"]'),
     plan: document.querySelector('[data-testid="button-tab-plan"]'),
@@ -162,23 +145,13 @@ function applyKitControls() {
     quiz: document.querySelector('[data-testid="button-tab-exam"]'),
   };
   const selected = config.include || {};
-  Object.entries(tabs).forEach(([key, button]) => {
-    if (!button) return;
-    const enabled = selected[key] !== false;
-    button.style.display = enabled ? '' : 'none';
-  });
-
+  Object.entries(tabs).forEach(([key, button]) => { if (button) button.style.display = selected[key] === false ? 'none' : ''; });
   if (tabs.plan && selected.plan !== false) tabs.plan.textContent = `${config.planDays}-day plan`;
-
-  const currentVisible = Object.entries(tabs).find(([key, button]) => selected[key] !== false && button && button.style.display !== 'none');
-  const overviewEnabled = selected.overview !== false;
-  if (!overviewEnabled && currentVisible?.[1]) currentVisible[1].click();
+  const firstVisible = Object.entries(tabs).find(([key, button]) => selected[key] !== false && button && button.style.display !== 'none');
+  if (selected.overview === false && firstVisible?.[1]) firstVisible[1].click();
 }
 
-const observer = new MutationObserver(() => {
-  addControl();
-  applyKitControls();
-});
+const observer = new MutationObserver(() => { addControl(); applyKitControls(); });
 observer.observe(document.documentElement, { childList: true, subtree: true });
 addControl();
 applyKitControls();
