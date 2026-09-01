@@ -165,13 +165,12 @@ function applyKitControls() {
   Object.entries(tabs).forEach(([key, button]) => {
     if (!button) return;
     const enabled = selected[key] !== false;
-    button.parentElement?.toggleAttribute('hidden', !enabled);
-    if (button.parentElement) button.parentElement.style.display = enabled ? '' : 'none';
+    button.style.display = enabled ? '' : 'none';
   });
 
   if (tabs.plan && selected.plan !== false) tabs.plan.textContent = `${config.planDays}-day plan`;
 
-  const currentVisible = Object.entries(tabs).find(([key, button]) => selected[key] !== false && button && button.parentElement?.style.display !== 'none');
+  const currentVisible = Object.entries(tabs).find(([key, button]) => selected[key] !== false && button && button.style.display !== 'none');
   const overviewEnabled = selected.overview !== false;
   if (!overviewEnabled && currentVisible?.[1]) currentVisible[1].click();
 }
