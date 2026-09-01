@@ -22,9 +22,6 @@ function allOptions() {
 }
 
 function readOptions() {
-  // Content choices are draft settings for the NEW kit currently being created.
-  // They must not be global, otherwise choosing "Flashcards only" once would
-  // incorrectly hide every older kit too.
   return allOptions();
 }
 
@@ -37,20 +34,16 @@ function readKitOptions() {
   }
 }
 
-function saveKitOptions(id, options) {
+function saveKitOptions(id, options, planDays) {
   if (!id) return;
   const all = readKitOptions();
-  all[id] = { ...allOptions(), ...options };
+  all[id] = { ...allOptions(), ...options, planDays: Number(planDays) || 7 };
   localStorage.setItem(KIT_OPTIONS_KEY, JSON.stringify(all));
 }
 
 function getKitIdFromPath() {
   const match = location.pathname.match(/\/kit\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : null;
-}
-
-function saveOptions() {
-  // Intentionally do not persist draft choices globally.
 }
 
 const originalFetch = window.fetch.bind(window);
@@ -77,14 +70,14 @@ window.fetch = async (input, init) => {
   try {
     const data = await response.clone().json();
     const include = generationConfig.include;
+    const generatedId = data.id || generationConfig.id || generationConfig.title;
 
     // Save the selection against THIS kit, not as a global setting.
-    const generatedId = data.id || generationConfig.id || generationConfig.title;
-    saveKitOptions(generatedId, include);
+    saveKitOptions(generatedId, include, generationConfig.planDays);
     sessionStorage.setItem(LAST_KIT_KEY, JSON.stringify({ ...generationConfig, generatedId, generatedTitle: data.title || generationConfig.title }));
 
-    // The UI stores the generated response locally. Keep the generated kit
-    // internally complete, and let the per-kit UI preference control visibility.
+    // Keep the generated response complete. The saved per-kit preference controls
+    // which tabs are shown; older kits are unaffected.
     data.contentOptions = { ...include };
     return new Response(JSON.stringify(data), { status: response.status, statusText: response.statusText, headers: response.headers });
   } catch {
@@ -139,7 +132,7 @@ function addControl() {
   const includeStatus = document.createElement('div');
   includeStatus.style.cssText = 'margin-top:8px;font-size:11px;color:#b45309;min-height:16px;';
 
-  // Always start a fresh kit with all four components selected.
+  // A new kit starts with all four components selected.
   selectedOptions = allOptions();
   CONTENT_OPTIONS.forEach(({ key, label, description: copy }) => {
     const item = document.createElement('label');
@@ -181,20 +174,16 @@ function applyKitControls() {
     if (button) button.style.display = selected[key] === false ? 'none' : '';
   });
   if (tabs.plan && selected.plan !== false) {
-    const dayCount = savedOptions?.planDays;
-    tabs.plan.textContent = `${Number(dayCount) || 7}-day plan`;
+    tabs.plan.textContent = `${Number(savedOptions?.planDays) || 7}-day plan`;
   }
 
   const firstVisible = Object.entries(tabs).find(([, button]) => button && button.style.display !== 'none');
   if (firstVisible && firstVisible[1] && !firstVisible[1].dataset.studyKitActivated) {
     firstVisible[1].dataset.studyKitActivated = 'true';
-    // If the overview is hidden, select the first allowed tab.
     if (tabs.overview?.style.display === 'none') firstVisible[1].click();
   }
 }
 
-// Handle navigation between /new, /, and /kit/:id without carrying the
-// previous kit's selection into the next one.
 let lastPathname = location.pathname;
 const observer = new MutationObserver(() => {
   if (location.pathname !== lastPathname) {
