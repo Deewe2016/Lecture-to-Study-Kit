@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @plugin "@tailwindcss/typography";
@@ -15,38 +15,38 @@
 }
 
 :root {
-  /* Deep cyber-tech: near-black navy surfaces with electric blue/cyan signal colors. */
-  --background: 222 47% 7%;
-  --foreground: 210 35% 94%;
-  --border: 220 30% 18%;
-  --card: 222 43% 10%;
-  --card-foreground: 210 35% 94%;
-  --card-border: 220 30% 19%;
-  --sidebar: 224 50% 5%;
-  --sidebar-foreground: 215 22% 72%;
-  --sidebar-border: 220 32% 14%;
+  /* Deep navy foundation + dark blue secondary palette. */
+  --background: 222 55% 6%;
+  --foreground: 214 30% 93%;
+  --border: 220 38% 17%;
+  --card: 222 50% 9%;
+  --card-foreground: 214 30% 93%;
+  --card-border: 220 38% 18%;
+  --sidebar: 224 60% 4%;
+  --sidebar-foreground: 215 22% 70%;
+  --sidebar-border: 220 40% 12%;
   --sidebar-primary: 195 100% 62%;
-  --sidebar-primary-foreground: 222 47% 7%;
-  --sidebar-accent: 215 48% 14%;
-  --sidebar-accent-foreground: 205 35% 93%;
+  --sidebar-primary-foreground: 222 55% 6%;
+  --sidebar-accent: 218 55% 13%;
+  --sidebar-accent-foreground: 210 35% 92%;
   --sidebar-ring: 195 100% 62%;
-  --popover: 222 43% 11%;
-  --popover-foreground: 210 35% 94%;
-  --popover-border: 220 30% 21%;
+  --popover: 222 50% 10%;
+  --popover-foreground: 214 30% 93%;
+  --popover-border: 220 38% 20%;
   --primary: 195 100% 62%;
-  --primary-foreground: 222 47% 7%;
-  --secondary: 218 38% 15%;
-  --secondary-foreground: 210 30% 91%;
-  --muted: 220 32% 13%;
-  --muted-foreground: 215 20% 59%;
-  --accent: 258 88% 72%;
-  --accent-foreground: 222 47% 7%;
-  --destructive: 0 78% 63%;
-  --destructive-foreground: 222 47% 7%;
-  --input: 220 31% 22%;
+  --primary-foreground: 222 55% 6%;
+  --secondary: 218 58% 16%;
+  --secondary-foreground: 212 30% 91%;
+  --muted: 220 42% 12%;
+  --muted-foreground: 215 18% 58%;
+  --accent: 214 90% 64%;
+  --accent-foreground: 222 55% 6%;
+  --destructive: 0 75% 62%;
+  --destructive-foreground: 222 55% 6%;
+  --input: 220 40% 21%;
   --ring: 195 100% 62%;
   --app-font-sans: 'DM Sans', sans-serif;
-  --app-font-serif: 'Fraunces', Georgia, serif;
+  --app-font-serif: 'DM Sans', sans-serif;
   --app-font-mono: 'DM Mono', monospace;
   --radius: .65rem;
   --spacing: .25rem;
@@ -58,6 +58,7 @@
 @layer base {
   * { @apply border-border; }
   body { @apply font-sans antialiased bg-background text-foreground; margin: 0; }
+  .font-serif { font-family: var(--app-font-sans) !important; }
 }
 
 @layer utilities {
@@ -86,12 +87,10 @@
   flex: 0 0 44px !important;
   aspect-ratio: 1 / 1 !important;
   border-radius: 10px !important;
-  background: #0B101A url('/flexus-logo.svg?v=5') center center / contain no-repeat !important;
+  background: #0B101A url('/flexus-logo.svg?v=6') center center / contain no-repeat !important;
   color: transparent !important;
   overflow: visible !important;
   padding: 0 !important;
   box-shadow: 0 0 20px hsl(195 100% 62% / .12), inset 0 0 14px hsl(195 100% 62% / .05) !important;
 }
-[data-testid="link-brand"] > span:first-child > svg {
-  display: none !important;
-}
+[data-testid="link-brand"] > span:first-child > svg { display: none !important; }
