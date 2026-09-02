@@ -1,0 +1,46 @@
+name: Remove marketing copy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-copy:
+    if: ${{ !contains(github.event.head_commit.message, '[remove-marketing-copy]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Remove marketing headlines
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('artifacts/study-kit/src/App.tsx')
+          text = path.read_text()
+
+          old_home = '<h1 className="mt-3 font-serif text-4xl leading-tight tracking-[-.04em] text-foreground sm:text-5xl">A little more<br /><span className="text-primary">remembering.</span></h1>'
+          new_home = '<h1 className="mt-3 font-serif text-4xl leading-tight tracking-[-.04em] text-foreground sm:text-5xl">Your study workspace</h1>'
+
+          old_new = '<h1 className="mt-3 font-serif text-4xl tracking-[-.04em] sm:text-5xl">Bring a lecture.<br /><span className="text-primary">Leave with a plan.</span></h1>'
+          new_new = '<h1 className="mt-3 font-serif text-4xl tracking-[-.04em] sm:text-5xl">Create a study kit</h1>'
+
+          for old, new in ((old_home, new_home), (old_new, new_new)):
+              if old not in text:
+                  raise SystemExit(f'Expected text was not found: {old}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Commit changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add artifacts/study-kit/src/App.tsx
+          git diff --cached --quiet || git commit -m 'Remove marketing copy [remove-marketing-copy]'
+          git push
