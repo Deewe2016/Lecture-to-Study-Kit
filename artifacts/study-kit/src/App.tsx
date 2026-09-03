@@ -16,6 +16,8 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
+import AuthPage from '@/pages/auth';
+import { getCurrentUser, getStoredUser, signOut, type AuthUser } from '@/lib/auth';
 import './index.css';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -133,6 +135,10 @@ function Brand() {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
+  const user = getStoredUser();
+  const displayName = user?.name || 'Student';
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const [mobileOpen, setMobileOpen] = useState(false);
   const [location] = useLocation();
   useHealthCheck({ query: { queryKey: getHealthCheckQueryKey(), staleTime: 60000 } });
@@ -158,7 +164,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <header className="flex h-[72px] items-center justify-between border-b border-border/70 px-5 sm:px-8">
         <button className="focus-ring rounded-md p-2 text-muted-foreground md:hidden" onClick={() => setMobileOpen(true)} data-testid="button-open-sidebar"><Menu size={20} /></button>
         <div className="hidden items-center gap-2 text-xs text-muted-foreground md:flex"><Home size={14} /> <span className="text-muted-foreground/50">/</span> <span>{location === '/' ? 'Library' : location === '/new' ? 'New kit' : 'Study space'}</span></div>
-        <div className="ml-auto flex items-center gap-4"><div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Saved locally</div><div className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-secondary text-xs font-medium text-foreground">AL</div></div>
+        <div className="ml-auto flex items-center gap-4"><div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Saved locally</div><button onClick={() => { void signOut().finally(() => window.location.reload()); }} title="Log out" className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-secondary text-xs font-medium text-foreground hover:border-primary/60" aria-label={`Log out ${displayName}`}>{displayName.slice(0, 2).toUpperCase()}</button></div>
       </header>
       {children}
     </main>
@@ -210,7 +216,7 @@ function LibraryPage() {
     }
   };
   return <section className="mx-auto max-w-6xl px-5 py-10 sm:px-9 sm:py-14">
-    <div className="slide-up flex flex-col justify-between gap-6 sm:flex-row sm:items-end"><div><p className="font-mono text-[11px] uppercase tracking-[.2em] text-primary">Good afternoon, Alex</p><h1 className="mt-3 font-serif text-4xl leading-tight tracking-[-.04em] text-foreground sm:text-5xl">Your study workspace</h1><p className="mt-4 max-w-md text-sm leading-6 text-muted-foreground">Your study space for the ideas worth keeping.</p></div><Link href="/new" className="focus-ring inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="link-create-kit"><Plus size={17} /> Create a study kit</Link></div>
+    <div className="slide-up flex flex-col justify-between gap-6 sm:flex-row sm:items-end"><div><p className="font-mono text-[11px] uppercase tracking-[.2em] text-primary">{greeting}, {displayName}</p><h1 className="mt-3 font-serif text-4xl leading-tight tracking-[-.04em] text-foreground sm:text-5xl">Your study workspace</h1><p className="mt-4 max-w-md text-sm leading-6 text-muted-foreground">Your study space for the ideas worth keeping.</p></div><Link href="/new" className="focus-ring inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="link-create-kit"><Plus size={17} /> Create a study kit</Link></div>
     <div className="mt-14 flex items-center justify-between border-b border-border pb-3"><h2 className="text-sm font-semibold">Your kits <span className="ml-1 text-muted-foreground">{kits.length}</span></h2><button className="focus-ring flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground" onClick={() => setKits([...kits].sort((a, b) => a.title.localeCompare(b.title)))} data-testid="button-sort-kits"><Search size={14} /> Sort alphabetically</button></div>
     <div className="mt-5 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
       {kits.map((kit, index) => <KitCard key={kit.id} kit={kit} index={index} onOpen={() => setLocation(`/kit/${kit.id}`)} onRemove={() => remove(kit.id)} />)}
@@ -447,5 +453,17 @@ function PracticeExam({ kit, progress, update }: { kit: LocalKit; progress: Prog
 function Router() {
   return <ErrorBoundary><Shell><Switch><Route path="/" component={LibraryPage} /><Route path="/new" component={NewPage} /><Route path="/calendar" component={CalendarPage} /><Route path="/kit/:id" component={KitPage} /><Route component={NotFound} /></Switch></Shell></ErrorBoundary>;
 }
-function App() { return <QueryClientProvider client={queryClient}><TooltipProvider><Router /><Toaster /></TooltipProvider></QueryClientProvider>; }
+function App() {
+  const [user, setUser] = useState<AuthUser | null>(() => getStoredUser());
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    void getCurrentUser().then(setUser).catch(() => setUser(null)).finally(() => setChecking(false));
+  }, []);
+
+  if (checking) return <main className="flex min-h-[100dvh] items-center justify-center bg-background text-sm text-muted-foreground">Loading workspace…</main>;
+  if (!user) return <AuthPage onAuthenticated={setUser} />;
+
+  return <QueryClientProvider client={queryClient}><TooltipProvider><Router /><Toaster /></TooltipProvider></QueryClientProvider>;
+}
 export default App;
