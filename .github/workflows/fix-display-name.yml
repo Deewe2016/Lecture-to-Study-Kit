@@ -1,0 +1,38 @@
+name: Fix Library displayName scope
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add displayName to LibraryPage
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('artifacts/study-kit/src/App.tsx')
+          s = p.read_text()
+          old = "function LibraryPage() {\n  const hour = new Date().getHours();"
+          new = "function LibraryPage() {\n  const user = getStoredUser();\n  const displayName = user?.name || 'Student';\n  const hour = new Date().getHours();"
+          if old not in s:
+              raise SystemExit('LibraryPage pattern not found')
+          if "function LibraryPage() {\n  const user = getStoredUser();" in s:
+              raise SystemExit('displayName already fixed')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit fix and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add artifacts/study-kit/src/App.tsx
+          git rm .github/workflows/fix-display-name.yml
+          git commit -m 'Fix Library displayName scope'
+          git push
