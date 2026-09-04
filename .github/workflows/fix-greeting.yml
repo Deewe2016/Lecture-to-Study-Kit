@@ -1,0 +1,44 @@
+name: Fix greeting scope
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Fix greeting scope in App.tsx
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('artifacts/study-kit/src/App.tsx')
+          text = path.read_text()
+          old = "function LibraryPage() {\n  const [, setLocation] = useLocation();"
+          new = "function LibraryPage() {\n  const hour = new Date().getHours();\n  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';\n  const [, setLocation] = useLocation();"
+
+          if old in text and "function LibraryPage() {\n  const hour = new Date().getHours();" not in text:
+              path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Commit fix and remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-greeting.yml
+          git add artifacts/study-kit/src/App.tsx
+          if git diff --cached --quiet; then
+            echo "No changes needed."
+            exit 0
+          fi
+          git commit -m "Fix greeting scope in study kit"
+          git push
