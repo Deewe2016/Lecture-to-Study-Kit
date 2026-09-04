@@ -172,6 +172,8 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 function LibraryPage() {
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const [, setLocation] = useLocation();
   const [kits, setKits] = useState<LocalKit[]>([]);
   const [kitsReady, setKitsReady] = useState(false);
