@@ -1,3 +1,4 @@
+// Large uploads never enter the Vercel request body: the browser uploads directly to Supabase Storage first.
 const SUPABASE_HOST_SUFFIX = '.supabase.co';
 const SUPABASE_BUCKET_PATH = '/storage/v1/object/public/video-uploads/';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
