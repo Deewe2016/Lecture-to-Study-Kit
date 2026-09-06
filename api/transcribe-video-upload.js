@@ -1,98 +1,67 @@
-const MAX_UPLOAD_BYTES = 4.5 * 1024 * 1024;
+const SUPABASE_HOST_SUFFIX = '.supabase.co';
+const SUPABASE_BUCKET_PATH = '/storage/v1/object/public/video-uploads/';
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
-function getContentType(req) {
-  const value = req.headers["content-type"];
-  return typeof value === "string" ? value.split(";")[0].trim().toLowerCase() : "application/octet-stream";
-}
-
-function getFileName(req, contentType) {
-  const header = req.headers["x-file-name"];
-  if (typeof header === "string" && header.trim()) return header.trim();
-  const extension = contentType.startsWith("video/") ? ".mp4" : contentType === "audio/mpeg" ? ".mp3" : contentType === "audio/mp4" ? ".m4a" : ".audio";
-  return `lecture${extension}`;
-}
-
-async function readRequestBody(req) {
-  const chunks = [];
-  let total = 0;
-
-  for await (const chunk of req) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    total += buffer.length;
-    if (total > MAX_UPLOAD_BYTES) {
-      throw Object.assign(new Error("This upload is too large for the current Vercel upload route. Please use a video under 4.5 MB."), { statusCode: 413 });
-    }
-    chunks.push(buffer);
+function isAllowedSupabaseVideoUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' &&
+      url.hostname.endsWith(SUPABASE_HOST_SUFFIX) &&
+      url.pathname.includes(SUPABASE_BUCKET_PATH);
+  } catch {
+    return false;
   }
-
-  return Buffer.concat(chunks);
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed." });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed.' });
 
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "GROQ_API_KEY is not configured in Vercel environment variables." });
-
-  const contentType = getContentType(req);
-  const supported = new Set([
-    "video/mp4",
-    "video/webm",
-    "video/mpeg",
-    "video/ogg",
-    "audio/flac",
-    "audio/mpeg",
-    "audio/mp4",
-    "audio/ogg",
-    "audio/wav",
-    "audio/webm",
-    "audio/x-wav",
-  ]);
-  if (!supported.has(contentType)) {
-    return res.status(415).json({ error: `Unsupported upload type: ${contentType}. Groq supports MP4, WebM, MPEG, FLAC, MP3, M4A, OGG, and WAV.` });
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GROQ_API_KEY is not configured in Vercel environment variables.' });
   }
 
   try {
-    const buffer = await readRequestBody(req);
-    if (buffer.length === 0) return res.status(400).json({ error: "The uploaded file is empty." });
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    const url = typeof body.url === 'string' ? body.url.trim() : '';
+    const fileName = typeof body.fileName === 'string' && body.fileName.trim() ? body.fileName.trim() : 'lecture.mp4';
+
+    if (!url) return res.status(400).json({ error: 'No uploaded video URL was provided.' });
+    if (!isAllowedSupabaseVideoUrl(url)) {
+      return res.status(400).json({ error: 'The uploaded video URL is not a valid public video-uploads Supabase URL.' });
+    }
 
     const form = new FormData();
-    form.append("file", new Blob([buffer], { type: contentType }), getFileName(req, contentType));
-    form.append("model", "whisper-large-v3-turbo");
-    form.append("response_format", "json");
+    form.append('url', url);
+    form.append('model', 'whisper-large-v3-turbo');
+    form.append('response_format', 'json');
 
-    const groqResponse = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-      method: "POST",
+    const groqResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
     });
 
+    const responseText = await groqResponse.text();
     if (!groqResponse.ok) {
-      const body = await groqResponse.text().catch(() => "");
-      let message = body.slice(0, 500);
+      let message = responseText.slice(0, 500);
       try {
-        const parsed = JSON.parse(body);
+        const parsed = JSON.parse(responseText);
         message = parsed?.error?.message || message;
       } catch {}
+      console.error('Groq transcription failed:', groqResponse.status, message);
       return res.status(groqResponse.status).json({ error: `Groq transcription failed: ${message}` });
     }
 
-    const data = await groqResponse.json();
-    if (!data?.text?.trim()) return res.status(422).json({ error: "No speech was detected in this upload." });
+    const data = JSON.parse(responseText);
+    if (!data?.text?.trim()) {
+      return res.status(422).json({ error: 'No speech was detected in this upload.' });
+    }
 
-    return res.status(200).json({
-      text: data.text.trim(),
-      title: getFileName(req, contentType),
-    });
+    return res.status(200).json({ text: data.text.trim(), title: fileName });
   } catch (error) {
-    const status = Number(error?.statusCode) || 500;
-    console.error("Video transcription failed:", error);
-    return res.status(status).json({ error: error instanceof Error ? error.message : "Could not transcribe this upload." });
+    console.error('Video transcription failed:', error);
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : 'Could not transcribe this upload.',
+    });
   }
 }
