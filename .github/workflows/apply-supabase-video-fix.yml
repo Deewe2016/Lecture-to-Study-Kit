@@ -1,8 +1,6 @@
 name: Apply Supabase video upload fix
 
-on:
-  push:
-    branches: [main]
+on: push
 
 permissions:
   contents: write
@@ -11,122 +9,23 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Enable pnpm
-        run: corepack enable
-
-      - name: Install resumable upload client
-        run: pnpm add tus-js-client --filter @workspace/study-kit
-
-      - name: Patch video upload flow
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-
-          app_path = Path('artifacts/study-kit/src/App.tsx')
-          text = app_path.read_text()
-
-          if "import * as tus from 'tus-js-client';" not in text:
-              text = text.replace("import * as pdfjsLib from 'pdfjs-dist';", "import * as pdfjsLib from 'pdfjs-dist';\nimport * as tus from 'tus-js-client';")
-
-          old_auth = "import { getCurrentUser, getStoredUser, signOut, type AuthUser } from '@/lib/auth';"
-          new_auth = "import { getCurrentUser, getStoredUser, getAccessToken, getSupabaseUploadConfig, signOut, type AuthUser } from '@/lib/auth';"
-          text = text.replace(old_auth, new_auth)
-
-          pattern = re.compile(r"  if \(sourceMode === 'video'\) \{[\s\S]*?    return;\n  \}\n", re.M)
-          replacement = '''  if (sourceMode === 'video') {
-    try {
-      let transcript;
-      if (videoFile) {
-        const accessToken = getAccessToken();
-        const storedUser = getStoredUser();
-        if (!accessToken || !storedUser) throw new Error('Your session expired. Please sign in again before uploading a video.');
-
-        const { url: supabaseUrl, anonKey } = getSupabaseUploadConfig();
-        const projectRef = new URL(supabaseUrl).hostname.split('.')[0];
-        const endpoint = `https://${projectRef}.storage.supabase.co/storage/v1/upload/resumable`;
-        const safeName = videoFile.name.replace(/[^a-zA-Z0-9._-]+/g, '-');
-        const objectName = `${storedUser.id}/${Date.now()}-${safeName}`;
-        const contentType = videoFile.type || 'video/mp4';
-
-        setStage('generating');
-        setError('Uploading video…');
-
-        await new Promise<void>((resolve, reject) => {
-          const upload = new tus.Upload(videoFile, {
-            endpoint,
-            retryDelays: [0, 3000, 5000, 10000, 20000],
-            chunkSize: 6 * 1024 * 1024,
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              apikey: anonKey,
-            },
-            metadata: {
-              bucketName: 'video-uploads',
-              objectName,
-              contentType,
-              cacheControl: '3600',
-            },
-            onError: reject,
-            onProgress: (bytesUploaded, bytesTotal) => {
-              const percent = Math.round((bytesUploaded / bytesTotal) * 100);
-              setError(`Uploading video… ${percent}%`);
-            },
-            onSuccess: () => resolve(),
-          });
-
-          void upload.findPreviousUploads().then((previousUploads) => {
-            if (previousUploads.length > 0) upload.resumeFromPreviousUpload(previousUploads[0]);
-            upload.start();
-          }).catch(reject);
-        });
-
-        const publicPath = objectName.split('/').map(encodeURIComponent).join('/');
-        const publicUrl = `${supabaseUrl}/storage/v1/object/public/video-uploads/${publicPath}`;
-        setError('Transcribing video…');
-
-        const uploadResponse = await fetch('/api/transcribe-video-upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: publicUrl, fileName: videoFile.name, mimeType: contentType }),
-        });
-        const payload = await uploadResponse.json().catch(() => null) as { error?: string; text?: string; title?: string } | null;
-        if (!uploadResponse.ok) throw new Error(payload?.error || 'Could not transcribe this upload.');
-        transcript = payload as { text: string; title: string };
-        setError('');
-      } else {
-        transcript = await transcribeVideo({ url: videoUrl.trim() || null, fileName: null, fileData: null, mimeType: null });
-      }
-      generationMaterials = [{ name: transcript.title, kind: 'transcript', text: transcript.text }];
-    } catch (transcriptionError) {
-      setStage('error');
-      setError(transcriptionError instanceof Error ? transcriptionError.message : 'Could not transcribe this video.');
-      return;
-    }
-  }
-'''
-          text, count = pattern.subn(replacement, text, count=1)
-          if count != 1:
-              raise SystemExit('Could not locate the existing video transcription block in App.tsx')
-
-          app_path.write_text(text)
-          print('Patched App.tsx')
-          PY
-
-      - name: Verify and commit
-        run: |
-          pnpm --filter @workspace/study-kit typecheck
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm add tus-js-client --filter @workspace/study-kit
+      - run: node scripts/apply-supabase-video-fix.mjs
+      - run: pnpm --filter @workspace/study-kit typecheck
+      - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add artifacts/study-kit/src/App.tsx artifacts/study-kit/package.json pnpm-lock.yaml
-          if git diff --cached --quiet; then
-            echo "No changes needed."
-          else
-            git commit -m "Fix Supabase video upload and Groq transcription"
-            git push
-          fi
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Fix Supabase video upload and Groq transcription"
+          git push
