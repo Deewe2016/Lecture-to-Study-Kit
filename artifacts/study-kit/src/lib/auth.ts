@@ -129,3 +129,12 @@ export function getStoredUser(): AuthUser | null {
   const session = readSession();
   return session ? toUser(session.user) : null;
 }
+
+export function getAccessToken(): string | null {
+  return readSession()?.access_token || null;
+}
+
+export function getSupabaseUploadConfig() {
+  ensureConfigured();
+  return { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY };
+}
