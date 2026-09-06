@@ -1,0 +1,52 @@
+name: Apply final video transcription fix
+on: push
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.30.3 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm add tus-js-client --filter @workspace/study-kit
+      - run: node scripts/apply-supabase-video-fix-final.mjs
+      - name: Replace Groq endpoint
+        run: |
+          cat > api/transcribe-video-upload.js <<'EOF'
+          export default async function handler(req, res) {
+            if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed.' });
+            const apiKey = process.env.GROQ_API_KEY;
+            if (!apiKey) return res.status(500).json({ error: 'GROQ_API_KEY is not configured in Vercel.' });
+            const { url, fileName } = req.body || {};
+            if (!url || typeof url !== 'string') return res.status(400).json({ error: 'No Supabase video URL was provided.' });
+            try {
+              const parsed = new URL(url);
+              if (!parsed.hostname.endsWith('.supabase.co') || !parsed.pathname.includes('/storage/v1/object/public/video-uploads/')) return res.status(400).json({ error: 'Invalid Supabase Storage public URL.' });
+              const form = new FormData(); form.append('url', url); form.append('model', 'whisper-large-v3-turbo'); form.append('response_format', 'json');
+              let response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method:'POST', headers:{Authorization:`Bearer ${apiKey}`}, body:form });
+              if (!response.ok) {
+                const fileResponse = await fetch(url);
+                if (!fileResponse.ok) throw new Error(`Supabase public URL is not accessible (${fileResponse.status}).`);
+                const raw = new FormData(); raw.append('file', await fileResponse.blob(), fileName || 'lecture.mp4'); raw.append('model','whisper-large-v3-turbo'); raw.append('response_format','json');
+                response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method:'POST', headers:{Authorization:`Bearer ${apiKey}`}, body:raw });
+              }
+              if (!response.ok) { const body=await response.text().catch(()=> ''); let msg=body.slice(0,500); try{msg=JSON.parse(body)?.error?.message||msg}catch{} return res.status(response.status).json({error:`Groq transcription failed: ${msg}`}); }
+              const data=await response.json();
+              if (!data?.text?.trim()) return res.status(422).json({error:'No speech was detected in this upload.'});
+              return res.status(200).json({text:data.text.trim(),title:fileName||'Lecture transcript'});
+            } catch (error) { console.error(error); return res.status(500).json({error:error instanceof Error?error.message:'Could not transcribe this upload.'}); }
+          }
+          EOF
+      - run: pnpm --filter @workspace/study-kit typecheck
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add artifacts/study-kit/src/App.tsx artifacts/study-kit/src/lib/auth.ts artifacts/study-kit/package.json pnpm-lock.yaml api/transcribe-video-upload.js
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Fix Supabase video upload and Groq transcription'
+          git push
