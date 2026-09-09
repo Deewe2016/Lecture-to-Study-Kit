@@ -5,6 +5,7 @@
 const SUPABASE_HOST_SUFFIX = '.supabase.co';
 const SUPABASE_BUCKET_PATH = '/storage/v1/object/public/video-uploads/';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+const GROQ_FILE_LIMIT = 25 * 1024 * 1024;
 
 function isAllowedSupabaseVideoUrl(value) {
   try {
@@ -102,6 +103,17 @@ export default async function handler(req, res) {
       if (!fileResponse.ok) {
         return res.status(502).json({
           error: `Supabase video could not be fetched for transcription (HTTP ${fileResponse.status}). Groq URL attempt: ${firstError}`,
+        });
+      }
+
+      const contentLength = Number(
+        fileResponse.headers.get('content-length') || '0',
+      );
+
+      if (contentLength > GROQ_FILE_LIMIT) {
+        return res.status(413).json({
+          error:
+            `This video is ${Math.round(contentLength / 1024 / 1024)} MB, which is above the 25 MB Groq file limit. The browser should compress large videos before upload; please try again with the latest version of the app.`,
         });
       }
 
