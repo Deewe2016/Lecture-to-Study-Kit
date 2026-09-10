@@ -455,6 +455,149 @@ function makeId() {
  * This deliberately uses the native fetch API instead of tus-js-client,
  * so App.tsx does not require another npm dependency.
  */
+async function compressVideoForTranscription(
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<File> {
+  const targetBytes = 22 * 1024 * 1024;
+
+  if (!file.type.startsWith('video/') || file.size <= 25 * 1024 * 1024) {
+    return file;
+  }
+
+  if (
+    typeof MediaRecorder === 'undefined' ||
+    !('captureStream' in HTMLVideoElement.prototype)
+  ) {
+    throw new Error(
+      'This browser cannot compress a large video before transcription. Please use Chrome or Edge, or choose a video under 25 MB.',
+    );
+  }
+
+  const video = document.createElement('video');
+  const objectUrl = URL.createObjectURL(file);
+  video.src = objectUrl;
+  // Mute playback so browser autoplay policy does not block the compression pass.
+  // The captured audio track is still added to the output stream.
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = 'metadata';
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () =>
+        reject(new Error('The selected video could not be opened.'));
+    });
+
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (!duration) {
+      throw new Error('The selected video has no readable duration.');
+    }
+
+    const scale = Math.min(
+      1,
+      1280 / Math.max(video.videoWidth || 1280, 1),
+      720 / Math.max(video.videoHeight || 720, 1),
+    );
+    const width = Math.max(
+      2,
+      Math.round((video.videoWidth || 1280) * scale / 2) * 2,
+    );
+    const height = Math.max(
+      2,
+      Math.round((video.videoHeight || 720) * scale / 2) * 2,
+    );
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+      throw new Error('Your browser could not prepare the video encoder.');
+    }
+
+      const videoStream = canvas.captureStream(24);
+    const sourceStream = (
+      video as HTMLVideoElement & {
+        captureStream: () => MediaStream;
+      }
+    ).captureStream();
+
+    for (const track of sourceStream.getAudioTracks()) {
+      videoStream.addTrack(track);
+    }
+
+    const mimeType = [
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm',
+    ].find((type) => MediaRecorder.isTypeSupported(type));
+
+    if (!mimeType) {
+      throw new Error(
+        'This browser does not support the video format needed for compression. Please use Chrome or Edge.',
+      );
+    }
+
+    const chunks: Blob[] = [];
+    const recorder = new MediaRecorder(videoStream, {
+      mimeType,
+      videoBitsPerSecond: 800_000,
+      audioBitsPerSecond: 64_000,
+    });
+
+    let drawFrame = 0;
+
+    const compressed = new Promise<Blob>((resolve, reject) => {
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onerror = () =>
+        reject(new Error('The browser could not compress this video.'));
+      recorder.onstop = () => {
+        window.cancelAnimationFrame(drawFrame);
+        resolve(new Blob(chunks, { type: mimeType }));
+      };
+    });
+
+    const draw = () => {
+      if (video.paused || video.ended) return;
+      context.drawImage(video, 0, 0, width, height);
+      onProgress(
+        Math.min(99, Math.round((video.currentTime / duration) * 100)),
+      );
+      drawFrame = window.requestAnimationFrame(draw);
+    };
+
+    video.onended = () => {
+      if (recorder.state !== 'inactive') recorder.stop();
+      videoStream.getTracks().forEach((track) => track.stop());
+      sourceStream.getTracks().forEach((track) => track.stop());
+    };
+
+    recorder.start(1000);
+    await video.play();
+    draw();
+
+    const blob = await compressed;
+
+    if (blob.size > targetBytes) {
+      throw new Error(
+        `This video is still ${Math.round(blob.size / 1024 / 1024)} MB after compression. Please choose a shorter video.`,
+      );
+    }
+
+    onProgress(100);
+    const baseName = file.name.replace(/\.[^/.]+$/, '') || 'lecture';
+
+    return new File([blob], `${baseName}.webm`, { type: mimeType });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 async function uploadVideoToSupabase(
   file: File,
   onProgress: (percent: number) => void,
@@ -1344,6 +1487,38 @@ function NewPage() {
         };
 
         if (videoFile) {
+          let uploadFile = videoFile;
+
+          if (
+            videoFile.type.startsWith('video/') &&
+            videoFile.size > 25 * 1024 * 1024
+          ) {
+            setVideoUploadProgress(0);
+            setStageLabel(
+              'Compressing your video for transcription…',
+            );
+
+            uploadFile =
+              await compressVideoForTranscription(
+                videoFile,
+                (percent) => {
+                  setVideoUploadProgress(percent);
+                  setProgress(
+                    Math.max(
+                      12,
+                      Math.min(
+                        24,
+                        12 + Math.round(percent * 0.12),
+                      ),
+                    ),
+                  );
+                  setStageLabel(
+                    `Compressing video… ${percent}%`,
+                  );
+                },
+              );
+          }
+
           setVideoUploadProgress(0);
           setStageLabel(
             'Uploading your video directly to secure storage',
@@ -1351,26 +1526,18 @@ function NewPage() {
 
           const publicUrl =
             await uploadVideoToSupabase(
-              videoFile,
+              uploadFile,
               (percent) => {
-                setVideoUploadProgress(
-                  percent,
-                );
-
+                setVideoUploadProgress(percent);
                 setProgress(
                   Math.max(
-                    12,
+                    24,
                     Math.min(
                       35,
-                      12 +
-                        Math.round(
-                          percent *
-                            0.23,
-                        ),
+                      24 + Math.round(percent * 0.11),
                     ),
                   ),
                 );
-
                 setStageLabel(
                   percent < 100
                     ? `Uploading video… ${percent}%`
@@ -1396,10 +1563,10 @@ function NewPage() {
                 body: JSON.stringify({
                   url: publicUrl,
                   fileName:
-                    videoFile.name,
+                    uploadFile.name,
                   mimeType:
-                    videoFile.type ||
-                    'video/mp4',
+                    uploadFile.type ||
+                    'video/webm',
                 }),
               },
             );
