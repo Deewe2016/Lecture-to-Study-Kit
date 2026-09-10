@@ -636,7 +636,9 @@ async function uploadVideoToSupabase(
     'audio/flac',
   ]);
 
-  if (file.type && !supportedTypes.has(file.type)) {
+  const normalizedType = (file.type || '').split(';', 1)[0].trim().toLowerCase();
+
+  if (normalizedType && !supportedTypes.has(normalizedType)) {
     throw new Error(
       'Unsupported video format. Please use MP4, MOV, WebM, or a supported audio file.',
     );
@@ -651,7 +653,7 @@ async function uploadVideoToSupabase(
 
   const objectName = `${userId}/${Date.now()}-${safeName}`;
 
-  const contentType = file.type || 'video/mp4';
+  const contentType = normalizedType || 'video/mp4';
 
   const endpoint = `https://${projectRef}.storage.supabase.co/storage/v1/upload/resumable`;
 
@@ -1565,7 +1567,7 @@ function NewPage() {
                   fileName:
                     uploadFile.name,
                   mimeType:
-                    uploadFile.type ||
+                    (uploadFile.type || '').split(';', 1)[0].trim().toLowerCase() ||
                     'video/webm',
                 }),
               },
