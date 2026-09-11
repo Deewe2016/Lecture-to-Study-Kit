@@ -1,5 +1,5 @@
 import { fetchTranscript } from 'youtube-transcript';
-import youtubedl from 'youtube-dl-exec';
+import { Innertube } from 'youtubei.js';
 
 export const config = { maxDuration: 60 };
 
@@ -34,53 +34,59 @@ async function getCaptionTranscript(videoId) {
   return text;
 }
 
-function getAudioMimeType(extension) {
+function getAudioMimeType(mimeType, extension) {
+  const normalized = (mimeType || '').split(';', 1)[0].trim().toLowerCase();
+  if (normalized.startsWith('audio/')) return normalized;
+
   switch ((extension || '').toLowerCase()) {
     case 'm4a': return 'audio/mp4';
     case 'mp3': return 'audio/mpeg';
     case 'ogg': return 'audio/ogg';
     case 'wav': return 'audio/wav';
-    default: return 'audio/webm';
+    case 'webm': return 'audio/webm';
+    default: return 'audio/mp4';
   }
 }
 
-async function downloadYouTubeAudio(url) {
-  const info = await youtubedl(url, {
-    dumpSingleJson: true,
-    skipDownload: true,
-    noPlaylist: true,
-    quiet: true,
-    noWarnings: true,
+async function downloadYouTubeAudio(videoId) {
+  // Pure JavaScript/Node.js YouTube extraction. No Python, yt-dlp, or external
+  // executable is used. youtubei.js returns a Web ReadableStream in Node.
+  const youtube = await Innertube.create();
+  const stream = await youtube.download(videoId, {
+    type: 'audio',
+    quality: 'best',
   });
 
-  const extension = info?.ext || 'webm';
-  const mimeType = getAudioMimeType(extension);
-  const subprocess = youtubedl.exec(url, {
-    format: 'bestaudio',
-    output: '-',
-    noPlaylist: true,
-    quiet: true,
-    noWarnings: true,
-  }, { timeout: 50000 });
+  if (!stream) throw new Error('YouTube did not provide an audio stream.');
 
+  const reader = stream.getReader();
   const chunks = [];
   let totalBytes = 0;
   const maxBytes = 25 * 1024 * 1024;
-  subprocess.stdout.on('data', (chunk) => {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    totalBytes += buffer.length;
-    if (totalBytes <= maxBytes) chunks.push(buffer);
-    else subprocess.kill('SIGKILL');
-  });
 
   try {
-    await subprocess;
-  } catch (error) {
-    if (totalBytes > maxBytes) throw new Error("The YouTube audio is larger than Groq's 25 MB file-upload limit.");
-    throw error;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      const chunk = Buffer.from(value);
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        throw new Error("The YouTube audio is larger than Groq's 25 MB file-upload limit.");
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
   }
 
-  if (!chunks.length) throw new Error('yt-dlp returned no audio data.');
+  if (!chunks.length) throw new Error('YouTube returned no audio data.');
+
+  // youtubei.js selects an audio format for us. Groq accepts common audio
+  // containers directly; m4a/mp4 is the usual result for best audio.
+  const extension = 'm4a';
+  const mimeType = getAudioMimeType('audio/mp4', extension);
   return { audio: Buffer.concat(chunks), extension, mimeType };
 }
 
@@ -125,11 +131,11 @@ export default async function handler(req, res) {
       const text = await getCaptionTranscript(videoId);
       return res.status(200).json({ text, title: 'YouTube lecture transcript' });
     } catch (captionError) {
-      console.warn('YouTube captions unavailable; falling back to yt-dlp + Groq:', captionError);
+      console.warn('YouTube captions unavailable; falling back to youtubei.js + Groq:', captionError);
     }
 
-    // If captions are unavailable, download audio with yt-dlp and transcribe it with Groq Whisper.
-    const { audio, extension, mimeType } = await downloadYouTubeAudio(url);
+    // No captions: download the audio directly with youtubei.js, then send it to Groq Whisper.
+    const { audio, extension, mimeType } = await downloadYouTubeAudio(videoId);
     const text = await transcribeWithGroq(audio, extension, mimeType);
     return res.status(200).json({ text, title: 'YouTube lecture transcript' });
   } catch (error) {
