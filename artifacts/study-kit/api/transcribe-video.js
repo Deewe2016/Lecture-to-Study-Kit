@@ -3,6 +3,9 @@ import { Innertube } from 'youtubei.js';
 
 export const config = { maxDuration: 60 };
 
+const PRIVATE_OR_AGE_RESTRICTED_MESSAGE =
+  'This video is private or age-restricted. Please try a public YouTube video.';
+
 function getYouTubeVideoId(value) {
   try {
     const url = new URL(value);
@@ -46,6 +49,21 @@ function getAudioMimeType(mimeType, extension) {
     case 'webm': return 'audio/webm';
     default: return 'audio/mp4';
   }
+}
+
+function isPrivateOrAgeRestrictedError(error) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes('login required') ||
+    normalized.includes('age-restricted') ||
+    normalized.includes('age restricted') ||
+    normalized.includes('private video') ||
+    normalized.includes('video is private') ||
+    normalized.includes('sign in to confirm your age') ||
+    normalized.includes('confirm your age')
+  );
 }
 
 async function downloadYouTubeAudio(videoId) {
@@ -131,15 +149,35 @@ export default async function handler(req, res) {
       const text = await getCaptionTranscript(videoId);
       return res.status(200).json({ text, title: 'YouTube lecture transcript' });
     } catch (captionError) {
+      // If YouTube itself tells us the video requires login/age verification,
+      // do not attempt a fallback that will fail for the same reason.
+      if (isPrivateOrAgeRestrictedError(captionError)) {
+        return res.status(403).json({ error: PRIVATE_OR_AGE_RESTRICTED_MESSAGE });
+      }
+
       console.warn('YouTube captions unavailable; falling back to youtubei.js + Groq:', captionError);
     }
 
     // No captions: download the audio directly with youtubei.js, then send it to Groq Whisper.
-    const { audio, extension, mimeType } = await downloadYouTubeAudio(videoId);
-    const text = await transcribeWithGroq(audio, extension, mimeType);
-    return res.status(200).json({ text, title: 'YouTube lecture transcript' });
+    try {
+      const { audio, extension, mimeType } = await downloadYouTubeAudio(videoId);
+      const text = await transcribeWithGroq(audio, extension, mimeType);
+      return res.status(200).json({ text, title: 'YouTube lecture transcript' });
+    } catch (fallbackError) {
+      if (isPrivateOrAgeRestrictedError(fallbackError)) {
+        return res.status(403).json({ error: PRIVATE_OR_AGE_RESTRICTED_MESSAGE });
+      }
+      throw fallbackError;
+    }
   } catch (error) {
     console.error('YouTube transcription failed:', error);
+
+    // Keep all expected YouTube access failures inside the API response so the
+    // frontend can show a normal error state instead of crashing.
+    if (isPrivateOrAgeRestrictedError(error)) {
+      return res.status(403).json({ error: PRIVATE_OR_AGE_RESTRICTED_MESSAGE });
+    }
+
     return res.status(502).json({
       error: error instanceof Error ? error.message : 'Could not transcribe this YouTube video.',
     });
