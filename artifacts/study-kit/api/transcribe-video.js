@@ -1,8 +1,14 @@
+import { fetchTranscript } from 'youtube-transcript';
+import youtubedl from 'youtube-dl-exec';
+
+export const config = { maxDuration: 60 };
+
 function getYouTubeVideoId(value) {
   try {
     const url = new URL(value);
-    if (url.hostname === 'youtu.be') return url.pathname.slice(1).split('/')[0] || null;
-    if (url.hostname.endsWith('youtube.com')) {
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'youtu.be') return url.pathname.slice(1).split('/')[0] || null;
+    if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com')) {
       if (url.pathname === '/watch') return url.searchParams.get('v');
       const parts = url.pathname.split('/').filter(Boolean);
       if (parts[0] === 'shorts' || parts[0] === 'embed' || parts[0] === 'live') return parts[1] || null;
@@ -11,71 +17,79 @@ function getYouTubeVideoId(value) {
   return null;
 }
 
-async function getYouTubeAudioUrl(videoId) {
-  const pageResponse = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36',
-    },
-  });
-  if (!pageResponse.ok) throw new Error(`YouTube returned HTTP ${pageResponse.status}.`);
-  const html = await pageResponse.text();
-
-  const keyMatch = html.match(/(?:INNERTUBE_API_KEY|\"INNERTUBE_API_KEY\")\s*[:=]\s*[\"']([^\"']+)[\"']/);
-  const apiKey = keyMatch?.[1];
-  if (!apiKey) throw new Error('Could not initialize the YouTube player API.');
-
-  const clients = [
-    { name: 'WEB', version: '2.20260909.01.00' },
-    { name: 'WEB_EMBEDDED_PLAYER', version: '1.20260909.01.00' },
-    { name: 'VISIONOS', version: '1.0' },
-  ];
-
-  for (const client of clients) {
-    try {
-      const response = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36',
-        },
-        body: JSON.stringify({
-          videoId,
-          contentCheckOk: true,
-          racyCheckOk: true,
-          context: {
-            client: {
-              clientName: client.name,
-              clientVersion: client.version,
-              hl: 'en',
-              gl: 'US',
-            },
-          },
-        }),
-      });
-      if (!response.ok) continue;
-      const data = await response.json();
-      const formats = [
-        ...(data.streamingData?.adaptiveFormats || []),
-        ...(data.streamingData?.formats || []),
-      ];
-      const audio = formats
-        .filter((format) => typeof format.url === 'string' && /^audio\//.test(format.mimeType || ''))
-        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-      if (audio?.url) return audio.url;
-    } catch {
-      // Try the next YouTube player client.
-    }
-  }
-
-  throw new Error('YouTube did not provide a directly fetchable audio stream for this video.');
+function transcriptToText(transcript) {
+  if (!Array.isArray(transcript)) return '';
+  return transcript
+    .map((item) => (typeof item === 'string' ? item : item?.text || ''))
+    .map((text) => text.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
 }
 
-async function transcribeWithGroq(audioUrl) {
+async function getCaptionTranscript(videoId) {
+  const transcript = await fetchTranscript(videoId);
+  const text = transcriptToText(transcript);
+  if (!text) throw new Error('YouTube captions were empty.');
+  return text;
+}
+
+function getAudioMimeType(extension) {
+  switch ((extension || '').toLowerCase()) {
+    case 'm4a': return 'audio/mp4';
+    case 'mp3': return 'audio/mpeg';
+    case 'ogg': return 'audio/ogg';
+    case 'wav': return 'audio/wav';
+    default: return 'audio/webm';
+  }
+}
+
+async function downloadYouTubeAudio(url) {
+  const info = await youtubedl(url, {
+    dumpSingleJson: true,
+    skipDownload: true,
+    noPlaylist: true,
+    quiet: true,
+    noWarnings: true,
+  });
+
+  const extension = info?.ext || 'webm';
+  const mimeType = getAudioMimeType(extension);
+  const subprocess = youtubedl.exec(url, {
+    format: 'bestaudio',
+    output: '-',
+    noPlaylist: true,
+    quiet: true,
+    noWarnings: true,
+  }, { timeout: 50000 });
+
+  const chunks = [];
+  let totalBytes = 0;
+  const maxBytes = 25 * 1024 * 1024;
+  subprocess.stdout.on('data', (chunk) => {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes <= maxBytes) chunks.push(buffer);
+    else subprocess.kill('SIGKILL');
+  });
+
+  try {
+    await subprocess;
+  } catch (error) {
+    if (totalBytes > maxBytes) throw new Error("The YouTube audio is larger than Groq's 25 MB file-upload limit.");
+    throw error;
+  }
+
+  if (!chunks.length) throw new Error('yt-dlp returned no audio data.');
+  return { audio: Buffer.concat(chunks), extension, mimeType };
+}
+
+async function transcribeWithGroq(audio, extension, mimeType) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('GROQ_API_KEY is not configured in Vercel.');
 
   const form = new FormData();
-  form.append('url', audioUrl);
+  form.append('file', new Blob([audio], { type: mimeType }), `youtube-audio.${extension}`);
   form.append('model', 'whisper-large-v3-turbo');
   form.append('response_format', 'json');
 
@@ -106,8 +120,17 @@ export default async function handler(req, res) {
   if (!videoId) return res.status(400).json({ error: 'Add a valid YouTube video URL.' });
 
   try {
-    const audioUrl = await getYouTubeAudioUrl(videoId);
-    const text = await transcribeWithGroq(audioUrl);
+    // First try the video's existing captions. This avoids downloading audio entirely.
+    try {
+      const text = await getCaptionTranscript(videoId);
+      return res.status(200).json({ text, title: 'YouTube lecture transcript' });
+    } catch (captionError) {
+      console.warn('YouTube captions unavailable; falling back to yt-dlp + Groq:', captionError);
+    }
+
+    // If captions are unavailable, download audio with yt-dlp and transcribe it with Groq Whisper.
+    const { audio, extension, mimeType } = await downloadYouTubeAudio(url);
+    const text = await transcribeWithGroq(audio, extension, mimeType);
     return res.status(200).json({ text, title: 'YouTube lecture transcript' });
   } catch (error) {
     console.error('YouTube transcription failed:', error);
