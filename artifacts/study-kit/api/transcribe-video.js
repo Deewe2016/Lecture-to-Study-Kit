@@ -1,4 +1,5 @@
 import { fetchTranscript } from 'youtube-transcript';
+import { Innertube, UniversalCache } from 'youtubei.js';
 
 export const config = { maxDuration: 60 };
 
@@ -36,7 +37,6 @@ function transcriptToText(transcript) {
 function isPrivateOrAgeRestrictedError(error) {
   const message = error instanceof Error ? error.message : String(error || '');
   const normalized = message.toLowerCase();
-
   return (
     normalized.includes('login required') ||
     normalized.includes('age-restricted') ||
@@ -48,24 +48,125 @@ function isPrivateOrAgeRestrictedError(error) {
   );
 }
 
-function isCaptionUnavailableError(error) {
+function isNoCaptionsError(error) {
   const message = error instanceof Error ? error.message : String(error || '');
   const normalized = message.toLowerCase();
-
   return (
     normalized.includes('transcript is disabled') ||
     normalized.includes('no transcript') ||
     normalized.includes('transcripts disabled') ||
     normalized.includes('captions') ||
-    normalized.includes('transcript') ||
-    normalized.includes('subtitle')
+    normalized.includes('subtitle') ||
+    normalized.includes('no transcript')
   );
 }
 
 async function getCaptionTranscript(videoId) {
-  const transcript = await fetchTranscript(videoId);
-  const text = transcriptToText(transcript);
-  if (!text) throw new Error('YouTube captions were empty.');
+  // youtube-transcript 1.3.1 accepts a language option. Try the requested
+  // English variants in priority order, then let the package discover its
+  // available/auto-generated English transcript.
+  const languageAttempts = ['en', 'en-US', 'en-GB'];
+  let lastError = null;
+
+  for (const lang of languageAttempts) {
+    try {
+      const transcript = await fetchTranscript(videoId, { lang });
+      const text = transcriptToText(transcript);
+      if (text) return text;
+    } catch (error) {
+      lastError = error;
+      if (isPrivateOrAgeRestrictedError(error)) throw error;
+    }
+  }
+
+  try {
+    const transcript = await fetchTranscript(videoId);
+    const text = transcriptToText(transcript);
+    if (text) return text;
+  } catch (error) {
+    lastError = error;
+    if (isPrivateOrAgeRestrictedError(error)) throw error;
+  }
+
+  throw lastError || new Error('No YouTube captions were found.');
+}
+
+function getProxyUrl() {
+  const value = process.env.YOUTUBE_PROXY_URL?.trim();
+  return value || null;
+}
+
+async function createInnertube() {
+  const proxyUrl = getProxyUrl();
+  const options = {
+    cache: new UniversalCache(false),
+    generate_session_locally: true,
+  };
+
+  // If a YOUTUBE_PROXY_URL is configured, youtubei.js will use it for its
+  // requests. This keeps the fallback deployable on Vercel without changing
+  // the working direct-upload path.
+  if (proxyUrl) {
+    options.http = { proxy: proxyUrl };
+  }
+
+  return Innertube.create(options);
+}
+
+async function downloadAudio(videoId) {
+  const youtube = await createInnertube();
+  const info = await youtube.getBasicInfo(videoId);
+
+  const status = info.playability_status?.status;
+  if (status === 'LOGIN_REQUIRED' || status === 'ERROR') {
+    const reason = info.playability_status?.reason || '';
+    throw new Error(reason || status);
+  }
+
+  // Request audio only. youtubei.js selects an adaptive audio format and
+  // returns a stream; no video stream is downloaded.
+  const stream = await youtube.download(videoId, {
+    type: 'audio',
+    quality: 'best',
+    format: 'mp4',
+  });
+
+  const chunks = [];
+  let totalBytes = 0;
+  for await (const chunk of stream) {
+    const buffer = Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > 24 * 1024 * 1024) {
+      throw new Error('YouTube audio is too large for the Groq transcription fallback.');
+    }
+    chunks.push(buffer);
+  }
+
+  return Buffer.concat(chunks);
+}
+
+async function transcribeAudioWithGroq(audioBuffer) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error('GROQ_API_KEY is not configured.');
+
+  const form = new FormData();
+  form.append('file', new Blob([audioBuffer], { type: 'audio/mp4' }), 'youtube-audio.mp4');
+  form.append('model', 'whisper-large-v3-turbo');
+  form.append('response_format', 'json');
+
+  const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || `Groq transcription failed (${response.status}).`);
+  }
+
+  const text = typeof data?.text === 'string' ? data.text.trim() : '';
+  if (!text) throw new Error('Groq returned an empty transcription.');
   return text;
 }
 
@@ -81,9 +182,7 @@ export default async function handler(req, res) {
   if (!videoId) return res.status(400).json({ error: 'Add a valid YouTube video URL.' });
 
   try {
-    // YouTube URL transcription is intentionally captions-only. We do not use
-    // youtubei.js, ytdl-core, yt-dlp, or any audio downloader here because those
-    // approaches are unreliable from Vercel server IPs.
+    // 1) Captions first. This is intentionally the cheapest/most reliable path.
     try {
       const text = await getCaptionTranscript(videoId);
       return res.status(200).json({ text, title: 'YouTube lecture transcript' });
@@ -92,22 +191,31 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: PRIVATE_OR_AGE_RESTRICTED_MESSAGE });
       }
 
-      if (isCaptionUnavailableError(captionError)) {
-        return res.status(404).json({ error: NO_CAPTIONS_MESSAGE });
+      if (!isNoCaptionsError(captionError)) {
+        console.error('YouTube caption lookup failed; trying audio fallback:', captionError);
       }
+    }
 
-      console.error('YouTube caption lookup failed:', captionError);
+    // 2) No usable captions: audio-only youtubei.js -> Groq Whisper.
+    try {
+      const audio = await downloadAudio(videoId);
+      const text = await transcribeAudioWithGroq(audio);
+      return res.status(200).json({ text, title: 'YouTube lecture transcript' });
+    } catch (audioError) {
+      console.error('YouTube audio fallback failed:', audioError);
+      if (isPrivateOrAgeRestrictedError(audioError)) {
+        return res.status(403).json({ error: PRIVATE_OR_AGE_RESTRICTED_MESSAGE });
+      }
       return res.status(502).json({
-        error: 'Could not retrieve captions from this YouTube video. Please try another public video or upload the video file directly.',
+        error:
+          'Could not transcribe this YouTube video. Captions were unavailable and the audio fallback could not access the video. Please try another public video or upload the video file directly.',
       });
     }
   } catch (error) {
     console.error('YouTube transcription failed:', error);
-
     if (isPrivateOrAgeRestrictedError(error)) {
       return res.status(403).json({ error: PRIVATE_OR_AGE_RESTRICTED_MESSAGE });
     }
-
     return res.status(502).json({
       error: error instanceof Error ? error.message : 'Could not transcribe this YouTube video.',
     });
