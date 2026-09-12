@@ -1,8 +1,6 @@
 export const config = { maxDuration: 60 };
 
-const NO_CAPTIONS_MESSAGE = 'No captions found';
-const PRIVATE_OR_AGE_RESTRICTED_MESSAGE =
-  'This video is private or age-restricted. Please try a public YouTube video.';
+const FALLBACK_MESSAGE = 'Could not get captions. Please upload the video file directly instead.';
 
 function getYouTubeVideoId(value) {
   try {
@@ -14,16 +12,10 @@ function getYouTubeVideoId(value) {
     }
 
     if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com')) {
-      if (url.pathname === '/watch') {
-        // Only the v parameter is used, so playlist/list and other parameters
-        // are deliberately ignored.
-        return url.searchParams.get('v');
-      }
+      if (url.pathname === '/watch') return url.searchParams.get('v');
 
       const parts = url.pathname.split('/').filter(Boolean);
-      if (['shorts', 'embed', 'live'].includes(parts[0])) {
-        return parts[1] || null;
-      }
+      if (['shorts', 'embed', 'live'].includes(parts[0])) return parts[1] || null;
     }
   } catch {
     // Invalid URL is handled by the caller.
@@ -32,80 +24,71 @@ function getYouTubeVideoId(value) {
   return null;
 }
 
-function transcriptToText(data) {
-  if (!data || typeof data !== 'object') return '';
+function encodeTranscriptParams(videoId) {
+  return Buffer.from(`\n\x0b${videoId}`).toString('base64');
+}
 
-  const events = Array.isArray(data.events) ? data.events : [];
-  return events
-    .flatMap((event) => (Array.isArray(event.segs) ? event.segs : []))
-    .map((segment) => (typeof segment?.utf8 === 'string' ? segment.utf8 : ''))
+function extractTranscriptText(data) {
+  const texts = [];
+
+  function visit(value) {
+    if (!value || typeof value !== 'object') return;
+
+    if (typeof value.text === 'string') texts.push(value.text);
+
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+    } else {
+      for (const child of Object.values(value)) visit(child);
+    }
+  }
+
+  visit(data);
+  return texts
     .map((text) => text.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .join(' ')
     .trim();
 }
 
-function isPrivateOrAgeRestrictedResponse(response, bodyText) {
-  const normalized = `${response.status} ${bodyText}`.toLowerCase();
-  return (
-    response.status === 401 ||
-    response.status === 403 ||
-    normalized.includes('login required') ||
-    normalized.includes('age-restricted') ||
-    normalized.includes('age restricted') ||
-    normalized.includes('private video') ||
-    normalized.includes('confirm your age')
-  );
-}
+async function fetchInnertubeTranscript(videoId) {
+  const params = encodeTranscriptParams(videoId);
 
-async function fetchTimedText(videoId, lang) {
-  const params = new URLSearchParams({ v: videoId, fmt: 'json3' });
-  if (lang) params.set('lang', lang);
-
-  const url = `https://www.youtube.com/api/timedtext?${params.toString()}`;
-  const response = await fetch(url, {
+  const response = await fetch('https://www.youtube.com/youtubei/v1/get_transcript', {
+    method: 'POST',
     headers: {
-      Accept: 'application/json,text/plain,*/*',
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
       'User-Agent': 'Mozilla/5.0',
     },
+    body: JSON.stringify({
+      context: {
+        client: {
+          clientName: 'WEB',
+          clientVersion: '2.20240101',
+        },
+      },
+      params,
+    }),
   });
 
   const bodyText = await response.text();
-
-  if (!response.ok) {
-    const error = new Error(`YouTube timedtext returned HTTP ${response.status}`);
-    error.status = response.status;
-    error.privateOrAgeRestricted = isPrivateOrAgeRestrictedResponse(response, bodyText);
-    throw error;
-  }
-
-  if (!bodyText.trim()) return '';
+  let data = null;
 
   try {
-    return transcriptToText(JSON.parse(bodyText));
+    data = bodyText ? JSON.parse(bodyText) : null;
   } catch {
-    // A non-JSON/empty response means this caption attempt did not produce a
-    // usable transcript. The caller will try the next caption variant.
-    return '';
-  }
-}
-
-async function getCaptionTranscript(videoId) {
-  let lastError = null;
-
-  // Requested order: English, en-US, then no lang (auto-generated/available).
-  for (const lang of ['en', 'en-US', null]) {
-    try {
-      const text = await fetchTimedText(videoId, lang);
-      if (text) return text;
-    } catch (error) {
-      lastError = error;
-      if (error?.privateOrAgeRestricted) throw error;
-    }
+    data = null;
   }
 
-  if (lastError?.privateOrAgeRestricted) throw lastError;
-  return '';
+  if (!response.ok) {
+    throw new Error(`YouTube Innertube returned HTTP ${response.status}`);
+  }
+
+  const text = extractTranscriptText(data);
+  if (!text) throw new Error('YouTube Innertube returned no transcript text');
+
+  return text;
 }
 
 export default async function handler(req, res) {
@@ -120,7 +103,7 @@ export default async function handler(req, res) {
   const url = typeof input.url === 'string' ? input.url.trim() : '';
   const videoId = getYouTubeVideoId(url);
 
-  console.log(`[transcribe-video:${requestId}] request`, {
+  console.log(`[transcribe-video:${requestId}] Innertube request`, {
     hasUrl: Boolean(url),
     videoId,
   });
@@ -130,14 +113,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const text = await getCaptionTranscript(videoId);
+    const text = await fetchInnertubeTranscript(videoId);
 
-    if (!text) {
-      console.log(`[transcribe-video:${requestId}] no captions found`, { videoId });
-      return res.status(422).json({ error: NO_CAPTIONS_MESSAGE, requestId, code: 'NO_CAPTIONS' });
-    }
-
-    console.log(`[transcribe-video:${requestId}] transcript success`, {
+    console.log(`[transcribe-video:${requestId}] Innertube transcript success`, {
       videoId,
       textLength: text.length,
     });
@@ -148,23 +126,17 @@ export default async function handler(req, res) {
       requestId,
     });
   } catch (error) {
-    console.error(`[transcribe-video:${requestId}] timedtext lookup failed`, {
+    console.error(`[transcribe-video:${requestId}] Innertube transcript failed`, {
       videoId,
       name: error instanceof Error ? error.name : typeof error,
       message: error instanceof Error ? error.message : String(error || ''),
-      status: error?.status,
       stack: error instanceof Error ? error.stack : undefined,
     });
 
-    if (error?.privateOrAgeRestricted) {
-      return res.status(403).json({ error: PRIVATE_OR_AGE_RESTRICTED_MESSAGE, requestId });
-    }
-
-    // Do not turn a server/network failure into a false "no captions" result.
-    return res.status(502).json({
-      error: 'YouTube could not be reached from the server while fetching captions. Please try again or upload the video file directly.',
+    return res.status(422).json({
+      error: FALLBACK_MESSAGE,
       requestId,
-      code: 'YOUTUBE_ACCESS_FAILED',
+      code: 'CAPTIONS_UNAVAILABLE',
     });
   }
 }
