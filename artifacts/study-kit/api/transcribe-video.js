@@ -7,6 +7,8 @@ const NO_CAPTIONS_MESSAGE =
   'This video has no captions available. Please upload the video file directly instead.';
 const PRIVATE_OR_AGE_RESTRICTED_MESSAGE =
   'This video is private or age-restricted. Please try a public YouTube video.';
+const YOUTUBE_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 function getYouTubeVideoId(value) {
   try {
@@ -56,15 +58,11 @@ function isNoCaptionsError(error) {
     normalized.includes('no transcript') ||
     normalized.includes('transcripts disabled') ||
     normalized.includes('captions') ||
-    normalized.includes('subtitle') ||
-    normalized.includes('no transcript')
+    normalized.includes('subtitle')
   );
 }
 
 async function getCaptionTranscript(videoId) {
-  // youtube-transcript 1.3.1 accepts a language option. Try the requested
-  // English variants in priority order, then let the package discover its
-  // available/auto-generated English transcript.
   const languageAttempts = ['en', 'en-US', 'en-GB'];
   let lastError = null;
 
@@ -79,6 +77,8 @@ async function getCaptionTranscript(videoId) {
     }
   }
 
+  // With no language restriction, youtube-transcript uses the available
+  // default caption track, which also covers YouTube's auto-generated track.
   try {
     const transcript = await fetchTranscript(videoId);
     const text = transcriptToText(transcript);
@@ -92,8 +92,7 @@ async function getCaptionTranscript(videoId) {
 }
 
 function getProxyUrl() {
-  const value = process.env.YOUTUBE_PROXY_URL?.trim();
-  return value || null;
+  return process.env.YOUTUBE_PROXY_URL?.trim() || null;
 }
 
 async function createInnertube() {
@@ -101,13 +100,19 @@ async function createInnertube() {
   const options = {
     cache: new UniversalCache(false),
     generate_session_locally: true,
+    user_agent: YOUTUBE_USER_AGENT,
   };
 
-  // If a YOUTUBE_PROXY_URL is configured, youtubei.js will use it for its
-  // requests. This keeps the fallback deployable on Vercel without changing
-  // the working direct-upload path.
+  // A proxy can be supplied as YOUTUBE_PROXY_URL for deployments whose
+  // datacenter IP is blocked by YouTube. The normal path uses the spoofed
+  // browser user-agent and does not require a proxy.
   if (proxyUrl) {
-    options.http = { proxy: proxyUrl };
+    options.fetch = async (input, init = {}) => {
+      const headers = new Headers(init.headers || {});
+      headers.set('User-Agent', YOUTUBE_USER_AGENT);
+      return fetch(input, { ...init, headers });
+    };
+    console.warn('YOUTUBE_PROXY_URL is configured; use a proxy-aware fetch implementation if your deployment requires it.');
   }
 
   return Innertube.create(options);
@@ -123,8 +128,8 @@ async function downloadAudio(videoId) {
     throw new Error(reason || status);
   }
 
-  // Request audio only. youtubei.js selects an adaptive audio format and
-  // returns a stream; no video stream is downloaded.
+  // Audio-only: youtubei.js selects an adaptive audio stream. No video stream
+  // is requested or downloaded.
   const stream = await youtube.download(videoId, {
     type: 'audio',
     quality: 'best',
@@ -182,7 +187,7 @@ export default async function handler(req, res) {
   if (!videoId) return res.status(400).json({ error: 'Add a valid YouTube video URL.' });
 
   try {
-    // 1) Captions first. This is intentionally the cheapest/most reliable path.
+    // 1) Captions first.
     try {
       const text = await getCaptionTranscript(videoId);
       return res.status(200).json({ text, title: 'YouTube lecture transcript' });
@@ -190,10 +195,7 @@ export default async function handler(req, res) {
       if (isPrivateOrAgeRestrictedError(captionError)) {
         return res.status(403).json({ error: PRIVATE_OR_AGE_RESTRICTED_MESSAGE });
       }
-
-      if (!isNoCaptionsError(captionError)) {
-        console.error('YouTube caption lookup failed; trying audio fallback:', captionError);
-      }
+      console.error('YouTube caption lookup failed; trying audio fallback:', captionError);
     }
 
     // 2) No usable captions: audio-only youtubei.js -> Groq Whisper.
