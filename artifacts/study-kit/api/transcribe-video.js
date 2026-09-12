@@ -1,6 +1,7 @@
 export const config = { maxDuration: 60 };
 
-const FALLBACK_MESSAGE = 'Could not get captions. Please upload the video file directly instead.';
+const NO_CAPTIONS_MESSAGE = 'This video has no captions. Please upload the video file directly.';
+const API_KEY = process.env.YOUTUBE_API_KEY;
 
 function getYouTubeVideoId(value) {
   try {
@@ -12,10 +13,15 @@ function getYouTubeVideoId(value) {
     }
 
     if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com')) {
-      if (url.pathname === '/watch') return url.searchParams.get('v');
+      if (url.pathname === '/watch') {
+        // Only the v parameter is used; playlist parameters are intentionally ignored.
+        return url.searchParams.get('v');
+      }
 
       const parts = url.pathname.split('/').filter(Boolean);
-      if (['shorts', 'embed', 'live'].includes(parts[0])) return parts[1] || null;
+      if (['shorts', 'embed', 'live'].includes(parts[0])) {
+        return parts[1] || null;
+      }
     }
   } catch {
     // Invalid URL is handled by the caller.
@@ -24,71 +30,142 @@ function getYouTubeVideoId(value) {
   return null;
 }
 
-function encodeTranscriptParams(videoId) {
-  return Buffer.from(`\n\x0b${videoId}`).toString('base64');
-}
-
-function extractTranscriptText(data) {
-  const texts = [];
-
-  function visit(value) {
-    if (!value || typeof value !== 'object') return;
-
-    if (typeof value.text === 'string') texts.push(value.text);
-
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item);
-    } else {
-      for (const child of Object.values(value)) visit(child);
-    }
-  }
-
-  visit(data);
-  return texts
-    .map((text) => text.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join(' ')
+function normalizeText(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
-async function fetchInnertubeTranscript(videoId) {
-  const params = encodeTranscriptParams(videoId);
+function parseCaptionTrack(body) {
+  const raw = String(body || '').trim();
+  if (!raw) return '';
 
-  const response = await fetch('https://www.youtube.com/youtubei/v1/get_transcript', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'User-Agent': 'Mozilla/5.0',
-    },
-    body: JSON.stringify({
-      context: {
-        client: {
-          clientName: 'WEB',
-          clientVersion: '2.20240101',
-        },
-      },
-      params,
-    }),
+  // YouTube caption downloads are commonly returned as WebVTT or SRT.
+  if (/^WEBVTT(?:\s|$)/i.test(raw)) {
+    return normalizeText(
+      raw
+        .replace(/^WEBVTT[^\n]*\n?/i, '')
+        .replace(/\n?\d{2}:\d{2}:\d{2}[.,]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[.,]\d{3}[^\n]*\n?/g, '\n')
+        .replace(/\n?\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}\.\d{3}[^\n]*\n?/g, '\n')
+    );
+  }
+
+  // SRT: remove cue numbers and timestamp lines, leaving caption text.
+  const withoutSrtMetadata = raw
+    .split('\n')
+    .filter((line) => !/^\s*\d+\s*$/.test(line))
+    .filter((line) => !/^\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,\.]\d{3}/.test(line));
+
+  return normalizeText(withoutSrtMetadata.join('\n'));
+}
+
+async function listCaptionTracks(videoId) {
+  if (!API_KEY) {
+    throw new Error('YOUTUBE_API_KEY is missing from the Vercel environment variables');
+  }
+
+  const params = new URLSearchParams({
+    part: 'snippet',
+    videoId,
+    key: API_KEY,
   });
 
-  const bodyText = await response.text();
-  let data = null;
+  const response = await fetch(`https://www.googleapis.com/youtube/v3/captions?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
 
+  const body = await response.text();
+  let data = null;
   try {
-    data = bodyText ? JSON.parse(bodyText) : null;
+    data = body ? JSON.parse(body) : null;
   } catch {
     data = null;
   }
 
   if (!response.ok) {
-    throw new Error(`YouTube Innertube returned HTTP ${response.status}`);
+    const apiMessage = data?.error?.message || `YouTube Data API returned HTTP ${response.status}`;
+    throw new Error(apiMessage);
   }
 
-  const text = extractTranscriptText(data);
-  if (!text) throw new Error('YouTube Innertube returned no transcript text');
+  return Array.isArray(data?.items) ? data.items : [];
+}
 
-  return text;
+async function downloadCaptionTrack(trackId) {
+  if (!API_KEY) throw new Error('YOUTUBE_API_KEY is missing from the Vercel environment variables');
+
+  const params = new URLSearchParams({
+    id: trackId,
+    key: API_KEY,
+    tfmt: 'vtt',
+  });
+
+  const response = await fetch(`https://www.googleapis.com/youtube/v3/captions/download?${params.toString()}`, {
+    headers: { Accept: 'text/vtt, text/plain, */*' },
+  });
+
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Caption download failed with HTTP ${response.status}: ${body.slice(0, 300)}`);
+  }
+
+  return parseCaptionTrack(body);
+}
+
+function chooseCaptionTracks(items) {
+  return [...items].sort((a, b) => {
+    const aSnippet = a?.snippet || {};
+    const bSnippet = b?.snippet || {};
+
+    // Prefer English, then auto-generated English, then any available language.
+    const score = (snippet) => {
+      let value = 0;
+      if (snippet.language === 'en') value += 100;
+      else if (snippet.language?.startsWith('en')) value += 80;
+      if (snippet.trackKind === 'ASR') value += 10;
+      if (snippet.status === 'serving') value += 5;
+      return value;
+    };
+
+    return score(bSnippet) - score(aSnippet);
+  });
+}
+
+async function fetchYouTubeTranscript(videoId) {
+  const tracks = chooseCaptionTracks(await listCaptionTracks(videoId));
+
+  if (!tracks.length) {
+    return { text: '', trackId: null };
+  }
+
+  let lastDownloadError = null;
+
+  for (const track of tracks) {
+    if (!track?.id) continue;
+
+    try {
+      const text = await downloadCaptionTrack(track.id);
+      if (text) return { text, trackId: track.id };
+    } catch (error) {
+      lastDownloadError = error;
+      console.error('YouTube caption track download failed', {
+        trackId: track.id,
+        language: track?.snippet?.language,
+        trackKind: track?.snippet?.trackKind,
+        message: error instanceof Error ? error.message : String(error || ''),
+      });
+    }
+  }
+
+  if (lastDownloadError) throw lastDownloadError;
+  return { text: '', trackId: null };
 }
 
 export default async function handler(req, res) {
@@ -103,9 +180,10 @@ export default async function handler(req, res) {
   const url = typeof input.url === 'string' ? input.url.trim() : '';
   const videoId = getYouTubeVideoId(url);
 
-  console.log(`[transcribe-video:${requestId}] Innertube request`, {
+  console.log(`[transcribe-video:${requestId}] YouTube Data API request`, {
     hasUrl: Boolean(url),
     videoId,
+    hasApiKey: Boolean(API_KEY),
   });
 
   if (!videoId) {
@@ -113,20 +191,30 @@ export default async function handler(req, res) {
   }
 
   try {
-    const text = await fetchInnertubeTranscript(videoId);
+    const result = await fetchYouTubeTranscript(videoId);
 
-    console.log(`[transcribe-video:${requestId}] Innertube transcript success`, {
+    if (!result.text) {
+      console.log(`[transcribe-video:${requestId}] No captions found`, { videoId });
+      return res.status(422).json({
+        error: NO_CAPTIONS_MESSAGE,
+        requestId,
+        code: 'NO_CAPTIONS',
+      });
+    }
+
+    console.log(`[transcribe-video:${requestId}] YouTube Data API transcript success`, {
       videoId,
-      textLength: text.length,
+      trackId: result.trackId,
+      textLength: result.text.length,
     });
 
     return res.status(200).json({
-      text,
+      text: result.text,
       title: 'YouTube lecture transcript',
       requestId,
     });
   } catch (error) {
-    console.error(`[transcribe-video:${requestId}] Innertube transcript failed`, {
+    console.error(`[transcribe-video:${requestId}] YouTube Data API transcription failed`, {
       videoId,
       name: error instanceof Error ? error.name : typeof error,
       message: error instanceof Error ? error.message : String(error || ''),
@@ -134,7 +222,7 @@ export default async function handler(req, res) {
     });
 
     return res.status(422).json({
-      error: FALLBACK_MESSAGE,
+      error: NO_CAPTIONS_MESSAGE,
       requestId,
       code: 'CAPTIONS_UNAVAILABLE',
     });
