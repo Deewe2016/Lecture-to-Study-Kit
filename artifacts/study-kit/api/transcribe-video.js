@@ -8,25 +8,59 @@ function getYouTubeVideoId(value) {
     const url = new URL(value);
     const hostname = url.hostname.toLowerCase();
 
-    if (hostname === 'youtu.be') {
-      return url.pathname.slice(1).split('/')[0] || null;
-    }
+    if (hostname === 'youtu.be') return url.pathname.slice(1).split('/')[0] || null;
 
     if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com')) {
-      if (url.pathname === '/watch') {
-        return url.searchParams.get('v');
-      }
-
+      if (url.pathname === '/watch') return url.searchParams.get('v');
       const parts = url.pathname.split('/').filter(Boolean);
-      if (['shorts', 'embed', 'live'].includes(parts[0])) {
-        return parts[1] || null;
-      }
+      if (['shorts', 'embed', 'live'].includes(parts[0])) return parts[1] || null;
     }
   } catch {
     // Invalid URL is handled by the caller.
   }
-
   return null;
+}
+
+function buildYouTubeApiUrl(endpoint, params) {
+  const url = new URL(`https://www.googleapis.com/youtube/v3/${endpoint}`);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  return url;
+}
+
+async function fetchYouTubeApi(endpoint, params, label) {
+  const url = buildYouTubeApiUrl(endpoint, params);
+  console.log(`[YouTube API] ${label} request`, {
+    url: (() => { const safe = new URL(url); safe.searchParams.set('key', '[REDACTED]'); return safe.toString(); })(),
+    hasApiKey: Boolean(API_KEY),
+    apiKeyLength: API_KEY ? API_KEY.length : 0,
+  });
+
+  const response = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+  const body = await response.text();
+  console.log(`[YouTube API] ${label} raw response`, { status: response.status, ok: response.ok, body });
+
+  let data = null;
+  try { data = body ? JSON.parse(body) : null; } catch { data = null; }
+  return { response, body, data };
+}
+
+async function listCaptionTracks(videoId) {
+  if (!API_KEY) throw new Error('YOUTUBE_API_KEY is missing from the Vercel environment variables');
+
+  const result = await fetchYouTubeApi('captions', { part: 'snippet', videoId, key: API_KEY }, `captions list (${videoId})`);
+  if (!result.response.ok) {
+    throw new Error(`${result.data?.error?.message || `YouTube Data API returned HTTP ${result.response.status}`}. Raw YouTube captions API response: ${result.body.slice(0, 4000)}`);
+  }
+  return Array.isArray(result.data?.items) ? result.data.items : [];
+}
+
+async function getVideoSnippet(videoId) {
+  if (!API_KEY) return null;
+  const result = await fetchYouTubeApi('videos', { part: 'snippet', id: videoId, key: API_KEY }, `videos metadata (${videoId})`);
+  if (!result.response.ok) return null;
+  const item = result.data?.items?.[0];
+  if (!item) return null;
+  return item.snippet || null;
 }
 
 function normalizeText(text) {
@@ -43,132 +77,117 @@ function normalizeText(text) {
     .trim();
 }
 
-function parseTimedText(body, format) {
+function parseJson3(body) {
+  try {
+    const data = JSON.parse(body);
+    const parts = [];
+    for (const event of data?.events || []) {
+      for (const segment of event?.segs || []) {
+        if (segment?.utf8) parts.push(segment.utf8);
+      }
+    }
+    return normalizeText(parts.join(' '));
+  } catch {
+    return '';
+  }
+}
+
+function parseCaptionResponse(body, contentType = '') {
   const raw = String(body || '').trim();
   if (!raw) return '';
 
-  if (format === 'json3') {
-    try {
-      const data = JSON.parse(raw);
-      const parts = [];
+  // json3 is sometimes returned with a non-JSON content type, so inspect the body too.
+  if (contentType.includes('json') || raw.startsWith('{')) return parseJson3(raw);
 
-      for (const event of Array.isArray(data.events) ? data.events : []) {
-        for (const segment of Array.isArray(event.segs) ? event.segs : []) {
-          if (typeof segment.utf8 === 'string') parts.push(segment.utf8);
-        }
-      }
+  // srv3/timedtext is XML. Extract text nodes while decoding common XML entities.
+  const matches = [...raw.matchAll(/<text(?:\s[^>]*)?>([\s\S]*?)<\/text>/gi)];
+  if (matches.length) return normalizeText(matches.map((match) => match[1]).join(' '));
 
-      return normalizeText(parts.join(' '));
-    } catch (error) {
-      console.error('[YouTube timedtext] json3 parse failed', {
-        message: error instanceof Error ? error.message : String(error || ''),
-        rawResponse: raw,
-      });
-      return '';
-    }
-  }
-
-  // srv3 is XML. Strip the transcript tags and decode the common entities.
-  if (format === 'srv3') {
-    return normalizeText(
-      raw
-        .replace(/<text[^>]*>([\s\S]*?)<\/text>/gi, '$1 ')
-        .replace(/<[^>]+>/g, ' ')
-    );
-  }
-
-  return normalizeText(raw);
+  // Some responses can still contain JSON despite an XML-ish content type.
+  return parseJson3(raw);
 }
 
-function buildYouTubeApiUrl(endpoint, params) {
-  const url = new URL(`https://www.googleapis.com/youtube/v3/${endpoint}`);
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-  return url;
-}
+const TIMEDTEXT_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Referer': 'https://www.youtube.com/',
+};
 
-function redactApiKey(url) {
-  const safe = new URL(url);
-  if (safe.searchParams.has('key')) safe.searchParams.set('key', '[REDACTED]');
-  return safe.toString();
-}
+async function fetchTimedtextAttempt(videoId, track, format, language, attemptNumber) {
+  const url = new URL('https://www.youtube.com/api/timedtext');
+  url.searchParams.set('v', videoId);
+  url.searchParams.set('fmt', format);
 
-async function fetchYouTubeApi(endpoint, params, label) {
-  const url = buildYouTubeApiUrl(endpoint, params);
+  // Use the actual track metadata when available. lang selects the source track;
+  // tlang requests translation, and name identifies the caption track by name.
+  if (language) url.searchParams.set('lang', language);
+  if (track?.snippet?.language) url.searchParams.set('tlang', track.snippet.language);
+  if (track?.snippet?.name?.simpleText) url.searchParams.set('name', track.snippet.name.simpleText);
+  else if (typeof track?.snippet?.name === 'string') url.searchParams.set('name', track.snippet.name);
+  if (track?.snippet?.trackKind?.toLowerCase() === 'asr') url.searchParams.set('kind', 'asr');
 
-  console.log(`[YouTube API] ${label} request`, {
-    url: redactApiKey(url),
-    hasApiKey: Boolean(API_KEY),
-    apiKeyLength: API_KEY ? API_KEY.length : 0,
+  // The timedtext endpoint does not document a stable public parameter for the
+  // Data API caption ID. We therefore also try the supplied ID as a diagnostic
+  // parameter without replacing the required v/video ID parameter.
+  if (track?.id) url.searchParams.set('trackId', track.id);
+
+  console.log(`[Timedtext] attempt ${attemptNumber} request`, {
+    url: url.toString(),
+    videoId,
+    trackId: track?.id || null,
+    language: language || null,
+    trackLanguage: track?.snippet?.language || null,
+    trackName: track?.snippet?.name?.simpleText || track?.snippet?.name || null,
+    trackKind: track?.snippet?.trackKind || null,
+    format,
+    headers: TIMEDTEXT_HEADERS,
   });
 
-  const response = await fetch(url.toString(), {
-    headers: { Accept: 'application/json' },
-  });
+  const response = await fetch(url.toString(), { headers: TIMEDTEXT_HEADERS });
   const body = await response.text();
 
-  console.log(`[YouTube API] ${label} raw response`, {
+  console.log(`[Timedtext] attempt ${attemptNumber} full response`, {
     status: response.status,
     ok: response.ok,
+    contentType: response.headers.get('content-type'),
+    contentLength: body.length,
     body,
   });
 
-  let data = null;
-  try {
-    data = body ? JSON.parse(body) : null;
-  } catch {
-    data = null;
-  }
-
-  return { response, body, data };
+  if (!response.ok || !body.trim()) return '';
+  return parseCaptionResponse(body, response.headers.get('content-type') || '');
 }
 
-async function getVideoMetadata(videoId) {
-  const result = await fetchYouTubeApi(
-    'videos',
-    { part: 'snippet', id: videoId, key: API_KEY },
-    `video metadata (${videoId})`
-  );
-
-  if (!result.response.ok) {
-    throw new Error(
-      `YouTube videos API failed with HTTP ${result.response.status}. Raw response: ${result.body.slice(0, 4000)}`
-    );
-  }
-
-  const item = result.data?.items?.[0];
-  if (!item) {
-    return { exists: false, defaultLanguage: null, defaultAudioLanguage: null };
-  }
-
-  return {
-    exists: true,
-    defaultLanguage: item.snippet?.defaultLanguage || null,
-    defaultAudioLanguage: item.snippet?.defaultAudioLanguage || null,
-    title: item.snippet?.title || null,
-  };
+function chooseCaptionTracks(items, videoSnippet) {
+  const defaultLanguage = videoSnippet?.defaultLanguage || videoSnippet?.defaultAudioLanguage || null;
+  return [...items].sort((a, b) => {
+    const score = (track) => {
+      const snippet = track?.snippet || {};
+      let value = 0;
+      if (snippet.language === 'en') value += 200;
+      else if (snippet.language?.startsWith('en')) value += 150;
+      if (defaultLanguage && snippet.language === defaultLanguage) value += 100;
+      if (snippet.trackKind?.toUpperCase() === 'ASR') value += 20;
+      if (snippet.status === 'serving') value += 5;
+      return value;
+    };
+    return score(b) - score(a);
+  });
 }
 
-async function confirmCaptionsExist(videoId) {
-  const result = await fetchYouTubeApi(
-    'captions',
-    { part: 'snippet', videoId, key: API_KEY },
-    `captions list (${videoId})`
-  );
+async function fetchYouTubeTranscript(videoId) {
+  const [tracks, videoSnippet] = await Promise.all([
+    listCaptionTracks(videoId),
+    getVideoSnippet(videoId),
+  ]);
 
-  if (!result.response.ok) {
-    throw new Error(
-      `YouTube captions API failed with HTTP ${result.response.status}. Raw response: ${result.body.slice(0, 4000)}`
-    );
-  }
-
-  const items = Array.isArray(result.data?.items) ? result.data.items : [];
-
-  console.log('[YouTube API] captions confirmation', {
+  console.log('[YouTube API] caption/video metadata', {
     videoId,
-    captionCount: items.length,
-    tracks: items.map((track) => ({
+    defaultLanguage: videoSnippet?.defaultLanguage || null,
+    defaultAudioLanguage: videoSnippet?.defaultAudioLanguage || null,
+    captionTrackCount: tracks.length,
+    tracks: tracks.map((track) => ({
       id: track?.id,
       language: track?.snippet?.language,
       trackKind: track?.snippet?.trackKind,
@@ -177,86 +196,59 @@ async function confirmCaptionsExist(videoId) {
     })),
   });
 
-  return items;
-}
+  if (!tracks.length) return { text: '', trackId: null };
 
-async function fetchTimedText(videoId, format, lang) {
-  const url = new URL('https://www.youtube.com/api/timedtext');
-  url.searchParams.set('v', videoId);
-  url.searchParams.set('fmt', format);
-  if (lang) url.searchParams.set('lang', lang);
+  // Prefer the English/asr track the user identified, then the best matching
+  // track. Every attempt includes the real Data API track ID when available.
+  const preferredTrack = tracks.find((track) => track?.id === 'AUieDaY3gaVNun_-aB7zFQwZZB218MNGu0JUzE2JVE0oYt3fWLo')
+    || tracks[0];
 
-  console.log('[YouTube timedtext] attempt request', {
-    videoId,
-    format,
-    lang: lang || null,
-    url: url.toString(),
-  });
+  const orderedTracks = [preferredTrack, ...tracks.filter((track) => track !== preferredTrack)];
+  const first = orderedTracks[0];
+  const trackLanguage = first?.snippet?.language || videoSnippet?.defaultLanguage || 'en';
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      Accept: '*/*',
-    },
-  });
-  const body = await response.text();
-
-  // Intentionally log the full response from every attempt for Vercel diagnostics.
-  console.log('[YouTube timedtext] attempt full response', {
-    videoId,
-    format,
-    lang: lang || null,
-    status: response.status,
-    ok: response.ok,
-    contentType: response.headers.get('content-type'),
-    body,
-  });
-
-  if (!response.ok) return '';
-
-  return parseTimedText(body, format);
-}
-
-async function fetchYouTubeTranscript(videoId, defaultLanguage) {
-  // Requested order: srv3/en, srv3/en-US, json3/en, srv3/no-lang, json3/no-lang.
-  // If the Data API says the video's default language is English, use the requested
-  // English attempts first. We still preserve the exact five-attempt fallback order.
   const attempts = [
-    { format: 'srv3', lang: 'en' },
-    { format: 'srv3', lang: 'en-US' },
-    { format: 'json3', lang: 'en' },
-    { format: 'srv3', lang: null },
-    { format: 'json3', lang: null },
+    { format: 'srv3', language: 'en', track: first },
+    { format: 'srv3', language: 'en-US', track: first },
+    { format: 'json3', language: 'en', track: first },
+    { format: 'srv3', language: null, track: first },
+    { format: 'json3', language: null, track: first },
+    // Additional direct-track attempts: use the actual track language and ASR kind.
+    { format: 'json3', language: trackLanguage, track: first },
+    { format: 'srv3', language: trackLanguage, track: first },
   ];
 
-  console.log('[YouTube timedtext] starting caption fetch', {
-    videoId,
-    defaultLanguage: defaultLanguage || null,
-    attempts,
-  });
-
+  let attemptNumber = 0;
   for (const attempt of attempts) {
+    attemptNumber += 1;
     try {
-      const text = await fetchTimedText(videoId, attempt.format, attempt.lang);
-      if (text) {
-        return {
-          text,
-          format: attempt.format,
-          lang: attempt.lang,
-        };
-      }
+      const text = await fetchTimedtextAttempt(videoId, attempt.track, attempt.format, attempt.language, attemptNumber);
+      if (text) return { text, trackId: attempt.track?.id || null };
     } catch (error) {
-      console.error('[YouTube timedtext] attempt failed', {
-        videoId,
-        format: attempt.format,
-        lang: attempt.lang || null,
+      console.error(`[Timedtext] attempt ${attemptNumber} failed`, {
         message: error instanceof Error ? error.message : String(error || ''),
-        stack: error instanceof Error ? error.stack : undefined,
       });
     }
   }
 
-  return { text: '', format: null, lang: null };
+  // Try each remaining caption track with its actual language and ID metadata.
+  for (const track of orderedTracks.slice(1)) {
+    const language = track?.snippet?.language || videoSnippet?.defaultLanguage || 'en';
+    for (const format of ['srv3', 'json3']) {
+      attemptNumber += 1;
+      try {
+        const text = await fetchTimedtextAttempt(videoId, track, format, language, attemptNumber);
+        if (text) return { text, trackId: track?.id || null };
+      } catch (error) {
+        console.error(`[Timedtext] track fallback attempt ${attemptNumber} failed`, {
+          trackId: track?.id || null,
+          message: error instanceof Error ? error.message : String(error || ''),
+        });
+      }
+    }
+  }
+
+  return { text: '', trackId: null };
 }
 
 export default async function handler(req, res) {
@@ -271,16 +263,13 @@ export default async function handler(req, res) {
   const url = typeof input.url === 'string' ? input.url.trim() : '';
   const videoId = getYouTubeVideoId(url);
 
-  console.log(`[transcribe-video:${requestId}] YouTube timedtext configuration`, {
+  console.log(`[transcribe-video:${requestId}] configuration`, {
     hasApiKey: Boolean(API_KEY),
     apiKeyLength: API_KEY ? API_KEY.length : 0,
-    hasUrl: Boolean(url),
     videoId,
   });
 
-  if (!videoId) {
-    return res.status(400).json({ error: 'Add a valid YouTube video URL.', requestId });
-  }
+  if (!videoId) return res.status(400).json({ error: 'Add a valid YouTube video URL.', requestId });
 
   if (!API_KEY) {
     return res.status(500).json({
@@ -291,62 +280,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    // First use the Data API to confirm the video exists and read its default language.
-    const metadata = await getVideoMetadata(videoId);
-
-    if (!metadata.exists) {
-      return res.status(422).json({
-        error: NO_CAPTIONS_MESSAGE,
-        requestId,
-        code: 'VIDEO_NOT_FOUND',
-      });
-    }
-
-    console.log(`[transcribe-video:${requestId}] video metadata`, {
-      videoId,
-      defaultLanguage: metadata.defaultLanguage,
-      defaultAudioLanguage: metadata.defaultAudioLanguage,
-      title: metadata.title,
-    });
-
-    // Then confirm that YouTube reports at least one caption track for the video.
-    const tracks = await confirmCaptionsExist(videoId);
-
-    if (!tracks.length) {
-      console.log(`[transcribe-video:${requestId}] Data API reports no caption tracks`, { videoId });
-      return res.status(422).json({
-        error: NO_CAPTIONS_MESSAGE,
-        requestId,
-        code: 'NO_CAPTIONS',
-      });
-    }
-
-    const result = await fetchYouTubeTranscript(videoId, metadata.defaultLanguage);
+    const result = await fetchYouTubeTranscript(videoId);
 
     if (!result.text) {
-      console.log(`[transcribe-video:${requestId}] timedtext returned no transcript`, {
-        videoId,
-        captionTrackCount: tracks.length,
-      });
-      return res.status(422).json({
-        error: NO_CAPTIONS_MESSAGE,
-        requestId,
-        code: 'TIMEDTEXT_EMPTY',
-      });
+      console.log(`[transcribe-video:${requestId}] No captions found after timedtext attempts`, { videoId });
+      return res.status(422).json({ error: NO_CAPTIONS_MESSAGE, requestId, code: 'NO_CAPTIONS' });
     }
 
-    console.log(`[transcribe-video:${requestId}] YouTube timedtext transcript success`, {
+    console.log(`[transcribe-video:${requestId}] timedtext transcript success`, {
       videoId,
-      format: result.format,
-      lang: result.lang,
+      trackId: result.trackId,
       textLength: result.text.length,
     });
 
-    return res.status(200).json({
-      text: result.text,
-      title: metadata.title || 'YouTube lecture transcript',
-      requestId,
-    });
+    return res.status(200).json({ text: result.text, title: 'YouTube lecture transcript', requestId });
   } catch (error) {
     console.error(`[transcribe-video:${requestId}] YouTube transcription failed`, {
       videoId,
@@ -355,10 +302,8 @@ export default async function handler(req, res) {
       stack: error instanceof Error ? error.stack : undefined,
     });
 
-    const message = error instanceof Error ? error.message : String(error || '');
-
     return res.status(422).json({
-      error: `${NO_CAPTIONS_MESSAGE}\n\nYouTube diagnostic: ${message}`,
+      error: `${NO_CAPTIONS_MESSAGE}\n\nYouTube API diagnostic: ${error instanceof Error ? error.message : String(error || '')}`,
       requestId,
       code: 'CAPTIONS_UNAVAILABLE',
     });
