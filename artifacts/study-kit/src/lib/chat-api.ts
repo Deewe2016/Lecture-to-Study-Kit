@@ -40,12 +40,23 @@ export async function updateSpace(spaceId: string, patch: Partial<Pick<ChatSpace
   if (!rows[0]) throw new Error('The space could not be updated.'); return rows[0];
 }
 export async function getRecentUserMessages(currentUserId: string): Promise<DbMessage[]> {
-  const or = `and(sender_id.eq.${currentUserId},recipient_id.not.is.null),and(recipient_id.eq.${currentUserId},sender_id.not.is.null)`;
-  return rest<DbMessage[]>(`/rest/v1/messages?select=id,sender_id,recipient_id,space_id,text,created_at&or=${encodeURIComponent(or)}&order=created_at.desc&limit=300`);
+  const sent = await rest<DbMessage[]>(`/rest/v1/messages?select=id,sender_id,recipient_id,space_id,text,created_at&sender_id=eq.${encodeURIComponent(currentUserId)}&order=created_at.desc&limit=300`);
+  const received = await rest<DbMessage[]>(`/rest/v1/messages?select=id,sender_id,recipient_id,space_id,text,created_at&recipient_id=eq.${encodeURIComponent(currentUserId)}&order=created_at.desc&limit=300`);
+  return [...(sent || []), ...(received || [])]
+    .filter((message, index, all) => all.findIndex((item) => item.id === message.id) === index)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 300);
 }
 export async function getMessagesForDm(currentUserId: string, otherUserId: string): Promise<DbMessage[]> {
-  const or = `and(sender_id.eq.${currentUserId},recipient_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},recipient_id.eq.${currentUserId})`;
-  return rest<DbMessage[]>(`/rest/v1/messages?select=id,sender_id,recipient_id,space_id,text,created_at&or=${encodeURIComponent(or)}&order=created_at.asc&limit=500`);
+  const sent = await rest<DbMessage[]>(`/rest/v1/messages?select=id,sender_id,recipient_id,space_id,text,created_at&sender_id=eq.${encodeURIComponent(currentUserId)}&order=created_at.asc&limit=500`);
+  const received = await rest<DbMessage[]>(`/rest/v1/messages?select=id,sender_id,recipient_id,space_id,text,created_at&recipient_id=eq.${encodeURIComponent(currentUserId)}&order=created_at.asc&limit=500`);
+  return [...(sent || []), ...(received || [])]
+    .filter((message, index, all) => all.findIndex((item) => item.id === message.id) === index)
+    .filter((message) =>
+      (message.sender_id === currentUserId && message.recipient_id === otherUserId) ||
+      (message.sender_id === otherUserId && message.recipient_id === currentUserId)
+    )
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 }
 export async function getMessagesForSpace(spaceId: string): Promise<DbMessage[]> { return rest<DbMessage[]>(`/rest/v1/messages?select=id,sender_id,recipient_id,space_id,text,created_at&space_id=eq.${encodeURIComponent(spaceId)}&order=created_at.asc&limit=500`); }
 export async function sendDmMessage(senderId: string, recipientId: string, text: string): Promise<DbMessage> {
