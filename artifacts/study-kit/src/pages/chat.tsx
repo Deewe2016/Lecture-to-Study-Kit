@@ -1,312 +1,40 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, MessageCircle, Plus, Search, Send, Users, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, MessageCircle, MoreHorizontal, Plus, Search, Send, Settings, Users, X } from 'lucide-react';
 import { getCurrentUser, type AuthUser } from '@/lib/auth';
-import {
-  createSpace,
-  getMessagesForDm,
-  getMessagesForSpace,
-  getRecentUserMessages,
-  getSpaces,
-  getUsersByIds,
-  searchUsers,
-  sendDmMessage,
-  sendSpaceMessage,
-  subscribeToMessages,
-  type ChatSpace,
-  type ChatUser,
-  type DbMessage,
-} from '@/lib/chat-api';
+import { createSpace, getMessagesForDm, getMessagesForSpace, getRecentUserMessages, getSpaces, getUsersByIds, searchUsers, sendDmMessage, sendSpaceMessage, subscribeToMessages, updateSpace, type ChatSpace, type ChatUser, type DbMessage } from '@/lib/chat-api';
 
-type UiMessage = { id: string; senderId: string; sender: string; text: string; createdAt: string };
-type DmConversation = { id: string; kind: 'dm'; name: string; userId: string; messages: UiMessage[] };
-type SpaceConversation = { id: string; kind: 'space'; name: string; spaceId: string; members: string[]; messages: UiMessage[] };
-type ChatConversation = DmConversation | SpaceConversation;
+type UiMessage={id:string;senderId:string;sender:string;text:string;createdAt:string};
+type Dm={id:string;kind:'dm';name:string;userId:string;messages:UiMessage[]};
+type Space={id:string;kind:'space';name:string;spaceId:string;members:string[];ownerId:string;messages:UiMessage[]};
+type Conversation=Dm|Space;
+type SidebarState={hiddenDms:string[];leftDms:string[];hiddenSpaces:string[];leftSpaces:string[];collapsedDms:boolean;collapsedSpaces:boolean};
+const STORE='flexus-chat-sidebar-v2';
+const emptyState:SidebarState={hiddenDms:[],leftDms:[],hiddenSpaces:[],leftSpaces:[],collapsedDms:false,collapsedSpaces:false};
+function loadState(uid:string):SidebarState{try{const raw=localStorage.getItem(`${STORE}:${uid}`);return raw?{...emptyState,...JSON.parse(raw)}:emptyState}catch{return emptyState}}
+function saveState(uid:string,s:SidebarState){try{localStorage.setItem(`${STORE}:${uid}`,JSON.stringify(s))}catch{}}
+function initials(name:string){return name.trim().slice(0,2).toUpperCase()||'F'}
+function formatTime(value:string){return new Date(value).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
+function extractTutorText(raw:string){const chunks:string[]=[];for(const line of raw.split(/\r?\n/)){if(!line.startsWith('data: '))continue;const p=line.slice(6).trim();if(!p||p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.content)chunks.push(j.content);else if(j.text)chunks.push(j.text)}catch{}}return chunks.join('')||raw.trim()}
+function parseSuggestions(raw:string){const text=extractTutorText(raw).trim();for(const candidate of [text,text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim()]){try{const p=JSON.parse(candidate);if(Array.isArray(p)){const a=p.filter((x):x is string=>typeof x==='string').map(x=>x.trim()).filter(Boolean).slice(0,3);if(a.length===3)return a}}catch{}}return[]}
+async function getSuggestions(messages:UiMessage[]){if(!messages.length)return[];const context=messages.slice(-5).map(m=>({sender:m.sender,text:m.text}));const r=await fetch('/api/tutor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:`You are generating reply suggestions for a study workspace chat. Use the last five real messages as context. Return exactly 3 short, natural reply suggestions as a JSON array of strings. No markdown or explanation.\n${JSON.stringify(context)}`,context:JSON.stringify(context)})});if(!r.ok)throw new Error('Tutor failed');return parseSuggestions(await r.text())}
+function toUi(messages:DbMessage[],users:Record<string,ChatUser>,me:AuthUser):UiMessage[]{return messages.map(m=>({id:m.id,senderId:m.sender_id,sender:m.sender_id===me.id?me.name:users[m.sender_id]?.display_name||'Flexus user',text:m.text,createdAt:m.created_at}))}
+function Row({c,selected,onClick,onMenu}:{c:Conversation;selected:boolean;onClick:()=>void;onMenu:(e:any)=>void}){return <div onContextMenu={onMenu} className={`group flex items-center gap-2 rounded-lg px-2 py-1.5 ${selected?'bg-sidebar-accent text-sidebar-accent-foreground':'text-sidebar-foreground hover:bg-sidebar-accent/60'}`}><button onClick={onClick} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground">{c.kind==='space'?<Users size={15}/>:<MessageCircle size={15}/>}</span><span className="min-w-0 flex-1 truncate text-sm font-medium">{c.name}</span></button><button onClick={onMenu} aria-label={`Options for ${c.name}`} className="rounded-md p-1 text-muted-foreground opacity-0 hover:bg-secondary group-hover:opacity-100 focus:opacity-100"><MoreHorizontal size={16}/></button></div>}
+function MenuPopup({x,y,c,onHide,onLeave,onSettings,onClose}:{x:number;y:number;c:Conversation;onHide:()=>void;onLeave:()=>void;onSettings:()=>void;onClose:()=>void}){return <div className="fixed z-[70] w-44 rounded-xl border border-border bg-card p-1.5 shadow-2xl" style={{left:Math.min(x,window.innerWidth-190),top:Math.min(y,window.innerHeight-150)}}><button onClick={onHide} className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-secondary">Hide</button><button onClick={onLeave} className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-secondary">Leave</button>{c.kind==='space'&&<button onClick={onSettings} className="w-full rounded-lg px-3 py-2 text-left text-xs hover:bg-secondary">Settings</button>}<button onClick={onClose} className="sr-only">Close</button></div>}
+function NewSpace({me,onClose,onCreated}:{me:string;onClose:()=>void;onCreated:(s:ChatSpace)=>void}){const[name,setName]=useState('');const[q,setQ]=useState('');const[r,setR]=useState<ChatUser[]>([]);const[m,setM]=useState<ChatUser[]>([]);const[saving,setSaving]=useState(false);const[error,setError]=useState('');useEffect(()=>{const t=setTimeout(async()=>{if(!q.trim()){setR([]);return}try{setR(await searchUsers(q,me))}catch(e){setError(e instanceof Error?e.message:'Search failed.')}},200);return()=>clearTimeout(t)},[q,me]);const submit=async()=>{if(!name.trim()||saving)return;setSaving(true);try{onCreated(await createSpace(name,m.map(x=>x.id),me))}catch(e){setError(e instanceof Error?e.message:'Could not create space.')}finally{setSaving(false)}};return <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-5 backdrop-blur-sm"><div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl"><div className="flex justify-between"><div><p className="font-mono text-[10px] uppercase tracking-[.18em] text-primary">New space</p><h2 className="mt-2 font-serif text-2xl">Create a group chat</h2></div><button onClick={onClose}><X size={17}/></button></div><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Space name" className="focus-ring mt-6 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><div className="relative mt-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Add members by name or email" className="focus-ring h-10 w-full rounded-lg border border-input bg-background pl-9 text-sm outline-none"/>{r.length>0&&<div className="absolute left-0 right-0 top-11 z-10 rounded-lg border border-border bg-card shadow-xl">{r.map(u=><button key={u.id} onClick={()=>{setM(v=>v.some(x=>x.id===u.id)?v:[...v,u]);setQ('');setR([])}} className="flex w-full gap-3 px-3 py-2.5 text-left hover:bg-secondary"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs text-primary">{initials(u.display_name)}</span><span><b className="block text-xs">{u.display_name}</b><span className="text-[10px] text-muted-foreground">{u.email}</span></span></button>)}</div>}</div><div className="mt-3 flex flex-wrap gap-2">{m.map(u=><button key={u.id} onClick={()=>setM(v=>v.filter(x=>x.id!==u.id))} className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs text-primary">{u.display_name} ×</button>)}</div>{error&&<p className="mt-3 text-xs text-destructive">{error}</p>}<div className="mt-6 flex justify-end gap-2"><button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-xs">Cancel</button><button onClick={submit} disabled={!name.trim()||saving} className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-40">{saving?'Creating…':'Create space'}</button></div></div></div>}
+function SpaceSettings({space,me,users,onClose,onSaved,onLeft}:{space:Space;me:string;users:Record<string,ChatUser>;onClose:()=>void;onSaved:(s:ChatSpace)=>void;onLeft:()=>void}){const[name,setName]=useState(space.name);const[owner,setOwner]=useState(space.ownerId);const[members,setMembers]=useState(space.members);const[saving,setSaving]=useState(false);const[error,setError]=useState('');const isOwner=owner===me;const save=async(patch:Partial<Pick<ChatSpace,'name'|'members'|'created_by'>>)=>{setSaving(true);setError('');try{const s=await updateSpace(space.spaceId,patch);setName(s.name);setOwner(s.created_by);setMembers(s.members);onSaved(s)}catch(e){setError(e instanceof Error?e.message:'Could not update space.')}finally{setSaving(false)}};const remove=async(id:string)=>{if(isOwner)await save({members:members.filter(x=>x!==id)})};const transfer=async(id:string)=>{if(isOwner&&members.includes(id))await save({created_by:id})};const leave=async()=>{if(isOwner){setError('Transfer ownership before leaving this space.');return}try{await save({members:members.filter(x=>x!==me)});onLeft()}catch{}};return <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-5 backdrop-blur-sm"><div className="max-h-[85vh] w-full max-w-lg overflow-auto rounded-2xl border border-border bg-card p-6 shadow-xl"><div className="flex justify-between"><div><p className="font-mono text-[10px] uppercase tracking-[.18em] text-primary">Space settings</p><h2 className="mt-2 font-serif text-2xl">{space.name}</h2><p className="mt-1 text-xs text-muted-foreground">Owner: {users[owner]?.display_name||(owner===me?'You':'Flexus user')}</p></div><button onClick={onClose}><X size={17}/></button></div><label className="mt-6 block text-xs font-semibold text-muted-foreground">SPACE NAME<input value={name} onChange={e=>setName(e.target.value)} disabled={!isOwner} className="focus-ring mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 text-sm disabled:opacity-60"/></label>{isOwner&&<button disabled={saving||!name.trim()} onClick={()=>save({name:name.trim()})} className="mt-3 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-40">Save name</button>}<div className="mt-6 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground"><Users size={14}/> Members ({members.length})</div><div className="mt-3 space-y-1">{members.map(id=>{const u=users[id];return <div key={id} className="flex items-center gap-3 rounded-lg border border-border/70 px-3 py-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs text-primary">{initials(u?.display_name||'FU')}</span><span className="min-w-0 flex-1"><b className="block truncate text-xs">{u?.display_name||'Flexus user'} {id===me&&'(You)'}</b><span className="text-[10px] text-muted-foreground">{u?.email||''}{id===owner?' · Owner':''}</span></span>{isOwner&&id!==me&&<><button onClick={()=>transfer(id)} disabled={saving} className="rounded-md border border-border px-2 py-1 text-[10px] hover:bg-secondary">Make owner</button><button onClick={()=>remove(id)} disabled={saving} className="rounded-md px-2 py-1 text-[10px] text-destructive hover:bg-destructive/10">Remove</button></>}</div>})}</div>{!isOwner&&<button onClick={leave} disabled={saving} className="mt-5 rounded-lg border border-destructive/30 px-3 py-2 text-xs text-destructive hover:bg-destructive/10">Leave space</button>}{error&&<p className="mt-4 text-xs text-destructive">{error}</p>}<div className="mt-6 flex justify-end"><button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-xs">Done</button></div></div></div>}
 
-function extractTutorText(raw: string) {
-  const chunks: string[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    if (!line.startsWith('data: ')) continue;
-    const payload = line.slice(6).trim();
-    if (!payload || payload === '[DONE]') continue;
-    try {
-      const parsed = JSON.parse(payload) as { content?: string; text?: string };
-      if (parsed.content) chunks.push(parsed.content);
-      else if (parsed.text) chunks.push(parsed.text);
-    } catch { /* ignore non-JSON SSE lines */ }
-  }
-  return chunks.join('') || raw.trim();
-}
-
-function parseSuggestions(raw: string): string[] {
-  const text = extractTutorText(raw).trim();
-  const candidates = [text, text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()];
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate);
-      if (Array.isArray(parsed)) {
-        const suggestions = parsed.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean).slice(0, 3);
-        if (suggestions.length === 3) return suggestions;
-      }
-    } catch { /* try another representation */ }
-  }
-  const match = text.match(/\[[\s\S]*\]/);
-  if (match) {
-    try {
-      const parsed = JSON.parse(match[0]);
-      if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean).slice(0, 3);
-    } catch { /* fall through */ }
-  }
-  return [];
-}
-
-async function getSuggestions(messages: UiMessage[]) {
-  if (!messages.length) return [];
-  const context = messages.slice(-5).map((message) => ({ sender: message.sender, text: message.text }));
-  const prompt = [
-    'You are generating reply suggestions for a study workspace chat.',
-    'Use the last five real messages as context.',
-    'Return exactly 3 short, natural reply suggestions as a JSON array of strings.',
-    'Do not include markdown, explanations, numbering, or text outside the JSON array.',
-    'Each suggestion should be concise enough to send as a chat message.',
-    '', JSON.stringify(context),
-  ].join('\n');
-  const response = await fetch('/api/tutor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, context: JSON.stringify(context) }) });
-  if (!response.ok) throw new Error(`Tutor returned HTTP ${response.status}`);
-  return parseSuggestions(await response.text());
-}
-
-function toUiMessages(messages: DbMessage[], users: Record<string, ChatUser>, currentUser: AuthUser): UiMessage[] {
-  return messages.map((message) => ({
-    id: message.id,
-    senderId: message.sender_id,
-    sender: message.sender_id === currentUser.id ? currentUser.name : users[message.sender_id]?.display_name || 'Flexus user',
-    text: message.text,
-    createdAt: message.created_at,
-  }));
-}
-
-function ConversationRow({ conversation, selected, onClick }: { conversation: ChatConversation; selected: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${selected ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground'}`}>
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground">{conversation.kind === 'space' ? <Users size={15} /> : <MessageCircle size={15} />}</span>
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">{conversation.name}</span>
-    </button>
-  );
-}
-
-function UserSearchResults({ results, onSelect }: { results: ChatUser[]; onSelect: (user: ChatUser) => void }) {
-  if (!results.length) return null;
-  return (
-    <div className="absolute left-0 right-0 top-11 z-30 overflow-hidden rounded-xl border border-border bg-card shadow-xl">
-      {results.map((user) => (
-        <button key={user.id} onClick={() => onSelect(user)} className="flex w-full items-center gap-3 border-b border-border px-3 py-3 text-left last:border-0 hover:bg-secondary">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{user.display_name.slice(0, 1).toUpperCase()}</span>
-          <span className="min-w-0"><span className="block truncate text-sm font-medium">{user.display_name}</span><span className="block truncate text-[11px] text-muted-foreground">{user.email}</span></span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function NewSpaceDialog({ currentUserId, onClose, onCreated }: { currentUserId: string; onClose: () => void; onCreated: (space: ChatSpace) => void }) {
-  const [name, setName] = useState('');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<ChatUser[]>([]);
-  const [members, setMembers] = useState<ChatUser[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      if (!query.trim()) { setResults([]); return; }
-      try {
-        const next = await searchUsers(query, currentUserId);
-        if (!cancelled) setResults(next);
-      } catch (err) { if (!cancelled) setError(err instanceof Error ? err.message : 'Could not search users.'); }
-    }, 220);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [query, currentUserId]);
-
-  const submit = async () => {
-    if (!name.trim() || saving) return;
-    setSaving(true); setError('');
-    try { onCreated(await createSpace(name, members.map((member) => member.id), currentUserId)); }
-    catch (err) { setError(err instanceof Error ? err.message : 'Could not create the space.'); }
-    finally { setSaving(false); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-5 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl">
-        <div className="flex items-start justify-between"><div><p className="font-mono text-[10px] uppercase tracking-[.18em] text-primary">New space</p><h2 className="mt-2 font-serif text-2xl tracking-[-.03em]">Create a group chat</h2></div><button onClick={onClose} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="Close"><X size={17} /></button></div>
-        <label className="mt-6 block"><span className="mb-2 block text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">Space name</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Science Study Group" className="focus-ring h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none" /></label>
-        <label className="mt-5 block"><span className="mb-2 block text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">Add members</span><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or email" className="focus-ring h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none" />{results.length > 0 && <div className="absolute left-0 right-0 top-11 z-10 overflow-hidden rounded-lg border border-border bg-card shadow-xl">{results.map((user) => <button key={user.id} onClick={() => { setMembers((previous) => previous.some((item) => item.id === user.id) ? previous : [...previous, user]); setQuery(''); setResults([]); }} className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-secondary"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{user.display_name.slice(0, 1).toUpperCase()}</span><span className="min-w-0"><span className="block truncate text-xs font-semibold">{user.display_name}</span><span className="block truncate text-[10px] text-muted-foreground">{user.email}</span></span></button>)}</div>}</div></label>
-        <div className="mt-3 flex flex-wrap gap-2">{members.map((member) => <button key={member.id} onClick={() => setMembers((previous) => previous.filter((item) => item.id !== member.id))} className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary">{member.display_name} ×</button>)}{members.length === 0 && <p className="text-xs text-muted-foreground">You are automatically included.</p>}</div>
-        {error && <p className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
-        <div className="mt-6 flex justify-end gap-2"><button onClick={onClose} className="rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary">Cancel</button><button onClick={submit} disabled={!name.trim() || saving} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40">{saving && <Loader2 size={14} className="animate-spin" />}Create space</button></div>
-      </div>
-    </div>
-  );
-}
-
-export default function ChatPage() {
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [conversations, setConversations] = useState<ChatConversation[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [input, setInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [searchResults, setSearchResults] = useState<ChatUser[]>([]);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [suggestionError, setSuggestionError] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [error, setError] = useState('');
-  const [realtimeStatus, setRealtimeStatus] = useState('CONNECTING');
-  const [showSpace, setShowSpace] = useState(false);
-  const [users, setUsers] = useState<Record<string, ChatUser>>({});
-
-  const selected = useMemo(() => conversations.find((conversation) => conversation.id === selectedId) || null, [conversations, selectedId]);
-
-  const refreshConversations = async (user: AuthUser) => {
-    const [recentMessages, spaces] = await Promise.all([getRecentUserMessages(user.id), getSpaces(user.id)]);
-    const partnerIds = Array.from(new Set(recentMessages.map((message) => message.sender_id === user.id ? message.recipient_id : message.sender_id).filter((id): id is string => Boolean(id))));
-    const partnerUsers = await getUsersByIds(partnerIds);
-    const userMap: Record<string, ChatUser> = {};
-    partnerUsers.forEach((item) => { userMap[item.id] = item; });
-    setUsers((previous) => ({ ...previous, ...userMap }));
-    const dms: DmConversation[] = partnerUsers.map((partner) => ({ id: `dm:${partner.id}`, kind: 'dm', name: partner.display_name, userId: partner.id, messages: [] }));
-    const spaceChats: SpaceConversation[] = spaces.map((space) => ({ id: `space:${space.id}`, kind: 'space', name: space.name, spaceId: space.id, members: space.members, messages: [] }));
-    setConversations((previous) => {
-      const oldMessages = new Map(previous.map((conversation) => [conversation.id, conversation.messages]));
-      return [...dms, ...spaceChats].map((conversation) => ({ ...conversation, messages: oldMessages.get(conversation.id) || [] }));
-    });
-  };
-
-  const loadSuggestions = async (messages: UiMessage[]) => {
-    if (!messages.length) { setSuggestions([]); return; }
-    setLoadingSuggestions(true); setSuggestionError(false);
-    try { const next = await getSuggestions(messages); setSuggestions(next); setSuggestionError(next.length !== 3); }
-    catch { setSuggestions([]); setSuggestionError(true); }
-    finally { setLoadingSuggestions(false); }
-  };
-
-  const loadConversationMessages = async (conversation: ChatConversation, user: AuthUser) => {
-    setLoadingMessages(true); setError('');
-    try {
-      const messages = conversation.kind === 'dm' ? await getMessagesForDm(user.id, conversation.userId) : await getMessagesForSpace(conversation.spaceId);
-      const senderIds = Array.from(new Set(messages.map((message) => message.sender_id).filter((id) => id !== user.id)));
-      const senderUsers = await getUsersByIds(senderIds);
-      const senderMap = { ...users } as Record<string, ChatUser>;
-      senderUsers.forEach((item) => { senderMap[item.id] = item; });
-      setUsers(senderMap);
-      const uiMessages = toUiMessages(messages, senderMap, user);
-      setConversations((previous) => previous.map((item) => item.id === conversation.id ? { ...item, messages: uiMessages } : item));
-      await loadSuggestions(uiMessages);
-    } catch (err) { setError(err instanceof Error ? err.message : 'Could not load messages.'); }
-    finally { setLoadingMessages(false); }
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const user = await getCurrentUser();
-        if (!user) { if (!cancelled) setError('You must be signed in to use Chat.'); return; }
-        if (cancelled) return;
-        setCurrentUser(user);
-        await refreshConversations(user);
-      } catch (err) { if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load Chat.'); }
-      finally { if (!cancelled) setLoading(false); }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!currentUser) return;
-    const stop = subscribeToMessages((message) => {
-      const partnerId = message.sender_id === currentUser.id ? message.recipient_id : message.sender_id;
-      const matching = conversations.find((conversation) => conversation.kind === 'space' ? conversation.spaceId === message.space_id : Boolean(partnerId) && conversation.userId === partnerId);
-      if (!matching) { refreshConversations(currentUser).catch(() => undefined); return; }
-      const senderName = message.sender_id === currentUser.id ? currentUser.name : users[message.sender_id]?.display_name || 'Flexus user';
-      const uiMessage: UiMessage = { id: message.id, senderId: message.sender_id, sender: senderName, text: message.text, createdAt: message.created_at };
-      setConversations((previous) => previous.map((conversation) => conversation.id === matching.id && !conversation.messages.some((item) => item.id === message.id) ? { ...conversation, messages: [...conversation.messages, uiMessage] } : conversation));
-      if (selectedId === matching.id) {
-        const nextMessages = [...(matching.messages || []), uiMessage].filter((item, index, all) => all.findIndex((other) => other.id === item.id) === index);
-        loadSuggestions(nextMessages).catch(() => undefined);
-      }
-    }, setRealtimeStatus);
-    return stop;
-  }, [currentUser, selectedId, conversations, users]);
-
-  useEffect(() => {
-    if (!currentUser || !search.trim()) { setSearchResults([]); return; }
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      try { const results = await searchUsers(search, currentUser.id); if (!cancelled) setSearchResults(results); }
-      catch (err) { if (!cancelled) setError(err instanceof Error ? err.message : 'Could not search users.'); }
-    }, 220);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [search, currentUser]);
-
-  useEffect(() => {
-    if (!currentUser || !selected) return;
-    loadConversationMessages(selected, currentUser).catch(() => undefined);
-  }, [selectedId]);
-
-  const startDm = (user: ChatUser) => {
-    setUsers((previous) => ({ ...previous, [user.id]: user }));
-    const existing = conversations.find((conversation) => conversation.kind === 'dm' && conversation.userId === user.id);
-    if (existing) setSelectedId(existing.id);
-    else {
-      const conversation: DmConversation = { id: `dm:${user.id}`, kind: 'dm', name: user.display_name, userId: user.id, messages: [] };
-      setConversations((previous) => [conversation, ...previous]);
-      setSelectedId(conversation.id);
-    }
-    setSearch(''); setSearchResults([]);
-  };
-
-  const handleSpaceCreated = (space: ChatSpace) => {
-    const conversation: SpaceConversation = { id: `space:${space.id}`, kind: 'space', name: space.name, spaceId: space.id, members: space.members, messages: [] };
-    setConversations((previous) => [conversation, ...previous]); setSelectedId(conversation.id); setShowSpace(false);
-  };
-
-  const send = async () => {
-    if (!currentUser || !selected || !input.trim()) return;
-    const text = input.trim(); setInput(''); setError('');
-    try { if (selected.kind === 'dm') await sendDmMessage(currentUser.id, selected.userId, text); else await sendSpaceMessage(currentUser.id, selected.spaceId, text); }
-    catch (err) { setInput(text); setError(err instanceof Error ? err.message : 'Could not send message.'); }
-  };
-
-  if (loading) return <div className="flex h-full items-center justify-center text-muted-foreground"><Loader2 className="animate-spin" size={22} /></div>;
-
-  return (
-    <section className="h-[calc(100dvh-72px)] min-h-[520px] overflow-hidden">
-      <div className="flex h-full border-b border-border">
-        <aside className="relative flex w-[310px] shrink-0 flex-col border-r border-border bg-sidebar/70">
-          <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><p className="font-mono text-[10px] uppercase tracking-[.18em] text-primary">Messages</p><h1 className="mt-1 font-serif text-2xl tracking-[-.03em]">Chat</h1></div><button onClick={() => setShowSpace(true)} className="focus-ring flex h-8 w-8 items-center justify-center rounded-full border border-border bg-secondary text-muted-foreground hover:border-primary/60 hover:text-primary" aria-label="Create a space"><Plus size={16} /></button></div>
-          <div className="border-b border-border px-3 py-3"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a Flexus user..." className="focus-ring h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-xs outline-none" /><UserSearchResults results={searchResults} onSelect={startDm} /></div></div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
-            <div className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Direct messages</div>
-            <div className="space-y-1">{conversations.filter((conversation) => conversation.kind === 'dm').map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} selected={selectedId === conversation.id} onClick={() => setSelectedId(conversation.id)} />)}{conversations.filter((conversation) => conversation.kind === 'dm').length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">Search for someone to start a DM.</p>}</div>
-            <div className="mt-7 px-2 pb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Spaces</div>
-            <div className="space-y-1">{conversations.filter((conversation) => conversation.kind === 'space').map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} selected={selectedId === conversation.id} onClick={() => setSelectedId(conversation.id)} />)}{conversations.filter((conversation) => conversation.kind === 'space').length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">No spaces yet.</p>}</div>
-          </div>
-          <div className="border-t border-border px-4 py-2 text-[10px] text-muted-foreground">Realtime: <span className={realtimeStatus === 'SUBSCRIBED' ? 'text-primary' : 'text-muted-foreground'}>{realtimeStatus.toLowerCase()}</span></div>
-        </aside>
-
-        <main className="flex min-w-0 flex-1 flex-col bg-background">
-          {selected ? <>
-            <header className="flex items-center gap-3 border-b border-border px-6 py-4"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">{selected.kind === 'space' ? <Users size={17} /> : <MessageCircle size={17} />}</span><div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{selected.name}</h2><p className="text-[10px] text-muted-foreground">{selected.kind === 'space' ? `${selected.members.length} members` : 'Direct message'}</p></div></header>
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-              {loadingMessages ? <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-muted-foreground" size={20} /></div> : selected.messages.length === 0 ? <div className="flex h-full items-center justify-center text-center"><div className="max-w-sm"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10 text-primary"><MessageCircle size={21} /></span><h3 className="mt-5 font-serif text-2xl tracking-[-.03em]">Start the conversation</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">Messages are stored in Supabase and delivered through Realtime.</p></div></div> : <div className="mx-auto max-w-3xl space-y-4">{selected.messages.map((message) => <div key={message.id} className={`flex ${message.senderId === currentUser?.id ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[75%] rounded-2xl border px-4 py-3 text-sm leading-6 ${message.senderId === currentUser?.id ? 'border-primary/30 bg-primary/[.10]' : 'border-border bg-card'}`}><div className="mb-1 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground">{message.sender}</div>{message.text}</div></div>)}</div>}
-            </div>
-            <div className="border-t border-border px-6 pb-5 pt-4"><div className="mx-auto max-w-3xl"><div className="mb-3 min-h-8">{loadingSuggestions ? <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><Loader2 size={13} className="animate-spin" /> Generating reply suggestions...</div> : suggestions.length === 3 ? <div className="flex flex-wrap gap-2">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => setInput(suggestion)} className="rounded-full border border-border bg-card px-3 py-1.5 text-[11px] text-muted-foreground hover:border-primary/50 hover:text-primary">{suggestion}</button>)}</div> : suggestionError ? <span className="text-[11px] text-muted-foreground">AI suggestions are temporarily unavailable.</span> : null}</div>{error && <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}<div className="flex items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-sm"><textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); } }} rows={2} placeholder="Write a message..." className="focus-ring min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-1 text-sm outline-none" /><button onClick={send} disabled={!input.trim()} className="focus-ring flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40" aria-label="Send message"><Send size={16} /></button></div><p className="mt-2 text-[10px] text-muted-foreground">Enter to send · Shift+Enter for a new line</p></div></div>
-          </> : <div className="flex h-full items-center justify-center text-center"><div className="max-w-sm"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10 text-primary"><MessageCircle size={21} /></span><h2 className="mt-5 font-serif text-2xl tracking-[-.03em]">Your Flexus chats</h2><p className="mt-2 text-xs leading-5 text-muted-foreground">Search for a real Flexus user or create a space to start messaging.</p></div></div>}
-        </main>
-      </div>
-      {showSpace && currentUser && <NewSpaceDialog currentUserId={currentUser.id} onClose={() => setShowSpace(false)} onCreated={handleSpaceCreated} />}
-    </section>
-  );
-}
+export default function ChatPage(){const[me,setMe]=useState<AuthUser|null>(null);const[convos,setConvos]=useState<Conversation[]>([]);const[selectedId,setSelectedId]=useState<string|null>(null);const[users,setUsers]=useState<Record<string,ChatUser>>({});const[input,setInput]=useState('');const[dmSearch,setDmSearch]=useState('');const[spaceSearch,setSpaceSearch]=useState('');const[userSearch,setUserSearch]=useState('');const[userResults,setUserResults]=useState<ChatUser[]>([]);const[suggestions,setSuggestions]=useState<string[]>([]);const[loadingSuggestions,setLoadingSuggestions]=useState(false);const[loading,setLoading]=useState(true);const[loadingMessages,setLoadingMessages]=useState(false);const[error,setError]=useState('');const[status,setStatus]=useState('CONNECTING');const[sidebar,setSidebar]=useState<SidebarState>(emptyState);const[menu,setMenu]=useState<{x:number;y:number;c:Conversation}|null>(null);const[newSpace,setNewSpace]=useState(false);const[settings,setSettings]=useState<Space|null>(null);
+ const selected=useMemo(()=>convos.find(c=>c.id===selectedId)||null,[convos,selectedId]);
+ const persist=(next:SidebarState)=>{if(me)saveState(me.id,next);setSidebar(next)};
+ const refresh=async(user:AuthUser)=>{const[recent,spaces]=await Promise.all([getRecentUserMessages(user.id),getSpaces(user.id)]);const ids=Array.from(new Set(recent.flatMap(m=>[m.sender_id,m.recipient_id]).filter((id):id is string=>Boolean(id)&&id!==user.id)));const partners=await getUsersByIds(ids);const spaceIds=Array.from(new Set(spaces.flatMap(s=>s.members)));const spaceUsers=await getUsersByIds(spaceIds);const map:Record<string,ChatUser>={};[...partners,...spaceUsers].forEach(u=>map[u.id]=u);setUsers(v=>({...v,...map}));setConvos(prev=>{const cache=new Map(prev.map(c=>[c.id,c.messages]));return [...partners.map(u=>({id:`dm:${u.id}`,kind:'dm' as const,name:u.display_name,userId:u.id,messages:cache.get(`dm:${u.id}`)||[]})),...spaces.map(s=>({id:`space:${s.id}`,kind:'space' as const,name:s.name,spaceId:s.id,members:s.members,ownerId:s.created_by,messages:cache.get(`space:${s.id}`)||[]}))]});};
+ const load=async(c:Conversation,user:AuthUser)=>{setLoadingMessages(true);setError('');try{const raw=c.kind==='dm'?await getMessagesForDm(user.id,c.userId):await getMessagesForSpace(c.spaceId);const ids=Array.from(new Set(raw.map(m=>m.sender_id).filter(id=>id!==user.id)));const us=await getUsersByIds(ids);const map={...users};us.forEach(u=>map[u.id]=u);setUsers(map);const ui=toUi(raw,map,user);setConvos(v=>v.map(x=>x.id===c.id?{...x,messages:ui}:x));setSuggestions([]);if(ui.length){setLoadingSuggestions(true);try{setSuggestions(await getSuggestions(ui))}catch{}finally{setLoadingSuggestions(false)}}}catch(e){setError(e instanceof Error?e.message:'Could not load messages.')}finally{setLoadingMessages(false)}};
+ useEffect(()=>{let dead=false;(async()=>{try{const u=await getCurrentUser();if(!u){setError('You must be signed in to use Chat.');return}if(dead)return;setMe(u);setSidebar(loadState(u.id));await refresh(u)}catch(e){if(!dead)setError(e instanceof Error?e.message:'Could not load Chat.')}finally{if(!dead)setLoading(false)}})();return()=>{dead=true}},[]);
+ useEffect(()=>{if(!me)return;const stop=subscribeToMessages(msg=>{const partner=msg.sender_id===me.id?msg.recipient_id:msg.sender_id;const match=convos.find(c=>c.kind==='space'?c.spaceId===msg.space_id:Boolean(partner)&&c.userId===partner);if(!match){refresh(me).catch(()=>{});return}const incoming=msg.sender_id!==me.id;const key=match.kind==='dm'?match.userId:match.spaceId;if(incoming)persist({...sidebar,hiddenDms:match.kind==='dm'?sidebar.hiddenDms.filter(x=>x!==key):sidebar.hiddenDms,hiddenSpaces:match.kind==='space'?sidebar.hiddenSpaces.filter(x=>x!==key):sidebar.hiddenSpaces,leftDms:match.kind==='dm'?sidebar.leftDms.filter(x=>x!==key):sidebar.leftDms,leftSpaces:match.kind==='space'?sidebar.leftSpaces.filter(x=>x!==key):sidebar.leftSpaces});const sender=msg.sender_id===me.id?me.name:users[msg.sender_id]?.display_name||'Flexus user';const ui={id:msg.id,senderId:msg.sender_id,sender,text:msg.text,createdAt:msg.created_at};setConvos(v=>v.map(c=>c.id===match.id?{...c,messages:c.messages.some(m=>m.id===ui.id)?c.messages:[...c.messages,ui]}:c))},setStatus);return stop},[me]);
+ useEffect(()=>{const t=setTimeout(async()=>{if(!userSearch.trim()){setUserResults([]);return}try{setUserResults(await searchUsers(userSearch,me?.id||''))}catch{}},200);return()=>clearTimeout(t)},[userSearch,me?.id]);
+ const chooseUser=(u:ChatUser)=>{const id=`dm:${u.id}`;setUsers(v=>({...v,[u.id]:u}));setConvos(v=>v.some(c=>c.id===id)?v:[...v,{id,kind:'dm',name:u.display_name,userId:u.id,messages:[]}]);setSelectedId(id);setUserSearch('');setUserResults([]);if(me)persist({...sidebar,leftDms:sidebar.leftDms.filter(x=>x!==u.id),hiddenDms:sidebar.hiddenDms.filter(x=>x!==u.id)})};
+ const send=async()=>{if(!me||!selected||!input.trim())return;const text=input.trim();setInput('');try{const m=selected.kind==='dm'?await sendDmMessage(me.id,selected.userId,text):await sendSpaceMessage(me.id,selected.spaceId,text);const ui={id:m.id,senderId:me.id,sender:me.name,text:m.text,createdAt:m.created_at};setConvos(v=>v.map(c=>c.id===selected.id?{...c,messages:c.messages.some(x=>x.id===ui.id)?c.messages:[...c.messages,ui]}:c))}catch(e){setError(e instanceof Error?e.message:'Could not send message.');setInput(text)}};
+ const visibleDms=convos.filter(c=>c.kind==='dm'&&!sidebar.leftDms.includes(c.userId)&&!sidebar.hiddenDms.includes(c.userId)&&c.name.toLowerCase().includes(dmSearch.toLowerCase()));const visibleSpaces=convos.filter(c=>c.kind==='space'&&!sidebar.leftSpaces.includes(c.spaceId)&&!sidebar.hiddenSpaces.includes(c.spaceId)&&c.name.toLowerCase().includes(spaceSearch.toLowerCase()));
+ const hide=(c:Conversation)=>{persist(c.kind==='dm'?{...sidebar,hiddenDms:Array.from(new Set([...sidebar.hiddenDms,c.userId]))}:{...sidebar,hiddenSpaces:Array.from(new Set([...sidebar.hiddenSpaces,c.spaceId]))});if(selectedId===c.id)setSelectedId(null);setMenu(null)};
+ const leave=async(c:Conversation)=>{try{if(c.kind==='space')await updateSpace(c.spaceId,{members:c.members.filter(x=>x!==me?.id)});persist(c.kind==='dm'?{...sidebar,leftDms:Array.from(new Set([...sidebar.leftDms,c.userId])),hiddenDms:sidebar.hiddenDms.filter(x=>x!==c.userId)}:{...sidebar,leftSpaces:Array.from(new Set([...sidebar.leftSpaces,c.spaceId])),hiddenSpaces:sidebar.hiddenSpaces.filter(x=>x!==c.spaceId)});setConvos(v=>v.filter(x=>x.id!==c.id));if(selectedId===c.id)setSelectedId(null)}catch(e){setError(e instanceof Error?e.message:'Could not leave.')}setMenu(null)};
+ if(loading)return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-muted-foreground"/></div>;
+ return <div className="flex min-h-[calc(100dvh-72px)]"><aside className="hidden w-[310px] shrink-0 border-r border-border/70 bg-sidebar/30 p-4 md:block"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15}/><input value={userSearch} onChange={e=>setUserSearch(e.target.value)} placeholder="Find a Flexus user..." className="focus-ring h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none"/>{userResults.length>0&&<div className="absolute left-0 right-0 top-11 z-30 rounded-xl border border-border bg-card shadow-xl">{userResults.map(u=><button key={u.id} onClick={()=>chooseUser(u)} className="flex w-full gap-3 px-3 py-3 text-left hover:bg-secondary"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs text-primary">{initials(u.display_name)}</span><span><b className="block text-sm">{u.display_name}</b><span className="text-[11px] text-muted-foreground">{u.email}</span></span></button>)}</div>}</div><div className="mt-5 flex items-center justify-between"><button onClick={()=>persist({...sidebar,collapsedDms:!sidebar.collapsedDms})} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{sidebar.collapsedDms?<ChevronRight size={14}/>:<ChevronDown size={14}/>}Direct Messages</button><button onClick={()=>document.querySelector<HTMLInputElement>('input[placeholder="Find a Flexus user..."]')?.focus()} className="rounded-md p-1 text-muted-foreground hover:bg-secondary"><Plus size={16}/></button></div>{!sidebar.collapsedDms&&<><div className="relative mt-2"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" size={13}/><input value={dmSearch} onChange={e=>setDmSearch(e.target.value)} placeholder="Search DMs" className="h-8 w-full rounded-md border border-border bg-background/60 pl-8 text-xs outline-none"/></div><div className="mt-2 space-y-1">{visibleDms.map(c=><Row key={c.id} c={c} selected={selectedId===c.id} onClick={()=>{setSelectedId(c.id);if(me)load(c,me)}} onMenu={e=>{e.preventDefault();setMenu({x:e.clientX,y:e.clientY,c})}}/>)}{!visibleDms.length&&<p className="px-3 py-3 text-xs text-muted-foreground">No visible DMs.</p>}</div></>}<div className="mt-6 flex items-center justify-between"><button onClick={()=>persist({...sidebar,collapsedSpaces:!sidebar.collapsedSpaces})} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{sidebar.collapsedSpaces?<ChevronRight size={14}/>:<ChevronDown size={14}/>}Spaces</button><button onClick={()=>setNewSpace(true)} className="rounded-md p-1 text-muted-foreground hover:bg-secondary"><Plus size={16}/></button></div>{!sidebar.collapsedSpaces&&<><div className="relative mt-2"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" size={13}/><input value={spaceSearch} onChange={e=>setSpaceSearch(e.target.value)} placeholder="Search Spaces" className="h-8 w-full rounded-md border border-border bg-background/60 pl-8 text-xs outline-none"/></div><div className="mt-2 space-y-1">{visibleSpaces.map(c=><Row key={c.id} c={c} selected={selectedId===c.id} onClick={()=>{setSelectedId(c.id);if(me)load(c,me)}} onMenu={e=>{e.preventDefault();setMenu({x:e.clientX,y:e.clientY,c})}}/>)}{!visibleSpaces.length&&<p className="px-3 py-3 text-xs text-muted-foreground">No visible Spaces.</p>}</div></>}</aside><section className="flex min-w-0 flex-1 flex-col">{selected?<><header className="flex h-16 items-center border-b border-border/70 px-5 sm:px-8"><div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">{selected.kind==='space'?<Users size={17}/>:<MessageCircle size={17}/>}</div><div className="ml-3 min-w-0"><h1 className="truncate text-sm font-semibold">{selected.name}</h1><p className="text-[11px] text-muted-foreground">{selected.kind==='space'?`${selected.members.length} members · ${selected.ownerId===me?.id?'You are owner':`Owner: ${users[selected.ownerId]?.display_name||'Flexus user'}`}`:'Direct message'}</p></div>{selected.kind==='space'&&<button onClick={()=>setSettings(selected)} className="ml-auto rounded-lg p-2 text-muted-foreground hover:bg-secondary"><Settings size={17}/></button>}</header><div className="flex-1 overflow-y-auto px-5 py-6 sm:px-8">{loadingMessages?<div className="flex justify-center py-10"><Loader2 className="animate-spin text-muted-foreground"/></div>:selected.messages.length===0?<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Start the conversation.</div>:<div className="mx-auto max-w-3xl space-y-4">{selected.messages.map(m=><div key={m.id} className={`flex gap-3 ${m.senderId===me?.id?'justify-end':''}`}><div className={`max-w-[78%] rounded-2xl px-4 py-3 ${m.senderId===me?.id?'bg-primary text-primary-foreground':'border border-border bg-card'}`}><div className="mb-1 flex gap-2 text-[10px] opacity-70"><span>{m.sender}</span><span>{formatTime(m.createdAt)}</span></div><p className="whitespace-pre-wrap text-sm leading-relaxed">{m.text}</p></div></div>)}</div>}</div><div className="border-t border-border/70 px-5 py-4 sm:px-8"><div className="mx-auto max-w-3xl">{(suggestions.length===3||loadingSuggestions)&&<div className="mb-3 flex gap-2 overflow-x-auto">{loadingSuggestions?<span className="text-[11px] text-muted-foreground">Generating suggestions…</span>:suggestions.map(s=><button key={s} onClick={()=>setInput(s)} className="shrink-0 rounded-full border border-border bg-secondary px-3 py-1.5 text-xs hover:border-primary/50">{s}</button>)}</div>}<div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2"><textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send()}}} placeholder="Write a message..." rows={1} className="max-h-32 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none"/><button onClick={()=>void send()} disabled={!input.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"><Send size={16}/></button></div></div></div></>:<div className="flex flex-1 items-center justify-center text-center"><div><MessageCircle className="mx-auto text-muted-foreground" size={34}/><h2 className="mt-4 font-serif text-2xl">Your conversations</h2><p className="mt-2 text-sm text-muted-foreground">Search for a Flexus user or choose a DM or Space.</p></div></div>}</section>{menu&&<MenuPopup x={menu.x} y={menu.y} c={menu.c} onHide={()=>hide(menu.c)} onLeave={()=>void leave(menu.c)} onSettings={()=>{if(menu.c.kind==='space')setSettings(menu.c);setMenu(null)}} onClose={()=>setMenu(null)}/>} {newSpace&&me&&<NewSpace me={me.id} onClose={()=>setNewSpace(false)} onCreated={s=>{setConvos(v=>[...v,{id:`space:${s.id}`,kind:'space',name:s.name,spaceId:s.id,members:s.members,ownerId:s.created_by,messages:[]}]);setNewSpace(false);setSelectedId(`space:${s.id}`)}}/>}{settings&&me&&<SpaceSettings space={settings} me={me.id} users={users} onClose={()=>setSettings(null)} onSaved={s=>{setConvos(v=>v.map(c=>c.kind==='space'&&c.spaceId===s.id?{...c,name:s.name,members:s.members,ownerId:s.created_by}:c));setSettings(v=>v?{...v,name:s.name,members:s.members,ownerId:s.created_by}:v)}} onLeft={()=>{setConvos(v=>v.filter(c=>c.id!==settings.id));setSelectedId(null);setSettings(null)}}/>}{error&&<div className="fixed bottom-4 right-4 z-[80] max-w-sm rounded-lg border border-destructive/30 bg-card px-4 py-3 text-xs text-destructive shadow-xl">{error}</div>}</div>}
