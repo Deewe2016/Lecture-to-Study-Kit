@@ -57,22 +57,76 @@ export async function sendSpaceMessage(senderId: string, spaceId: string, text: 
   if (!rows[0]) throw new Error('Supabase did not return the new message.'); return rows[0];
 }
 
-export function subscribeToMessages(onMessage: (message: DbMessage) => void, onStatus?: (status: string) => void) {
-  ensureConfigured(); const token = getAccessToken(); if (!token) throw new Error('You must be signed in to use Chat.');
-  const projectRef = SUPABASE_URL.replace(/^https?:\/\//, '').split('.')[0];
-  const socket = new WebSocket(`wss://${projectRef}.supabase.co/realtime/v1/websocket?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}&vsn=1.0.0`);
-  let ref = 0, heartbeat: number | undefined, reconnectTimer: number | undefined, stopped = false, joined = false, reconnectAttempt = 0;
-  const joinRef = String(++ref);
-  const send = (event: string, payload: unknown, topic = 'realtime:chat') => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ topic, event, payload, ref: String(++ref), join_ref: joinRef })); };
-  const tokenField = 'access' + '_' + 'token';
-  const getUserIdFromToken = (value: string) => { try { const part = value.split('.')[1]; if (!part) return ''; const normalized = part.replace(/-/g, '+').replace(/_/g, '/'); return String(JSON.parse(atob(normalized.padEnd(normalized.length + (4 - normalized.length % 4) % 4, '='))).sub || ''); } catch { return ''; } };
-  const userId = getUserIdFromToken(token);
-  const join = () => send('phx_join', { config: { broadcast: { ack: false, self: false }, presence: { enabled: false }, postgres_changes: [{ event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${userId}` }], private: false }, [tokenField]: getAccessToken() || token });
-  const reconnect = () => { if (stopped || reconnectTimer) return; const delay = [1000, 2000, 5000, 10000][Math.min(reconnectAttempt, 3)]; reconnectAttempt++; reconnectTimer = window.setTimeout(() => { reconnectTimer = undefined; if (!stopped) window.location.reload(); }, delay); };
-  socket.addEventListener('open', () => { reconnectAttempt = 0; joined = false; onStatus?.('CONNECTING'); join(); heartbeat = window.setInterval(() => send('heartbeat', {}, 'phoenix'), 20000); });
-  socket.addEventListener('message', (event) => { let payload: any; try { payload = JSON.parse(event.data); } catch { return; } if (payload.event === 'phx_reply' && payload.topic === 'realtime:chat' && payload.payload?.status === 'ok') { joined = true; onStatus?.('SUBSCRIBED'); } else if (payload.event === 'postgres_changes') { const record = payload.payload?.data?.record || payload.payload?.record; if (record?.id && record?.sender_id && record?.text && record.sender_id === userId) onMessage(record as DbMessage); } else if (payload.event === 'phx_error' || payload.event === 'phx_close') { joined = false; onStatus?.('RECONNECTING'); reconnect(); } });
-  socket.addEventListener('error', () => { joined = false; onStatus?.('ERROR'); reconnect(); });
-  socket.addEventListener('close', () => { joined = false; if (heartbeat) window.clearInterval(heartbeat); if (!stopped) { onStatus?.('RECONNECTING'); reconnect(); } });
-  const refreshTimer = window.setInterval(() => { const nextToken = getAccessToken(); if (joined && nextToken) send('access_token', { [tokenField]: nextToken }); }, 60000);
-  return () => { stopped = true; if (heartbeat) window.clearInterval(heartbeat); window.clearInterval(refreshTimer); if (reconnectTimer) window.clearTimeout(reconnectTimer); if (socket.readyState === WebSocket.OPEN) send('phx_leave', {}); socket.close(); };
+function createRealtimeSupabaseCompat() {
+  const channel = (name: string) => {
+    let handler: ((payload: any) => void) | undefined;
+    let socket: WebSocket | undefined;
+    let heartbeat: number | undefined;
+    let stopped = false;
+    let ref = 0;
+    const joinRef = String(++ref);
+    const send = (event: string, payload: unknown, topic = `realtime:${name}`) => {
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ topic, event, payload, ref: String(++ref), join_ref: joinRef }));
+    };
+    const tokenField = 'access' + '_' + 'token';
+    const reconnect = () => {
+      if (stopped) return;
+      window.setTimeout(() => {
+        if (!stopped) start();
+      }, 2000);
+    };
+    const start = () => {
+      if (stopped) return;
+      const token = getAccessToken();
+      if (!token) return;
+      const projectRef = SUPABASE_URL.replace(/^https?:\/\//, '').split('.')[0];
+      socket = new WebSocket(`wss://${projectRef}.supabase.co/realtime/v1/websocket?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}&vsn=1.0.0`);
+      socket.addEventListener('open', () => {
+        send('phx_join', { config: { broadcast: { ack: false, self: false }, presence: { enabled: false }, postgres_changes: [{ event: '*', schema: 'public', table: 'messages' }], private: false }, [tokenField]: token });
+        heartbeat = window.setInterval(() => send('heartbeat', {}, 'phoenix'), 20000);
+      });
+      socket.addEventListener('message', (event) => {
+        let payload: any;
+        try { payload = JSON.parse(event.data); } catch { return; }
+        if (payload.event === 'postgres_changes') handler?.(payload);
+      });
+      socket.addEventListener('error', () => {});
+      socket.addEventListener('close', () => {
+        if (heartbeat) window.clearInterval(heartbeat);
+        if (!stopped) reconnect();
+      });
+    };
+    return {
+      on(_event: string, _config: { event: '*'; schema: 'public'; table: 'messages' }, callback: (payload: any) => void) {
+        handler = callback;
+        return this;
+      },
+      subscribe() {
+        start();
+        return () => {
+          stopped = true;
+          if (heartbeat) window.clearInterval(heartbeat);
+          if (socket?.readyState === WebSocket.OPEN) send('phx_leave', {});
+          socket?.close();
+        };
+      },
+    };
+  };
+  return { channel };
+}
+
+export function subscribeToMessages(onMessage: (message: DbMessage) => void) {
+  ensureConfigured();
+  if (!getAccessToken()) return () => {};
+  const supabase = createRealtimeSupabaseCompat();
+  const channel = supabase
+    .channel('messages')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
+      // Filter in JavaScript here, not in Supabase.
+      const record = payload?.payload?.data?.record || payload?.payload?.record;
+      if (!record?.id || !record?.sender_id || !record?.text) return;
+      onMessage(record as DbMessage);
+    })
+    .subscribe();
+  return channel;
 }
