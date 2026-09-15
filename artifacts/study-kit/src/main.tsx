@@ -67,7 +67,8 @@ function ChatNavInjector() {
 }
 
 function Root() {
-  const path = window.location.pathname;
+  const rawPath = window.location.pathname;
+  const path = rawPath.length > 1 ? rawPath.replace(/\/+$/, '') : rawPath;
   const isChat = path === '/chat';
   const isAIChat = path === '/ai-chat';
 
