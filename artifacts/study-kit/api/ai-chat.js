@@ -1,4 +1,4 @@
-const MODEL = "llama-3.1-8b-instant";
+const MODEL = "openai/gpt-oss-20b";
 
 function cleanMessage(message) {
   if (!message || (message.role !== "user" && message.role !== "assistant")) return null;
@@ -21,6 +21,45 @@ export default async function handler(req, res) {
   }
 
   try {
+    const modelsResponse = await fetch("https://api.groq.com/openai/v1/models", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+    });
+    const modelsBody = await modelsResponse.text().catch(() => "");
+    console.log("Groq models API response:", {
+      status: modelsResponse.status,
+      ok: modelsResponse.ok,
+      body: modelsBody,
+    });
+
+    if (!modelsResponse.ok) {
+      return res.status(502).json({
+        error: `Groq models API HTTP ${modelsResponse.status}: ${modelsBody}`,
+      });
+    }
+
+    let modelsData;
+    try {
+      modelsData = JSON.parse(modelsBody);
+    } catch (parseError) {
+      console.error("Groq models API returned invalid JSON:", parseError);
+      return res.status(502).json({ error: `Invalid Groq models response: ${modelsBody}` });
+    }
+
+    const availableModelIds = Array.isArray(modelsData?.data)
+      ? modelsData.data.map((model) => model?.id).filter(Boolean)
+      : [];
+    console.log("Groq available model IDs:", availableModelIds);
+
+    if (!availableModelIds.includes(MODEL)) {
+      return res.status(502).json({
+        error: `Configured chat model ${MODEL} was not returned by Groq /models. Full response: ${modelsBody}`,
+      });
+    }
+
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -43,8 +82,12 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const details = await response.text().catch(() => "");
-      console.error("Groq AI Chat HTTP error:", response.status, details);
-      return res.status(502).json({ error: `Groq HTTP ${response.status}: ${details.slice(0, 500)}` });
+      console.error("Groq AI Chat HTTP error — full response:", {
+        status: response.status,
+        statusText: response.statusText,
+        body: details,
+      });
+      return res.status(502).json({ error: `Groq HTTP ${response.status}: ${details}` });
     }
 
     res.statusCode = 200;
