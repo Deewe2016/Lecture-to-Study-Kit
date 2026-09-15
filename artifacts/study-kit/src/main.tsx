@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import ChatPage from './pages/chat';
 import ChatShell from './pages/chat-shell';
+import AIChatPage from './pages/ai-chat';
 import { ErrorBoundary } from '@/components/error-boundary';
 
 import './index.css';
@@ -66,14 +67,20 @@ function ChatNavInjector() {
 }
 
 function Root() {
-  const isChat = window.location.pathname === '/chat';
+  const path = window.location.pathname;
+  const isChat = path === '/chat';
+  const isAIChat = path === '/ai-chat';
 
   return (
     <ErrorBoundary>
-      {!isChat && <ChatNavInjector />}
+      {!isChat && !isAIChat && <ChatNavInjector />}
       {isChat ? (
         <ChatShell>
           <ChatPage />
+        </ChatShell>
+      ) : isAIChat ? (
+        <ChatShell>
+          <AIChatPage />
         </ChatShell>
       ) : (
         <App />
