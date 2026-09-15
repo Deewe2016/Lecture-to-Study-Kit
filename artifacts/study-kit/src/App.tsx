@@ -894,9 +894,9 @@ function Shell({
   return (
     <div className="grain min-h-[100dvh] bg-background text-foreground">
       <aside
-        className={`fixed inset-y-0 left-0 z-30 border-r border-sidebar-border bg-sidebar px-5 py-6 transition-all md:translate-x-0 ${
-          collapsed ? 'md:w-[72px]' : 'md:w-[248px]'
-        } w-[248px] ${
+        className={`fixed inset-y-0 left-0 z-30 border-r border-sidebar-border bg-sidebar py-6 transition-all md:translate-x-0 ${
+          collapsed ? 'md:w-[72px] md:px-3' : 'md:w-[248px] md:px-5'
+        } w-[248px] px-5 ${
           mobileOpen
             ? 'translate-x-0'
             : '-translate-x-full'
@@ -945,7 +945,7 @@ function Shell({
                 onClick={() =>
                   setMobileOpen(false)
                 }
-                className={`focus-ring flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                className={`focus-ring flex items-center rounded-lg py-2.5 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${
                   location === href
                     ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                     : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground'
@@ -953,8 +953,10 @@ function Shell({
                 data-testid={`link-nav-${label
                   .toLowerCase()
                   .replaceAll(' ', '-')}`}
+                title={collapsed ? label : undefined}
               >
                 <Icon
+                  className="shrink-0"
                   size={17}
                   strokeWidth={1.8}
                 />
