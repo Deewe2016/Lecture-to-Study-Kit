@@ -65,7 +65,7 @@ function conversationTitle(conversation: Conversation) {
   return text.length > 30 ? `${text.slice(0, 30)}…` : text;
 }
 
-function renderMarkdown(text: string) {
+function renderInlineMarkdown(text: string) {
   const tokens = text.split(/(\*\*[^*]+\*\*|(?<!\*)\*[^*]+\*(?!\*))/g);
   return tokens.map((token, index) => {
     if (token.startsWith('**') && token.endsWith('**')) {
@@ -76,6 +76,80 @@ function renderMarkdown(text: string) {
     }
     return <span key={index}>{token}</span>;
   });
+}
+
+function isTableSeparator(line: string) {
+  const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function splitTableRow(line: string) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+}
+
+function renderMarkdown(text: string) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const blocks: React.ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const nextLine = lines[index + 1];
+
+    if (line.includes('|') && nextLine && isTableSeparator(nextLine)) {
+      const headers = splitTableRow(line);
+      const rows: string[][] = [];
+      index += 2;
+
+      while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
+        rows.push(splitTableRow(lines[index]));
+        index += 1;
+      }
+
+      blocks.push(
+        <div key={`table-${index}`} className="my-3 w-full overflow-x-auto rounded-lg border border-border">
+          <table className="min-w-full border-collapse text-left text-sm">
+            <thead>
+              <tr className="bg-secondary/80">
+                {headers.map((header, cellIndex) => (
+                  <th key={cellIndex} className="border-b border-r border-border px-3 py-2.5 font-semibold text-foreground last:border-r-0">
+                    {renderInlineMarkdown(header)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-card' : 'bg-secondary/35'}>
+                  {headers.map((_, cellIndex) => (
+                    <td key={cellIndex} className="border-b border-r border-border px-3 py-2.5 align-top text-card-foreground last:border-r-0 last:border-b-0">
+                      {renderInlineMarkdown(row[cellIndex] || '')}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+
+    if (!line.trim()) {
+      blocks.push(<div key={`space-${index}`} className="h-2" />);
+      index += 1;
+      continue;
+    }
+
+    blocks.push(
+      <div key={`line-${index}`}>
+        {renderInlineMarkdown(line)}
+      </div>,
+    );
+    index += 1;
+  }
+
+  return <>{blocks}</>;
 }
 
 export default function AIChatPage() {
