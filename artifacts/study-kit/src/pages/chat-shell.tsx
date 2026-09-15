@@ -33,7 +33,7 @@ export default function ChatShell({ children }: { children: React.ReactNode }) {
   const displayName = user?.name || 'Student';
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true');
-  const location = window.location.pathname;
+  const location = window.location.pathname.replace(/\/+$/, '') || '/';
 
   const toggleCollapsed = () => {
     setCollapsed((current) => {
@@ -68,7 +68,13 @@ export default function ChatShell({ children }: { children: React.ReactNode }) {
             <a
               key={href}
               href={href}
-              onClick={() => setMobileOpen(false)}
+              onClick={(event) => {
+                setMobileOpen(false);
+                if (href === '/ai-chat') {
+                  event.preventDefault();
+                  window.location.assign('/ai-chat');
+                }
+              }}
               title={collapsed ? label : undefined}
               className={`focus-ring flex items-center rounded-lg py-2.5 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${location === href ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground'}`}
               data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}
