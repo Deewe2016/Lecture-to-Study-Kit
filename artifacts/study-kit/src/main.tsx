@@ -66,6 +66,17 @@ function ChatNavInjector() {
   return null;
 }
 
+function Route({ path, component: Component }: { path: string; component: React.ComponentType }) {
+  const rawPath = window.location.pathname;
+  const currentPath = rawPath.length > 1 ? rawPath.replace(/\/+$/, '') : rawPath;
+  if (currentPath !== path) return null;
+  return (
+    <ChatShell>
+      <Component />
+    </ChatShell>
+  );
+}
+
 function Root() {
   const rawPath = window.location.pathname;
   const path = rawPath.length > 1 ? rawPath.replace(/\/+$/, '') : rawPath;
@@ -80,9 +91,7 @@ function Root() {
           <ChatPage />
         </ChatShell>
       ) : isAIChat ? (
-        <ChatShell>
-          <AIChatPage />
-        </ChatShell>
+        <Route path="/ai-chat" component={AIChatPage} />
       ) : (
         <App />
       )}
