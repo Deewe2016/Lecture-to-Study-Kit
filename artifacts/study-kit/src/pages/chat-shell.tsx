@@ -8,6 +8,7 @@ import {
   Menu,
   MessageCircle,
   Plus,
+  Sparkles,
   X,
 } from 'lucide-react';
 import { getStoredUser, signOut } from '@/lib/auth';
@@ -34,6 +35,7 @@ export default function ChatShell({ children }: { children: React.ReactNode }) {
     { href: '/new', label: 'New study kit', icon: Plus },
     { href: '/calendar', label: 'Calendar', icon: CalendarDays },
     { href: '/chat', label: 'Chat', icon: MessageCircle },
+    { href: '/ai-chat', label: 'AI Chat', icon: Sparkles },
   ];
 
   return (
@@ -75,7 +77,7 @@ export default function ChatShell({ children }: { children: React.ReactNode }) {
       <main className="min-h-[100dvh] md:pl-[248px]">
         <header className="flex h-[72px] items-center justify-between border-b border-border/70 px-5 sm:px-8">
           <button className="focus-ring rounded-md p-2 text-muted-foreground md:hidden" onClick={() => setMobileOpen(true)} data-testid="button-open-sidebar"><Menu size={20} /></button>
-          <div className="hidden items-center gap-2 text-xs text-muted-foreground md:flex"><Home size={14} /><span className="text-muted-foreground/50">/</span><span>Chat</span></div>
+          <div className="hidden items-center gap-2 text-xs text-muted-foreground md:flex"><Home size={14} /><span className="text-muted-foreground/50">/</span><span>{location === '/ai-chat' ? 'AI Chat' : 'Chat'}</span></div>
           <div className="ml-auto flex items-center gap-4">
             <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Saved locally</div>
             <button onClick={() => { void signOut().finally(() => window.location.reload()); }} title="Log out" className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-secondary text-xs font-medium text-foreground hover:border-primary/60" aria-label={`Log out ${displayName}`}>
