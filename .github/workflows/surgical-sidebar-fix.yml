@@ -20,7 +20,6 @@ jobs:
 
           app = Path('artifacts/study-kit/src/App.tsx')
           text = app.read_text()
-
           replacements = [
               ('  Menu,\n  MoreHorizontal,\n  PanelLeft,\n', '  Menu,\n  MessageCircle,\n  MoreHorizontal,\n  PanelLeft,\n', 'App import'),
               ('''  const [mobileOpen, setMobileOpen] =\n    useState(false);\n\n  const [location] = useLocation();''', '''  const [mobileOpen, setMobileOpen] =\n    useState(false);\n\n  const SIDEBAR_COLLAPSED_KEY = 'study-kit-sidebar-collapsed';\n  const [collapsed, setCollapsed] = useState(() => {\n    try {\n      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';\n    } catch {\n      return false;\n    }\n  });\n\n  useEffect(() => {\n    try {\n      localStorage.setItem(\n        SIDEBAR_COLLAPSED_KEY,\n        String(collapsed),\n      );\n    } catch {\n      // Ignore storage failures.\n    }\n  }, [collapsed]);\n\n  const [location] = useLocation();''', 'Shell state'),
@@ -34,7 +33,6 @@ jobs:
               ('''import AiChatPage from '@/pages/ai-chat';\n''', '''import AiChatPage from '@/pages/ai-chat';\nimport ChatPage from '@/pages/chat';\n''', 'Chat import'),
               ('''          <Route\n            path="/ai-chat"\n            component={AiChatPage}\n          />''', '''          <Route\n            path="/chat"\n            component={ChatPage}\n          />\n\n          <Route\n            path="/ai-chat"\n            component={AiChatPage}\n          />''', 'Chat route'),
           ]
-
           for old, new, label in replacements:
               count = text.count(old)
               if count != 1:
@@ -57,11 +55,20 @@ jobs:
           main.write_text(main_text)
           PY
 
+      - name: Validate and remove one-time workflow
+        run: |
+          grep -q "path=\"/chat\"" artifacts/study-kit/src/App.tsx
+          grep -q "MessageCircle" artifacts/study-kit/src/App.tsx
+          ! grep -q "ChatNavInjector" artifacts/study-kit/src/main.tsx
+          ! grep -q "ChatShell" artifacts/study-kit/src/main.tsx
+          git diff --check
+          rm -f .github/workflows/surgical-sidebar-fix.yml .github/sidebar-trigger
+
       - name: Commit surgical changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add artifacts/study-kit/src/App.tsx artifacts/study-kit/src/main.tsx
+          git add -A
           git diff --cached --check
           git commit -m "Fix shared sidebar collapse and chat navigation"
           git push
