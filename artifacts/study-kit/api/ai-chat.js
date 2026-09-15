@@ -1,4 +1,4 @@
-const MODEL = "llama3-70b-8192";
+const MODEL = "llama-3.1-8b-instant";
 
 function cleanMessage(message) {
   if (!message || (message.role !== "user" && message.role !== "assistant")) return null;
