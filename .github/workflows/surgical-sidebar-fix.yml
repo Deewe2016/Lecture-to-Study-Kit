@@ -1,7 +1,9 @@
 name: Surgical sidebar fix
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   fix-sidebar:
@@ -19,89 +21,38 @@ jobs:
           app = Path('artifacts/study-kit/src/App.tsx')
           text = app.read_text()
 
-          old_import = '  Menu,\n  MoreHorizontal,\n  PanelLeft,\n'
-          new_import = '  Menu,\n  MessageCircle,\n  MoreHorizontal,\n  PanelLeft,\n'
-          if text.count(old_import) != 1:
-              raise SystemExit('App.tsx import anchor count mismatch')
-          text = text.replace(old_import, new_import)
+          replacements = [
+              ('  Menu,\n  MoreHorizontal,\n  PanelLeft,\n', '  Menu,\n  MessageCircle,\n  MoreHorizontal,\n  PanelLeft,\n', 'App import'),
+              ('''  const [mobileOpen, setMobileOpen] =\n    useState(false);\n\n  const [location] = useLocation();''', '''  const [mobileOpen, setMobileOpen] =\n    useState(false);\n\n  const SIDEBAR_COLLAPSED_KEY = 'study-kit-sidebar-collapsed';\n  const [collapsed, setCollapsed] = useState(() => {\n    try {\n      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';\n    } catch {\n      return false;\n    }\n  });\n\n  useEffect(() => {\n    try {\n      localStorage.setItem(\n        SIDEBAR_COLLAPSED_KEY,\n        String(collapsed),\n      );\n    } catch {\n      // Ignore storage failures.\n    }\n  }, [collapsed]);\n\n  const [location] = useLocation();''', 'Shell state'),
+              ('''  const nav = [\n    {\n      href: '/',\n      label: 'My kits',\n      icon: Library,\n    },\n    {\n      href: '/new',\n      label: 'New study kit',\n      icon: Plus,\n    },\n    {\n      href: '/calendar',\n      label: 'Calendar',\n      icon: CalendarDays,\n    },\n    {\n      href: '/ai-chat',\n      label: 'AI Chat',\n      icon: Sparkles,\n    },\n  ];''', '''  const nav = [\n    { href: '/', label: 'My kits', icon: Library },\n    { href: '/new', label: 'New study kit', icon: Plus },\n    { href: '/calendar', label: 'Calendar', icon: CalendarDays },\n    { href: '/chat', label: 'Chat', icon: MessageCircle },\n    { href: '/ai-chat', label: 'AI Chat', icon: Sparkles },\n  ];''', 'nav array'),
+              ('''      <aside\n        className={`fixed inset-y-0 left-0 z-30 w-[248px] border-r border-sidebar-border bg-sidebar px-5 py-6 transition-transform md:translate-x-0 ${\n          mobileOpen\n            ? 'translate-x-0'\n            : '-translate-x-full'\n        }`}\n      >''', '''      <aside\n        className={`fixed inset-y-0 left-0 z-30 border-r border-sidebar-border bg-sidebar px-5 py-6 transition-all md:translate-x-0 ${\n          collapsed ? 'md:w-[72px]' : 'md:w-[248px]'\n        } w-[248px] ${\n          mobileOpen\n            ? 'translate-x-0'\n            : '-translate-x-full'\n        }`}\n      >''', 'aside width'),
+              ('''        <div className="flex items-center justify-between">\n          <Brand />''', '''        <div className="flex items-center justify-between">\n          <div className={collapsed ? 'md:hidden' : ''}>\n            <Brand />\n          </div>\n\n          <button\n            className="focus-ring hidden rounded-md p-1 text-muted-foreground md:block"\n            onClick={() => setCollapsed((value) => !value)}\n            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}\n            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}\n            data-testid="button-toggle-sidebar"\n          >\n            <PanelLeft size={18} />\n          </button>''', 'collapse button'),
+              ('''        <div className="mt-12 px-2 text-[10px] font-medium uppercase tracking-[.18em] text-muted-foreground">\n          Workspace\n        </div>''', '''        <div className={`mt-12 px-2 text-[10px] font-medium uppercase tracking-[.18em] text-muted-foreground ${\n          collapsed ? 'md:hidden' : ''\n        }`}>\n          Workspace\n        </div>''', 'workspace label'),
+              ('''                <span>{label}</span>\n\n                {href === '/new' && (''', '''                <span className={collapsed ? 'md:hidden' : ''}>\n                  {label}\n                </span>\n\n                {href === '/new' && !collapsed && (''', 'nav labels'),
+              ('''<main className="min-h-[100dvh] md:pl-[248px]">''', '''<main\n        className={`min-h-[100dvh] ${\n          collapsed ? 'md:pl-[72px]' : 'md:pl-[248px]'\n        }`}\n      >''', 'main padding'),
+              ('''<div className="absolute bottom-6 left-5 right-5 rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-4">''', '''<div\n          className={`absolute bottom-6 left-5 right-5 rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-4 ${\n            collapsed ? 'md:hidden' : ''\n          }`}\n        >''', 'workspace card'),
+              ('''import AiChatPage from '@/pages/ai-chat';\n''', '''import AiChatPage from '@/pages/ai-chat';\nimport ChatPage from '@/pages/chat';\n''', 'Chat import'),
+              ('''          <Route\n            path="/ai-chat"\n            component={AiChatPage}\n          />''', '''          <Route\n            path="/chat"\n            component={ChatPage}\n          />\n\n          <Route\n            path="/ai-chat"\n            component={AiChatPage}\n          />''', 'Chat route'),
+          ]
 
-          old_state = '''  const [mobileOpen, setMobileOpen] =\n    useState(false);\n\n  const [location] = useLocation();'''
-          new_state = '''  const [mobileOpen, setMobileOpen] =\n    useState(false);\n\n  const SIDEBAR_COLLAPSED_KEY = 'study-kit-sidebar-collapsed';\n  const [collapsed, setCollapsed] = useState(() => {\n    try {\n      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';\n    } catch {\n      return false;\n    }\n  });\n\n  useEffect(() => {\n    try {\n      localStorage.setItem(\n        SIDEBAR_COLLAPSED_KEY,\n        String(collapsed),\n      );\n    } catch {\n      // Ignore storage failures.\n    }\n  }, [collapsed]);\n\n  const [location] = useLocation();'''
-          if text.count(old_state) != 1:
-              raise SystemExit('App.tsx Shell state anchor count mismatch')
-          text = text.replace(old_state, new_state)
-
-          old_nav = '''  const nav = [\n    {\n      href: '/',\n      label: 'My kits',\n      icon: Library,\n    },\n    {\n      href: '/new',\n      label: 'New study kit',\n      icon: Plus,\n    },\n    {\n      href: '/calendar',\n      label: 'Calendar',\n      icon: CalendarDays,\n    },\n    {\n      href: '/ai-chat',\n      label: 'AI Chat',\n      icon: Sparkles,\n    },\n  ];'''
-          new_nav = '''  const nav = [\n    { href: '/', label: 'My kits', icon: Library },\n    { href: '/new', label: 'New study kit', icon: Plus },\n    { href: '/calendar', label: 'Calendar', icon: CalendarDays },\n    { href: '/chat', label: 'Chat', icon: MessageCircle },\n    { href: '/ai-chat', label: 'AI Chat', icon: Sparkles },\n  ];'''
-          if text.count(old_nav) != 1:
-              raise SystemExit('App.tsx nav anchor count mismatch')
-          text = text.replace(old_nav, new_nav)
-
-          old_aside = '''      <aside\n        className={`fixed inset-y-0 left-0 z-30 w-[248px] border-r border-sidebar-border bg-sidebar px-5 py-6 transition-transform md:translate-x-0 ${\n          mobileOpen\n            ? 'translate-x-0'\n            : '-translate-x-full'\n        }`}\n      >'''
-          new_aside = '''      <aside\n        className={`fixed inset-y-0 left-0 z-30 border-r border-sidebar-border bg-sidebar px-5 py-6 transition-all md:translate-x-0 ${\n          collapsed ? 'md:w-[72px]' : 'md:w-[248px]'\n        } w-[248px] ${\n          mobileOpen\n            ? 'translate-x-0'\n            : '-translate-x-full'\n        }`}\n      >'''
-          if text.count(old_aside) != 1:
-              raise SystemExit('App.tsx aside anchor count mismatch')
-          text = text.replace(old_aside, new_aside)
-
-          old_header = '''        <div className="flex items-center justify-between">\n          <Brand />'''
-          new_header = '''        <div className="flex items-center justify-between">\n          <div className={collapsed ? 'md:hidden' : ''}>\n            <Brand />\n          </div>\n\n          <button\n            className="focus-ring hidden rounded-md p-1 text-muted-foreground md:block"\n            onClick={() => setCollapsed((value) => !value)}\n            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}\n            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}\n            data-testid="button-toggle-sidebar"\n          >\n            <PanelLeft size={18} />\n          </button>'''
-          if text.count(old_header) != 1:
-              raise SystemExit('App.tsx header anchor count mismatch')
-          text = text.replace(old_header, new_header)
-
-          old_workspace = '''        <div className="mt-12 px-2 text-[10px] font-medium uppercase tracking-[.18em] text-muted-foreground">\n          Workspace\n        </div>'''
-          new_workspace = '''        <div className={`mt-12 px-2 text-[10px] font-medium uppercase tracking-[.18em] text-muted-foreground ${\n          collapsed ? 'md:hidden' : ''\n        }`}>\n          Workspace\n        </div>'''
-          if text.count(old_workspace) != 1:
-              raise SystemExit('App.tsx workspace anchor count mismatch')
-          text = text.replace(old_workspace, new_workspace)
-
-          old_label = '''                <span>{label}</span>\n\n                {href === '/new' && ('''
-          new_label = '''                <span className={collapsed ? 'md:hidden' : ''}>\n                  {label}\n                </span>\n\n                {href === '/new' && !collapsed && ('''
-          if text.count(old_label) != 1:
-              raise SystemExit('App.tsx nav label anchor count mismatch')
-          text = text.replace(old_label, new_label)
-
-          old_main = '<main className="min-h-[100dvh] md:pl-[248px]">'
-          new_main = '''<main\n        className={`min-h-[100dvh] ${\n          collapsed ? 'md:pl-[72px]' : 'md:pl-[248px]'\n        }`}\n      >'''
-          if text.count(old_main) != 1:
-              raise SystemExit('App.tsx main anchor count mismatch')
-          text = text.replace(old_main, new_main)
-
-          old_card = '<div className="absolute bottom-6 left-5 right-5 rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-4">'
-          new_card = '''<div\n          className={`absolute bottom-6 left-5 right-5 rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-4 ${\n            collapsed ? 'md:hidden' : ''\n          }`}\n        >'''
-          if text.count(old_card) != 1:
-              raise SystemExit('App.tsx workspace card anchor count mismatch')
-          text = text.replace(old_card, new_card)
-
-          old_chat_route = '''          <Route\n            path="/ai-chat"\n            component={AiChatPage}\n          />'''
-          new_chat_route = '''          <Route\n            path="/chat"\n            component={ChatPage}\n          />\n\n          <Route\n            path="/ai-chat"\n            component={AiChatPage}\n          />'''
-          if text.count(old_chat_route) != 1:
-              raise SystemExit('App.tsx route anchor count mismatch')
-          text = text.replace(old_chat_route, new_chat_route)
-
-          old_chat_import = "import AiChatPage from '@/pages/ai-chat';\n"
-          new_chat_import = "import AiChatPage from '@/pages/ai-chat';\nimport ChatPage from '@/pages/chat';\n"
-          if text.count(old_chat_import) != 1:
-              raise SystemExit('App.tsx page import anchor count mismatch')
-          text = text.replace(old_chat_import, new_chat_import)
-
+          for old, new, label in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label} anchor count mismatch: {count}')
+              text = text.replace(old, new)
           app.write_text(text)
 
           main = Path('artifacts/study-kit/src/main.tsx')
           main_text = main.read_text()
-          expected = '''import { useEffect } from 'react';\nimport { createRoot } from 'react-dom/client';\n\nimport App from './App';\nimport ChatPage from './pages/chat';\nimport ChatShell from './pages/chat-shell';\nimport { ErrorBoundary } from '@/components/error-boundary';\n\nimport './index.css';\n\nfunction ChatNavInjector() {'''
-          if main_text.count(expected) != 1:
-              raise SystemExit('main.tsx start anchor count mismatch')
-          start = main_text.index(expected)
-          end_marker = '\nfunction Root() {'
-          end = main_text.index(end_marker, start)
-          replacement = '''import { createRoot } from 'react-dom/client';\n\nimport App from './App';\nimport { ErrorBoundary } from '@/components/error-boundary';\n\nimport './index.css';\n'''
-          main_text = main_text[:start] + replacement + main_text[end:]
-
+          old_main = '''import { useEffect } from 'react';\nimport { createRoot } from 'react-dom/client';\n\nimport App from './App';\nimport ChatPage from './pages/chat';\nimport ChatShell from './pages/chat-shell';\nimport { ErrorBoundary } from '@/components/error-boundary';\n\nimport './index.css';\n\nfunction ChatNavInjector() {'''
+          new_main = '''import { createRoot } from 'react-dom/client';\n\nimport App from './App';\nimport { ErrorBoundary } from '@/components/error-boundary';\n\nimport './index.css';\n\n'''
+          if main_text.count(old_main) != 1:
+              raise SystemExit('main imports/injector anchor count mismatch')
+          main_text = main_text.replace(old_main, new_main)
           old_root = '''function Root() {\n  const rawPath = window.location.pathname;\n  const path = rawPath.length > 1 ? rawPath.replace(/\\/+$/, '') : rawPath;\n  const isChat = path === '/chat';\n\n  return (\n    <ErrorBoundary>\n      {!isChat && <ChatNavInjector />}\n      {isChat ? (\n        <ChatShell>\n          <ChatPage />\n        </ChatShell>\n      ) : (\n        <App />\n      )}\n    </ErrorBoundary>\n  );\n}'''
           new_root = '''function Root() {\n  return (\n    <ErrorBoundary>\n      <App />\n    </ErrorBoundary>\n  );\n}'''
           if main_text.count(old_root) != 1:
-              raise SystemExit('main.tsx Root anchor count mismatch')
+              raise SystemExit('main Root anchor count mismatch')
           main_text = main_text.replace(old_root, new_root)
           main.write_text(main_text)
           PY
@@ -112,6 +63,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add artifacts/study-kit/src/App.tsx artifacts/study-kit/src/main.tsx
           git diff --cached --check
-          git diff --cached -- artifacts/study-kit/src/App.tsx artifacts/study-kit/src/main.tsx
           git commit -m "Fix shared sidebar collapse and chat navigation"
           git push
