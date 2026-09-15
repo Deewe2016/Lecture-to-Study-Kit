@@ -57,6 +57,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import AuthPage from '@/pages/auth';
+import AiChatPage from '@/pages/ai-chat';
 import {
   getCurrentUser,
   getStoredUser,
@@ -65,6 +66,8 @@ import {
   type AuthUser,
 } from '@/lib/auth';
 import './index.css';
+
+export { AiChatPage };
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -873,6 +876,11 @@ function Shell({
       href: '/calendar',
       label: 'Calendar',
       icon: CalendarDays,
+    },
+    {
+      href: '/ai-chat',
+      label: 'AI Chat',
+      icon: Sparkles,
     },
   ];
 
@@ -3862,6 +3870,11 @@ function Router() {
           <Route
             path="/kit/:id"
             component={KitPage}
+          />
+
+          <Route
+            path="/ai-chat"
+            component={AiChatPage}
           />
 
           <Route
