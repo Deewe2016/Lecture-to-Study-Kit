@@ -1,14 +1,11 @@
-import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import App from './App';
-import ChatPage from './pages/chat';
-import ChatShell from './pages/chat-shell';
 import { ErrorBoundary } from '@/components/error-boundary';
 
 import './index.css';
 
-function ChatNavInjector() {
+
   useEffect(() => {
     let link: HTMLAnchorElement | null = null;
 
@@ -66,20 +63,9 @@ function ChatNavInjector() {
 }
 
 function Root() {
-  const rawPath = window.location.pathname;
-  const path = rawPath.length > 1 ? rawPath.replace(/\/+$/, '') : rawPath;
-  const isChat = path === '/chat';
-
   return (
     <ErrorBoundary>
-      {!isChat && <ChatNavInjector />}
-      {isChat ? (
-        <ChatShell>
-          <ChatPage />
-        </ChatShell>
-      ) : (
-        <App />
-      )}
+      <App />
     </ErrorBoundary>
   );
 }

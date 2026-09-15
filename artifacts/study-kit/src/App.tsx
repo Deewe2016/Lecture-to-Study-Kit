@@ -38,6 +38,7 @@ import {
   Home,
   Library,
   Menu,
+  MessageCircle,
   MoreHorizontal,
   PanelLeft,
   PenLine,
@@ -58,6 +59,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import AuthPage from '@/pages/auth';
 import AiChatPage from '@/pages/ai-chat';
+import ChatPage from '@/pages/chat';
 import {
   getCurrentUser,
   getStoredUser,
@@ -852,6 +854,26 @@ function Shell({
   const [mobileOpen, setMobileOpen] =
     useState(false);
 
+  const SIDEBAR_COLLAPSED_KEY = 'study-kit-sidebar-collapsed';
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        SIDEBAR_COLLAPSED_KEY,
+        String(collapsed),
+      );
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [collapsed]);
+
   const [location] = useLocation();
 
   useHealthCheck({
@@ -862,39 +884,38 @@ function Shell({
   });
 
   const nav = [
-    {
-      href: '/',
-      label: 'My kits',
-      icon: Library,
-    },
-    {
-      href: '/new',
-      label: 'New study kit',
-      icon: Plus,
-    },
-    {
-      href: '/calendar',
-      label: 'Calendar',
-      icon: CalendarDays,
-    },
-    {
-      href: '/ai-chat',
-      label: 'AI Chat',
-      icon: Sparkles,
-    },
+    { href: '/', label: 'My kits', icon: Library },
+    { href: '/new', label: 'New study kit', icon: Plus },
+    { href: '/calendar', label: 'Calendar', icon: CalendarDays },
+    { href: '/chat', label: 'Chat', icon: MessageCircle },
+    { href: '/ai-chat', label: 'AI Chat', icon: Sparkles },
   ];
 
   return (
     <div className="grain min-h-[100dvh] bg-background text-foreground">
       <aside
-        className={`fixed inset-y-0 left-0 z-30 w-[248px] border-r border-sidebar-border bg-sidebar px-5 py-6 transition-transform md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 border-r border-sidebar-border bg-sidebar px-5 py-6 transition-all md:translate-x-0 ${
+          collapsed ? 'md:w-[72px]' : 'md:w-[248px]'
+        } w-[248px] ${
           mobileOpen
             ? 'translate-x-0'
             : '-translate-x-full'
         }`}
       >
         <div className="flex items-center justify-between">
-          <Brand />
+          <div className={collapsed ? 'md:hidden' : ''}>
+            <Brand />
+          </div>
+
+          <button
+            className="focus-ring hidden rounded-md p-1 text-muted-foreground md:block"
+            onClick={() => setCollapsed((value) => !value)}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            data-testid="button-toggle-sidebar"
+          >
+            <PanelLeft size={18} />
+          </button>
 
           <button
             className="focus-ring rounded-md p-1 text-muted-foreground md:hidden"
@@ -905,7 +926,9 @@ function Shell({
           </button>
         </div>
 
-        <div className="mt-12 px-2 text-[10px] font-medium uppercase tracking-[.18em] text-muted-foreground">
+        <div className={`mt-12 px-2 text-[10px] font-medium uppercase tracking-[.18em] text-muted-foreground ${
+          collapsed ? 'md:hidden' : ''
+        }`}>
           Workspace
         </div>
 
@@ -936,9 +959,11 @@ function Shell({
                   strokeWidth={1.8}
                 />
 
-                <span>{label}</span>
+                <span className={collapsed ? 'md:hidden' : ''}>
+                  {label}
+                </span>
 
-                {href === '/new' && (
+                {href === '/new' && !collapsed && (
                   <span className="ml-auto text-primary">
                     <ArrowRight size={14} />
                   </span>
@@ -948,7 +973,11 @@ function Shell({
           )}
         </nav>
 
-        <div className="absolute bottom-6 left-5 right-5 rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-4">
+        <div
+          className={`absolute bottom-6 left-5 right-5 rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-4 ${
+            collapsed ? 'md:hidden' : ''
+          }`}
+        >
           <div className="flex items-center gap-2 text-xs text-sidebar-accent-foreground">
             <span className="h-2 w-2 rounded-full bg-emerald-400" />
             Local workspace
@@ -969,7 +998,11 @@ function Shell({
         />
       )}
 
-      <main className="min-h-[100dvh] md:pl-[248px]">
+      <main
+        className={`min-h-[100dvh] ${
+          collapsed ? 'md:pl-[72px]' : 'md:pl-[248px]'
+        }`}
+      >
         <header className="flex h-[72px] items-center justify-between border-b border-border/70 px-5 sm:px-8">
           <button
             className="focus-ring rounded-md p-2 text-muted-foreground md:hidden"
@@ -3870,6 +3903,11 @@ function Router() {
           <Route
             path="/kit/:id"
             component={KitPage}
+          />
+
+          <Route
+            path="/chat"
+            component={ChatPage}
           />
 
           <Route
