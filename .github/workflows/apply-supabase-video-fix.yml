@@ -12,6 +12,56 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Apply Dive Deeper auto-response fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app = Path('artifacts/study-kit/src/App.tsx')
+          text = app.read_text()
+          old = """                    localStorage.removeItem('lecture-study-ai-chat');
+                  } catch {
+                    // Navigation still works if local storage is unavailable.
+                  }
+
+                  window.location.assign('/ai-chat');"""
+          new = """                    localStorage.removeItem('lecture-study-ai-chat');
+                    localStorage.setItem('lecture-study-ai-auto-send', message);
+                  } catch {
+                    // Navigation still works if local storage is unavailable.
+                  }
+
+                  window.location.assign('/ai-chat');"""
+          if old in text:
+              app.write_text(text.replace(old, new, 1))
+
+          chat = Path('artifacts/study-kit/src/pages/ai-chat.tsx')
+          text = chat.read_text()
+          old_sig = """  const sendMessage = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const content = input.trim();"""
+          new_sig = """  const sendMessage = async (event?: FormEvent, contentOverride?: string) => {
+    event?.preventDefault();
+    const content = (contentOverride ?? input).trim();"""
+          if old_sig in text:
+              text = text.replace(old_sig, new_sig, 1)
+
+          marker = """  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {"""
+          insert = """  useEffect(() => {
+    const pendingMessage = localStorage.getItem('lecture-study-ai-auto-send');
+    if (!pendingMessage?.trim()) return;
+
+    localStorage.removeItem('lecture-study-ai-auto-send');
+    requestAnimationFrame(() => {
+      void sendMessage(undefined, pendingMessage);
+    });
+  }, []);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {"""
+          if marker in text and "lecture-study-ai-auto-send" not in text:
+              text = text.replace(marker, insert, 1)
+          chat.write_text(text)
+          PY
       - uses: pnpm/action-setup@v4
         with:
           version: 10.30.3
@@ -25,7 +75,7 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add artifacts/study-kit/src/App.tsx artifacts/study-kit/package.json pnpm-lock.yaml
+          git add artifacts/study-kit/src/App.tsx artifacts/study-kit/package.json pnpm-lock.yaml artifacts/study-kit/src/pages/ai-chat.tsx
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Fix Supabase video upload and Groq transcription"
+          git commit -m "Make Dive Deeper automatically send to AI"
           git push
