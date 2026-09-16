@@ -1,0 +1,144 @@
+name: Fix Dive Deeper auto-response
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch only Dive Deeper flow
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          app_path = Path('artifacts/study-kit/src/App.tsx')
+          chat_path = Path('artifacts/study-kit/src/pages/ai-chat.tsx')
+          app = app_path.read_text()
+          chat = chat_path.read_text()
+
+          # Replace only the existing Dive Deeper onClick body. The script locates
+          # the button by its visible text and replaces its arrow-function handler.
+          button_pos = app.find('>Dive Deeper</button>')
+          if button_pos < 0:
+              button_pos = app.find('>Dive Deeper<')
+          if button_pos < 0:
+              raise SystemExit('Could not find Dive Deeper button')
+
+          button_start = app.rfind('<button', 0, button_pos)
+          if button_start < 0:
+              raise SystemExit('Could not find Dive Deeper button start')
+
+          on_click_pos = app.find('onClick={() => {', button_start, button_pos)
+          if on_click_pos < 0:
+              raise SystemExit('Could not find Dive Deeper onClick handler')
+          handler_open = on_click_pos + len('onClick={() => {')
+
+          # Find the matching closing brace for the arrow function, respecting
+          # strings/templates so unrelated code is not touched.
+          depth = 1
+          i = handler_open
+          quote = None
+          escaped = False
+          while i < len(app):
+              c = app[i]
+              if quote:
+                  if escaped:
+                      escaped = False
+                  elif c == '\\':
+                      escaped = True
+                  elif c == quote:
+                      quote = None
+                  i += 1
+                  continue
+              if c in "'\"`":
+                  quote = c
+                  i += 1
+                  continue
+              if c == '{':
+                  depth += 1
+              elif c == '}':
+                  depth -= 1
+                  if depth == 0:
+                      break
+              i += 1
+          if depth != 0:
+              raise SystemExit('Could not parse Dive Deeper onClick handler')
+
+          # Preserve the existing kit/question/answer variable names by extracting
+          # them from the old handler's message construction. We only need the
+          # expressions already used by that handler.
+          old_handler = app[handler_open:i]
+          message_match = re.search(r'const message = `([^`]*)`;', old_handler)
+          if not message_match:
+              raise SystemExit('Could not find existing Dive Deeper message template')
+          old_template = message_match.group(1)
+
+          # Identify the existing interpolations for title, overview, and chapters.
+          # The old handler is known to use kit.title, kit.overview and kit.chapters.
+          # The tutor question/answer state is discovered from the nearby tutor answer
+          # rendering so this remains limited to the existing tutor implementation.
+          answer_render = app.rfind('{renderInlineMarkdown(answer)}', 0, button_start)
+          if answer_render < 0:
+              raise SystemExit('Could not locate tutor answer rendering')
+          # Look backward for the tutor question expression used in the nearby form.
+          nearby = app[max(0, answer_render - 12000):answer_render]
+          candidates = []
+          for pattern in [r'question', r'userQuestion', r'tutorQuestion']:
+              candidates.extend(re.findall(pattern, nearby))
+
+          # The current tutor state uses `question` and `answer`; verify both exist.
+          if not re.search(r'\bquestion\b', nearby):
+              raise SystemExit('Could not identify tutor question state')
+          question_expr = 'question'
+          answer_expr = 'answer'
+
+          new_handler = '''\n                  const message = `I was studying ${kit.title} and asked: ${question}. The tutor answered: ${answer}. I want to dive deeper into this topic. Here is my study material: ${kit.overview}\\n\\n${kit.chapters.map((chapter) => `${chapter.title}: ${chapter.summary}`).join('\\n\\n')}`;\n                  localStorage.setItem('lecture-study-ai-dive-deeper-pending', message);\n                  localStorage.removeItem('lecture-study-ai-chat');\n                  navigate('/ai-chat');\n                '''
+          # Keep indentation/style of the surrounding handler; replace only its body.
+          app = app[:handler_open] + new_handler + app[i:]
+          app_path.write_text(app)
+
+          # Make sendMessage accept a direct content override, then consume the
+          # pending Dive Deeper message on mount. This causes the exact same API
+          # request/streaming path as a normal user submission.
+          old_sig = "const sendMessage = async (event?: FormEvent) => {\n    event?.preventDefault();\n    const content = input.trim();"
+          new_sig = "const sendMessage = async (event?: FormEvent, contentOverride?: string) => {\n    event?.preventDefault();\n    const content = (contentOverride ?? input).trim();"
+          if old_sig not in chat:
+              raise SystemExit('Could not find sendMessage signature')
+          chat = chat.replace(old_sig, new_sig, 1)
+
+          marker = "  useEffect(() => () => abortRef.current?.abort(), []);\n"
+          if marker not in chat:
+              raise SystemExit('Could not find AI Chat effect insertion point')
+          effect = '''\n  useEffect(() => {\n    const pending = localStorage.getItem('lecture-study-ai-dive-deeper-pending');\n    if (!pending) return;\n\n    localStorage.removeItem('lecture-study-ai-dive-deeper-pending');\n    void sendMessage(undefined, pending);\n  }, []);\n'''
+          chat = chat.replace(marker, marker + effect, 1)
+          chat_path.write_text(chat)
+
+      - name: Verify only the two requested files changed
+        run: |
+          git diff --check
+          git diff -- artifacts/study-kit/src/App.tsx artifacts/study-kit/src/pages/ai-chat.tsx
+          test -z "$(git status --porcelain -- . ':!.github/workflows/fix-dive-deeper-auto-response.yml' | grep -v '^ M artifacts/study-kit/src/App.tsx$' | grep -v '^ M artifacts/study-kit/src/pages/ai-chat.tsx$' || true)"
+
+      - name: Commit requested fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts/study-kit/src/App.tsx artifacts/study-kit/src/pages/ai-chat.tsx
+          git commit -m "Fix Dive Deeper automatic AI response"
+          git push
+
+      - name: Remove temporary workflow
+        if: success()
+        run: |
+          rm -f .github/workflows/fix-dive-deeper-auto-response.yml
+          git add .github/workflows/fix-dive-deeper-auto-response.yml
+          git commit -m "Remove temporary Dive Deeper fix workflow"
+          git push
