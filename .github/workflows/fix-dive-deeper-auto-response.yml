@@ -1,7 +1,9 @@
 name: Fix Dive Deeper auto response
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   fix:
