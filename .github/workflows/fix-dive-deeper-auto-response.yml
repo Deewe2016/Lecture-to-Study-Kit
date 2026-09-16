@@ -1,16 +1,14 @@
 name: Fix Dive Deeper auto-response
 
 on:
-  workflow_run:
-    workflows: ["Apply final video transcription fix"]
-    types: [completed]
+  push:
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   fix:
-    if: ${{ github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,8 +28,6 @@ jobs:
           if button_pos < 0:
               raise SystemExit('Could not find Dive Deeper button')
           button_start = app.rfind('<button', 0, button_pos)
-          if button_start < 0:
-              raise SystemExit('Could not find Dive Deeper button start')
           on_click_pos = app.find('onClick={() => {', button_start, button_pos)
           if on_click_pos < 0:
               raise SystemExit('Could not find Dive Deeper onClick handler')
@@ -65,10 +61,8 @@ jobs:
               raise SystemExit('Could not parse Dive Deeper onClick handler')
 
           old_handler = app[handler_open:i]
-          if 'kit.title' not in old_handler or 'kit.overview' not in old_handler:
+          if 'kit.title' not in old_handler or 'kit.overview' not in old_handler or 'question' not in old_handler or 'answer' not in old_handler:
               raise SystemExit('Unexpected Dive Deeper handler; refusing unrelated changes')
-          if 'question' not in old_handler or 'answer' not in old_handler:
-              raise SystemExit('Tutor question/answer state not available in Dive Deeper scope')
 
           new_handler = '''
                   const message = `I was studying ${kit.title} and asked: ${question}. The tutor answered: ${answer}. I want to dive deeper into this topic. Here is my study material: ${kit.overview}\\n\\n${kit.chapters.map((chapter) => `${chapter.title}: ${chapter.summary}`).join('\\n\\n')}`;
@@ -104,8 +98,7 @@ jobs:
       - name: Verify only requested source files changed
         run: |
           git diff --check
-          changed=$(git diff --name-only)
-          test "$changed" = $'artifacts/study-kit/src/App.tsx\nartifacts/study-kit/src/pages/ai-chat.tsx'
+          test "$(git diff --name-only)" = $'artifacts/study-kit/src/App.tsx\nartifacts/study-kit/src/pages/ai-chat.tsx'
 
       - name: Commit requested fix
         run: |
