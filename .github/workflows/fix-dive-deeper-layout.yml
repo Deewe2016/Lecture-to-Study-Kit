@@ -1,0 +1,46 @@
+name: Fix Dive Deeper layout
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix button layout only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('artifacts/study-kit/src/App.tsx')
+          s = p.read_text()
+          old = '''              {renderInlineMarkdown(answer)}\n\n              <button\n                type="button"'''
+          new = '''              {renderInlineMarkdown(answer)}\n\n              <div className="mt-3 block">\n                <button\n                  type="button"'''
+          if old not in s:
+              raise SystemExit('Expected Dive Deeper button start was not found')
+          s = s.replace(old, new, 1)
+          old_class = '''                className="focus-ring mt-4 inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"'''
+          new_class = '''                  className="focus-ring inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"'''
+          if old_class not in s:
+              raise SystemExit('Expected Dive Deeper button class was not found')
+          s = s.replace(old_class, new_class, 1)
+          old_end = '''              </button>\n            </div>\n          )}'''
+          new_end = '''                </button>\n              </div>\n            </div>\n          )}'''
+          if old_end not in s:
+              raise SystemExit('Expected Dive Deeper button closing structure was not found')
+          s = s.replace(old_end, new_end, 1)
+          p.write_text(s)
+          PY
+      - name: Commit only App.tsx and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts/study-kit/src/App.tsx
+          git commit -m "Fix Dive Deeper button layout"
+          git push
+          git rm .github/workflows/fix-dive-deeper-layout.yml
+          git commit -m "Remove temporary layout workflow"
+          git push
