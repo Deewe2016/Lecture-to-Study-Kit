@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   let context = clean(req.body?.context);
   if (!prompt) return res.status(400).json({ error: "Ask a question first." });
 
-  // Keep the tutor focused on the generated kit rather than allowing an enormous request.
+  // Keep the supplied kit context bounded while allowing the tutor to use general knowledge.
   context = context.slice(0, 30000);
 
   try {
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
         messages: [
           {
             role: "system",
-            content: "You are a concise study tutor. Answer the student's question using ONLY the supplied study-kit context. Explain ideas clearly in your own words. Do not invent information. If the context does not contain enough information, say so. Keep the answer focused and suitable for studying.",
+            content: "You are a helpful study tutor. Use the provided study kit content as your PRIMARY source when answering. If the user asks something beyond the study kit content, answer from your general knowledge and mention that this goes beyond the kit material. Never refuse to answer.",
           },
           {
             role: "user",
