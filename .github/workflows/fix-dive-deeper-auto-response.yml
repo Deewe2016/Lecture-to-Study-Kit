@@ -1,14 +1,16 @@
 name: Fix Dive Deeper auto-response
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["Apply final video transcription fix"]
+    types: [completed]
 
 permissions:
   contents: write
 
 jobs:
   fix:
+    if: ${{ github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,16 +26,12 @@ jobs:
           app = app_path.read_text()
           chat = chat_path.read_text()
 
-          button_pos = app.find('>Dive Deeper</button>')
-          if button_pos < 0:
-              button_pos = app.find('>Dive Deeper<')
+          button_pos = app.find('Dive Deeper')
           if button_pos < 0:
               raise SystemExit('Could not find Dive Deeper button')
-
           button_start = app.rfind('<button', 0, button_pos)
           if button_start < 0:
               raise SystemExit('Could not find Dive Deeper button start')
-
           on_click_pos = app.find('onClick={() => {', button_start, button_pos)
           if on_click_pos < 0:
               raise SystemExit('Could not find Dive Deeper onClick handler')
@@ -56,9 +54,7 @@ jobs:
                   continue
               if c in "'\"`":
                   quote = c
-                  i += 1
-                  continue
-              if c == '{':
+              elif c == '{':
                   depth += 1
               elif c == '}':
                   depth -= 1
@@ -69,20 +65,16 @@ jobs:
               raise SystemExit('Could not parse Dive Deeper onClick handler')
 
           old_handler = app[handler_open:i]
-          if 'const message = `' not in old_handler:
-              raise SystemExit('Could not find existing Dive Deeper message template')
-
-          answer_render = app.rfind('{renderInlineMarkdown(answer)}', 0, button_start)
-          if answer_render < 0:
-              raise SystemExit('Could not locate tutor answer rendering')
-          nearby = app[max(0, answer_render - 12000):answer_render]
-          if not re.search(r'\bquestion\b', nearby):
-              raise SystemExit('Could not identify tutor question state')
+          if 'kit.title' not in old_handler or 'kit.overview' not in old_handler:
+              raise SystemExit('Unexpected Dive Deeper handler; refusing unrelated changes')
+          if 'question' not in old_handler or 'answer' not in old_handler:
+              raise SystemExit('Tutor question/answer state not available in Dive Deeper scope')
 
           new_handler = '''
                   const message = `I was studying ${kit.title} and asked: ${question}. The tutor answered: ${answer}. I want to dive deeper into this topic. Here is my study material: ${kit.overview}\\n\\n${kit.chapters.map((chapter) => `${chapter.title}: ${chapter.summary}`).join('\\n\\n')}`;
                   localStorage.setItem('lecture-study-ai-dive-deeper-pending', message);
                   localStorage.removeItem('lecture-study-ai-chat');
+                  localStorage.removeItem('lecture-study-ai-conversations');
                   navigate('/ai-chat');
                 '''
           app = app[:handler_open] + new_handler + app[i:]
@@ -130,5 +122,3 @@ jobs:
           git add .github/workflows/fix-dive-deeper-auto-response.yml
           git commit -m "Remove temporary Dive Deeper fix workflow"
           git push
-
-# This comment intentionally triggers a second push now that the workflow exists on main.
