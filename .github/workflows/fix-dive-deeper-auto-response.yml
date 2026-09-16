@@ -1,0 +1,87 @@
+name: Fix Dive Deeper auto response
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch Dive Deeper auto-send
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app = Path('artifacts/study-kit/src/App.tsx')
+          text = app.read_text()
+          old = """                    localStorage.removeItem('lecture-study-ai-chat');
+                  } catch {
+                    // Navigation still works if local storage is unavailable.
+                  }
+
+                  window.location.assign('/ai-chat');"""
+          new = """                    localStorage.removeItem('lecture-study-ai-chat');
+                    localStorage.setItem('lecture-study-ai-auto-send', message);
+                  } catch {
+                    // Navigation still works if local storage is unavailable.
+                  }
+
+                  window.location.assign('/ai-chat');"""
+          if old not in text:
+              raise SystemExit('App.tsx target snippet not found')
+          app.write_text(text.replace(old, new, 1))
+
+          chat = Path('artifacts/study-kit/src/pages/ai-chat.tsx')
+          text = chat.read_text()
+          old_sig = """  const sendMessage = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const content = input.trim();"""
+          new_sig = """  const sendMessage = async (event?: FormEvent, contentOverride?: string) => {
+    event?.preventDefault();
+    const content = (contentOverride ?? input).trim();"""
+          if old_sig not in text:
+              raise SystemExit('ai-chat.tsx sendMessage signature not found')
+          text = text.replace(old_sig, new_sig, 1)
+
+          marker = """  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {"""
+          insert = """  useEffect(() => {
+    const pendingMessage = localStorage.getItem('lecture-study-ai-auto-send');
+    if (!pendingMessage?.trim()) return;
+
+    localStorage.removeItem('lecture-study-ai-auto-send');
+    requestAnimationFrame(() => {
+      void sendMessage(undefined, pendingMessage);
+    });
+  }, []);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {"""
+          if marker not in text:
+              raise SystemExit('ai-chat.tsx insertion marker not found')
+          text = text.replace(marker, insert, 1)
+          chat.write_text(text)
+          PY
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts/study-kit/src/App.tsx artifacts/study-kit/src/pages/ai-chat.tsx
+          git diff --cached --check
+          git commit -m "Make Dive Deeper automatically send to AI"
+          git push
+
+      - name: Remove temporary workflow
+        if: always()
+        run: |
+          rm -f .github/workflows/fix-dive-deeper-auto-response.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/fix-dive-deeper-auto-response.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "Remove temporary auto-response workflow"
+            git push
+          fi
