@@ -115,3 +115,5 @@ jobs:
           git add .github/workflows/fix-dive-deeper-auto-response.yml
           git commit -m "Remove temporary Dive Deeper fix workflow"
           git push
+
+# trigger
