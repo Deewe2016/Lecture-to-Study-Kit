@@ -2818,8 +2818,9 @@ function Overview({
             >
               {renderInlineMarkdown(answer)}
 
-              <button
-                type="button"
+              <div className="mt-3 block">
+                <button
+                  type="button"
                 onClick={() => {
                   const message = `I want to learn more about ${kit.title}. Here is the study material: ${kit.overview}\n\n${kit.chapters
                     .map((chapter) => `${chapter.title}: ${chapter.summary}`)
@@ -2853,13 +2854,14 @@ function Overview({
 
                   window.location.assign('/ai-chat');
                 }}
-                className="focus-ring mt-4 inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"
+                  className="focus-ring inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"
                 data-testid="button-dive-deeper"
               >
                 <Sparkles size={14} />
                 Dive Deeper
                 <ArrowRight size={14} />
-              </button>
+                </button>
+              </div>
             </div>
           )}
         </div>
