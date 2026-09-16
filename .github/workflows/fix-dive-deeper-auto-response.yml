@@ -17,7 +17,6 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re
 
           app_path = Path('artifacts/study-kit/src/App.tsx')
           chat_path = Path('artifacts/study-kit/src/pages/ai-chat.tsx')
@@ -65,17 +64,14 @@ jobs:
               raise SystemExit('Unexpected Dive Deeper handler; refusing unrelated changes')
 
           new_handler = '''
-                  const message = `I was studying ${kit.title} and asked: ${question}. The tutor answered: ${answer}. I want to dive deeper into this topic. Here is my study material: ${kit.overview}\\n\\n${kit.chapters.map((chapter) => `${chapter.title}: ${chapter.summary}`).join('\\n\\n')}`;
-                  localStorage.setItem('lecture-study-ai-dive-deeper-pending', message);
-                  localStorage.removeItem('lecture-study-ai-chat');
-                  localStorage.removeItem('lecture-study-ai-conversations');
-                  navigate('/ai-chat');
+                  localStorage.setItem('dive-deeper-message', `I was studying "${kit.title}" and asked: "${question}". The tutor answered: "${answer}". I want to dive deeper. Here is the study material: ${kit.overview}`);
+                  window.location.assign('/ai-chat');
                 '''
           app = app[:handler_open] + new_handler + app[i:]
           app_path.write_text(app)
 
           old_sig = "const sendMessage = async (event?: FormEvent) => {\n    event?.preventDefault();\n    const content = input.trim();"
-          new_sig = "const sendMessage = async (event?: FormEvent, contentOverride?: string) => {\n    event?.preventDefault();\n    const content = (contentOverride ?? input).trim();"
+          new_sig = "const sendMessage = async (event?: FormEvent, overrideContent?: string) => {\n    event?.preventDefault();\n    const content = overrideContent ?? input.trim();"
           if old_sig not in chat:
               raise SystemExit('Could not find sendMessage signature')
           chat = chat.replace(old_sig, new_sig, 1)
@@ -85,11 +81,17 @@ jobs:
               raise SystemExit('Could not find AI Chat effect insertion point')
           effect = '''
   useEffect(() => {
-    const pending = localStorage.getItem('lecture-study-ai-dive-deeper-pending');
+    const pending = localStorage.getItem('dive-deeper-message');
     if (!pending) return;
-
-    localStorage.removeItem('lecture-study-ai-dive-deeper-pending');
-    void sendMessage(undefined, pending);
+    localStorage.removeItem('dive-deeper-message');
+    const newConversation = {
+      id: makeId(),
+      messages: [],
+      createdAt: Date.now(),
+    };
+    setConversations(current => [newConversation, ...current]);
+    setSelectedId(newConversation.id);
+    setTimeout(() => sendMessage(undefined, pending), 100);
   }, []);
 '''
           chat = chat.replace(marker, marker + effect, 1)
@@ -115,5 +117,3 @@ jobs:
           git add .github/workflows/fix-dive-deeper-auto-response.yml
           git commit -m "Remove temporary Dive Deeper fix workflow"
           git push
-
-# trigger
