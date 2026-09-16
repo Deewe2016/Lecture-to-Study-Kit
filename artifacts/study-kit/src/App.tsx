@@ -2488,6 +2488,19 @@ function KitWorkspace({
   );
 }
 
+function renderInlineMarkdown(text: string) {
+  const tokens = text.split(/(\*\*[^*]+\*\*|(?<!\*)\*[^*]+\*(?!\*))/g);
+  return tokens.map((token, index) => {
+    if (token.startsWith('**') && token.endsWith('**')) {
+      return <strong key={index}>{token.slice(2, -2)}</strong>;
+    }
+    if (token.startsWith('*') && token.endsWith('*')) {
+      return <em key={index}>{token.slice(1, -1)}</em>;
+    }
+    return <span key={index}>{token}</span>;
+  });
+}
+
 function Overview({
   kit,
   onTab,
@@ -2799,12 +2812,55 @@ function Overview({
           </div>
 
           {answer && (
-            <p
+            <div
               className="mt-4 border-t border-border pt-4 text-xs leading-5 text-muted-foreground"
               data-testid="text-tutor-answer"
             >
-              {answer}
-            </p>
+              {renderInlineMarkdown(answer)}
+
+              <button
+                type="button"
+                onClick={() => {
+                  const message = `I want to learn more about ${kit.title}. Here is the study material: ${kit.overview}\n\n${kit.chapters
+                    .map((chapter) => `${chapter.title}: ${chapter.summary}`)
+                    .join('\n\n')}`;
+                  const id = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                  const conversation = {
+                    id,
+                    messages: [
+                      {
+                        id: `ai-msg-${Date.now()}`,
+                        role: 'user' as const,
+                        content: message,
+                      },
+                    ],
+                    createdAt: Date.now(),
+                  };
+
+                  try {
+                    const existing = JSON.parse(
+                      localStorage.getItem('lecture-study-ai-conversations') || '[]',
+                    );
+                    const conversations = Array.isArray(existing) ? existing : [];
+                    localStorage.setItem(
+                      'lecture-study-ai-conversations',
+                      JSON.stringify([conversation, ...conversations]),
+                    );
+                    localStorage.removeItem('lecture-study-ai-chat');
+                  } catch {
+                    // Navigation still works if local storage is unavailable.
+                  }
+
+                  window.location.assign('/ai-chat');
+                }}
+                className="focus-ring mt-4 inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"
+                data-testid="button-dive-deeper"
+              >
+                <Sparkles size={14} />
+                Dive Deeper
+                <ArrowRight size={14} />
+              </button>
+            </div>
           )}
         </div>
       </div>
