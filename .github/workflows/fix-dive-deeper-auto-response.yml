@@ -63,12 +63,12 @@ jobs:
               raise SystemExit('Could not parse Dive Deeper onClick handler')
 
           old_handler = app[handler_open:i]
-          if 'kit.title' not in old_handler or 'kit.overview' not in old_handler or 'question' not in old_handler or 'answer' not in old_handler:
+          if 'kit.title' not in old_handler or 'kit.overview' not in old_handler or 'prompt' not in old_handler or 'answer' not in old_handler:
               raise SystemExit('Unexpected Dive Deeper handler; refusing unrelated changes')
 
           if "localStorage.setItem('dive-deeper-message'" not in old_handler:
               new_handler = '''
-                  localStorage.setItem('dive-deeper-message', `I was studying "${kit.title}" and asked: "${question}". The tutor answered: "${answer}". I want to dive deeper. Here is the study material: ${kit.overview}`);
+                  localStorage.setItem('dive-deeper-message', `I was studying "${kit.title}" and asked: "${prompt}". The tutor answered: "${answer}". I want to dive deeper. Here is the study material: ${kit.overview}`);
                   window.location.assign('/ai-chat');
                 '''
               app = app[:handler_open] + new_handler + app[i:]
@@ -84,16 +84,16 @@ jobs:
               if marker not in chat:
                   raise SystemExit('Could not find AI Chat effect insertion point')
               effect = '''
-          useEffect(() => {
-            const pending = localStorage.getItem('dive-deeper-message');
-            if (!pending) return;
-            localStorage.removeItem('dive-deeper-message');
-            const newConv = { id: makeId(), messages: [], createdAt: Date.now() };
-            setConversations(prev => [newConv, ...prev]);
-            setSelectedId(newConv.id);
-            setTimeout(() => sendMessage(undefined, pending), 300);
-          }, []);
-          '''
+  useEffect(() => {
+    const pending = localStorage.getItem('dive-deeper-message');
+    if (!pending) return;
+    localStorage.removeItem('dive-deeper-message');
+    const newConv = { id: makeId(), messages: [], createdAt: Date.now() };
+    setConversations(prev => [newConv, ...prev]);
+    setSelectedId(newConv.id);
+    setTimeout(() => sendMessage(undefined, pending), 300);
+  }, []);
+'''
               chat = chat.replace(marker, marker + effect, 1)
           chat_path.write_text(chat)
 
