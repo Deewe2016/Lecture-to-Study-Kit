@@ -482,8 +482,6 @@ async function compressVideoForTranscription(
   const video = document.createElement('video');
   const objectUrl = URL.createObjectURL(file);
   video.src = objectUrl;
-  // Mute playback so browser autoplay policy does not block the compression pass.
-  // The captured audio track is still added to the output stream.
   video.muted = true;
   video.playsInline = true;
   video.preload = 'metadata';
@@ -523,7 +521,7 @@ async function compressVideoForTranscription(
       throw new Error('Your browser could not prepare the video encoder.');
     }
 
-      const videoStream = canvas.captureStream(24);
+    const videoStream = canvas.captureStream(24);
     const sourceStream = (
       video as HTMLVideoElement & {
         captureStream: () => MediaStream;
@@ -2821,45 +2819,16 @@ function Overview({
               <div className="mt-3 block">
                 <button
                   type="button"
-                onClick={() => {
-                  const message = `I want to learn more about ${kit.title}. Here is the study material: ${kit.overview}\n\n${kit.chapters
-                    .map((chapter) => `${chapter.title}: ${chapter.summary}`)
-                    .join('\n\n')}`;
-                  const id = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                  const conversation = {
-                    id,
-                    messages: [
-                      {
-                        id: `ai-msg-${Date.now()}`,
-                        role: 'user' as const,
-                        content: message,
-                      },
-                    ],
-                    createdAt: Date.now(),
-                  };
-
-                  try {
-                    const existing = JSON.parse(
-                      localStorage.getItem('lecture-study-ai-conversations') || '[]',
-                    );
-                    const conversations = Array.isArray(existing) ? existing : [];
-                    localStorage.setItem(
-                      'lecture-study-ai-conversations',
-                      JSON.stringify([conversation, ...conversations]),
-                    );
-                    localStorage.removeItem('lecture-study-ai-chat');
-                  } catch {
-                    // Navigation still works if local storage is unavailable.
-                  }
-
-                  window.location.assign('/ai-chat');
-                }}
+                  onClick={() => {
+                    localStorage.setItem('dive-deeper-message', `I was studying "${kit.title}" and asked: "${prompt}". The tutor answered: "${answer}". I want to dive deeper. Here is the study material: ${kit.overview}`);
+                    window.location.assign('/ai-chat');
+                  }}
                   className="focus-ring inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"
-                data-testid="button-dive-deeper"
-              >
-                <Sparkles size={14} />
-                Dive Deeper
-                <ArrowRight size={14} />
+                  data-testid="button-dive-deeper"
+                >
+                  <Sparkles size={14} />
+                  Dive Deeper
+                  <ArrowRight size={14} />
                 </button>
               </div>
             </div>

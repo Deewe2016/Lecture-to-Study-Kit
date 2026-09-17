@@ -180,6 +180,16 @@ export default function AIChatPage() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  useEffect(() => {
+    const pending = localStorage.getItem('dive-deeper-message');
+    if (!pending) return;
+    localStorage.removeItem('dive-deeper-message');
+    const newConversation = { id: makeId(), messages: [], createdAt: Date.now() };
+    setConversations(prev => [newConversation, ...prev]);
+    setSelectedId(newConversation.id);
+    setTimeout(() => sendMessage(undefined, pending), 300);
+  }, []);
+
   const newConversation = () => {
     abortRef.current?.abort();
     const conversation: Conversation = { id: makeId(), messages: [], createdAt: Date.now() };
@@ -220,9 +230,9 @@ export default function AIChatPage() {
     ));
   };
 
-  const sendMessage = async (event?: FormEvent) => {
+  const sendMessage = async (event?: FormEvent, overrideContent?: string) => {
     event?.preventDefault();
-    const content = input.trim();
+    const content = overrideContent ?? input.trim();
     if (!content || thinking) return;
 
     let conversationId = selectedId;
