@@ -2,7 +2,7 @@ name: Fix Dive Deeper auto-response
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: write
@@ -20,70 +20,46 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-
           app_path = Path('artifacts/study-kit/src/App.tsx')
           chat_path = Path('artifacts/study-kit/src/pages/ai-chat.tsx')
           app = app_path.read_text()
           chat = chat_path.read_text()
-
           button_pos = app.find('Dive Deeper')
-          if button_pos < 0:
-              raise SystemExit('Could not find Dive Deeper button')
+          if button_pos < 0: raise SystemExit('Could not find Dive Deeper button')
           button_start = app.rfind('<button', 0, button_pos)
           on_click_pos = app.find('onClick={() => {', button_start, button_pos)
-          if on_click_pos < 0:
-              raise SystemExit('Could not find Dive Deeper onClick handler')
+          if on_click_pos < 0: raise SystemExit('Could not find Dive Deeper onClick handler')
           handler_open = on_click_pos + len('onClick={() => {')
-
-          depth = 1
-          i = handler_open
-          quote = None
-          escaped = False
+          depth = 1; i = handler_open; quote = None; escaped = False
           while i < len(app):
               c = app[i]
               if quote:
-                  if escaped:
-                      escaped = False
-                  elif c == '\\':
-                      escaped = True
-                  elif c == quote:
-                      quote = None
-                  i += 1
-                  continue
-              if c in "'\"`":
-                  quote = c
-              elif c == '{':
-                  depth += 1
+                  if escaped: escaped = False
+                  elif c == '\\': escaped = True
+                  elif c == quote: quote = None
+                  i += 1; continue
+              if c in "'\"`": quote = c
+              elif c == '{': depth += 1
               elif c == '}':
                   depth -= 1
-                  if depth == 0:
-                      break
+                  if depth == 0: break
               i += 1
-          if depth != 0:
-              raise SystemExit('Could not parse Dive Deeper onClick handler')
-
+          if depth != 0: raise SystemExit('Could not parse Dive Deeper onClick handler')
           old_handler = app[handler_open:i]
           if 'kit.title' not in old_handler or 'kit.overview' not in old_handler:
               raise SystemExit('Unexpected Dive Deeper handler; refusing unrelated changes')
-
           navigation = "                  window.location.assign('/ai-chat');"
           if "localStorage.setItem('dive-deeper-message'" not in old_handler:
               insertion = "                  localStorage.setItem('dive-deeper-message', `I was studying \"${kit.title}\" and asked: \"${prompt}\". The tutor answered: \"${answer}\". I want to dive deeper. Here is the study material: ${kit.overview}`);\n\n"
-              if navigation not in old_handler:
-                  raise SystemExit('Could not find Dive Deeper navigation')
-              new_handler = old_handler.replace(navigation, insertion + navigation, 1)
-              app = app[:handler_open] + new_handler + app[i:]
+              if navigation not in old_handler: raise SystemExit('Could not find Dive Deeper navigation')
+              app = app[:handler_open] + old_handler.replace(navigation, insertion + navigation, 1) + app[i:]
               app_path.write_text(app)
-
           old_sig = "const sendMessage = async (event?: FormEvent) => {\n    event?.preventDefault();\n    const content = input.trim();"
           new_sig = "const sendMessage = async (event?: FormEvent, overrideContent?: string) => {\n    event?.preventDefault();\n    const content = overrideContent ?? input.trim();"
-          if old_sig in chat:
-              chat = chat.replace(old_sig, new_sig, 1)
-
+          if old_sig in chat: chat = chat.replace(old_sig, new_sig, 1)
           if "localStorage.getItem('dive-deeper-message')" not in chat:
               marker = "  useEffect(() => () => abortRef.current?.abort(), []);\n"
-              if marker not in chat:
-                  raise SystemExit('Could not find AI Chat effect insertion point')
+              if marker not in chat: raise SystemExit('Could not find AI Chat effect insertion point')
               effect = '''
   useEffect(() => {
     const pending = localStorage.getItem('dive-deeper-message');
@@ -97,12 +73,10 @@ jobs:
 '''
               chat = chat.replace(marker, marker + effect, 1)
           chat_path.write_text(chat)
-
       - name: Verify only requested source files changed
         run: |
           git diff --check
           test "$(git diff --name-only)" = $'artifacts/study-kit/src/App.tsx\nartifacts/study-kit/src/pages/ai-chat.tsx'
-
       - name: Commit requested fix
         run: |
           git config user.name "github-actions[bot]"
@@ -110,7 +84,6 @@ jobs:
           git add artifacts/study-kit/src/App.tsx artifacts/study-kit/src/pages/ai-chat.tsx
           git diff --cached --quiet || git commit -m "Fix Dive Deeper automatic AI response"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
-
       - name: Remove temporary workflow
         if: success()
         run: |
