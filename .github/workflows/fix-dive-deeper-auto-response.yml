@@ -1,17 +1,20 @@
 name: Fix Dive Deeper auto-response
 
 on:
-  push:
-    branches: [main]
+  pull_request:
+    types: [opened, synchronize]
 
 permissions:
   contents: write
 
 jobs:
   fix:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Patch only Dive Deeper flow
         shell: python
@@ -63,38 +66,35 @@ jobs:
           if 'kit.title' not in old_handler or 'kit.overview' not in old_handler or 'question' not in old_handler or 'answer' not in old_handler:
               raise SystemExit('Unexpected Dive Deeper handler; refusing unrelated changes')
 
-          new_handler = '''
+          if "localStorage.setItem('dive-deeper-message'" not in old_handler:
+              new_handler = '''
                   localStorage.setItem('dive-deeper-message', `I was studying "${kit.title}" and asked: "${question}". The tutor answered: "${answer}". I want to dive deeper. Here is the study material: ${kit.overview}`);
                   window.location.assign('/ai-chat');
                 '''
-          app = app[:handler_open] + new_handler + app[i:]
-          app_path.write_text(app)
+              app = app[:handler_open] + new_handler + app[i:]
+              app_path.write_text(app)
 
           old_sig = "const sendMessage = async (event?: FormEvent) => {\n    event?.preventDefault();\n    const content = input.trim();"
           new_sig = "const sendMessage = async (event?: FormEvent, overrideContent?: string) => {\n    event?.preventDefault();\n    const content = overrideContent ?? input.trim();"
-          if old_sig not in chat:
-              raise SystemExit('Could not find sendMessage signature')
-          chat = chat.replace(old_sig, new_sig, 1)
+          if old_sig in chat:
+              chat = chat.replace(old_sig, new_sig, 1)
 
-          marker = "  useEffect(() => () => abortRef.current?.abort(), []);\n"
-          if marker not in chat:
-              raise SystemExit('Could not find AI Chat effect insertion point')
-          effect = '''
-  useEffect(() => {
-    const pending = localStorage.getItem('dive-deeper-message');
-    if (!pending) return;
-    localStorage.removeItem('dive-deeper-message');
-    const newConversation = {
-      id: makeId(),
-      messages: [],
-      createdAt: Date.now(),
-    };
-    setConversations(current => [newConversation, ...current]);
-    setSelectedId(newConversation.id);
-    setTimeout(() => sendMessage(undefined, pending), 100);
-  }, []);
-'''
-          chat = chat.replace(marker, marker + effect, 1)
+          if "localStorage.getItem('dive-deeper-message')" not in chat:
+              marker = "  useEffect(() => () => abortRef.current?.abort(), []);\n"
+              if marker not in chat:
+                  raise SystemExit('Could not find AI Chat effect insertion point')
+              effect = '''
+          useEffect(() => {
+            const pending = localStorage.getItem('dive-deeper-message');
+            if (!pending) return;
+            localStorage.removeItem('dive-deeper-message');
+            const newConv = { id: makeId(), messages: [], createdAt: Date.now() };
+            setConversations(prev => [newConv, ...prev]);
+            setSelectedId(newConv.id);
+            setTimeout(() => sendMessage(undefined, pending), 300);
+          }, []);
+          '''
+              chat = chat.replace(marker, marker + effect, 1)
           chat_path.write_text(chat)
 
       - name: Verify only requested source files changed
@@ -107,13 +107,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add artifacts/study-kit/src/App.tsx artifacts/study-kit/src/pages/ai-chat.tsx
-          git commit -m "Fix Dive Deeper automatic AI response"
-          git push
+          git diff --cached --quiet || git commit -m "Fix Dive Deeper automatic AI response"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
 
       - name: Remove temporary workflow
         if: success()
         run: |
           rm -f .github/workflows/fix-dive-deeper-auto-response.yml
           git add .github/workflows/fix-dive-deeper-auto-response.yml
-          git commit -m "Remove temporary Dive Deeper fix workflow"
-          git push
+          git diff --cached --quiet || git commit -m "Remove temporary Dive Deeper fix workflow"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
