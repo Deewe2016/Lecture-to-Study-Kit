@@ -2827,7 +2827,7 @@ function Overview({
                         ?.text || kit.overview;
                     localStorage.setItem('dive-deeper-message', `I was studying '${kit.title}'. My question was: '${prompt}'. Here is the study material: ${studyMaterial}`);
                     window.location.assign('/ai-chat');
-                  }}}
+                  }}
                   className="focus-ring inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"
                   data-testid="button-dive-deeper"
                 >
