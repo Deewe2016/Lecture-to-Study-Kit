@@ -1988,11 +1988,7 @@ function NewPage() {
 
                 <button
                   onClick={() => setSourceMode('paste')}
-                  className={\`rounded-full border px-3 py-1.5 text-xs \${
-                    sourceMode === 'paste'
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground'
-                  }\`}
+                  className={`rounded-full border px-3 py-1.5 text-xs ${sourceMode === 'paste' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
                   data-testid="button-source-paste"
                 >
                   <FileText size={13} className="mr-1 inline" />
