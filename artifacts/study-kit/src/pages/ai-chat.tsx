@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { Bot, MessageSquare, Plus, Send, Sparkles, Trash2, User } from 'lucide-react';
 
 type Message = {
@@ -65,91 +67,15 @@ function conversationTitle(conversation: Conversation) {
   return text.length > 30 ? `${text.slice(0, 30)}…` : text;
 }
 
-function renderInlineMarkdown(text: string) {
-  const tokens = text.split(/(\*\*[^*]+\*\*|(?<!\*)\*[^*]+\*(?!\*))/g);
-  return tokens.map((token, index) => {
-    if (token.startsWith('**') && token.endsWith('**')) {
-      return <strong key={index}>{token.slice(2, -2)}</strong>;
-    }
-    if (token.startsWith('*') && token.endsWith('*')) {
-      return <em key={index}>{token.slice(1, -1)}</em>;
-    }
-    return <span key={index}>{token}</span>;
-  });
-}
-
-function isTableSeparator(line: string) {
-  const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
-  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
-}
-
-function splitTableRow(line: string) {
-  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
-}
-
 function renderMarkdown(text: string) {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const blocks: React.ReactNode[] = [];
-  let index = 0;
+  const html = DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }) as string);
 
-  while (index < lines.length) {
-    const line = lines[index];
-    const nextLine = lines[index + 1];
-
-    if (line.includes('|') && nextLine && isTableSeparator(nextLine)) {
-      const headers = splitTableRow(line);
-      const rows: string[][] = [];
-      index += 2;
-
-      while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
-        rows.push(splitTableRow(lines[index]));
-        index += 1;
-      }
-
-      blocks.push(
-        <div key={`table-${index}`} className="my-3 w-full overflow-x-auto rounded-lg border border-border">
-          <table className="min-w-full border-collapse text-left text-sm">
-            <thead>
-              <tr className="bg-secondary/80">
-                {headers.map((header, cellIndex) => (
-                  <th key={cellIndex} className="border-b border-r border-border px-3 py-2.5 font-semibold text-foreground last:border-r-0">
-                    {renderInlineMarkdown(header)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-card' : 'bg-secondary/35'}>
-                  {headers.map((_, cellIndex) => (
-                    <td key={cellIndex} className="border-b border-r border-border px-3 py-2.5 align-top text-card-foreground last:border-r-0 last:border-b-0">
-                      {renderInlineMarkdown(row[cellIndex] || '')}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>,
-      );
-      continue;
-    }
-
-    if (!line.trim()) {
-      blocks.push(<div key={`space-${index}`} className="h-2" />);
-      index += 1;
-      continue;
-    }
-
-    blocks.push(
-      <div key={`line-${index}`}>
-        {renderInlineMarkdown(line)}
-      </div>,
-    );
-    index += 1;
-  }
-
-  return <>{blocks}</>;
+  return (
+    <div
+      className="[&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_hr]:my-4 [&_hr]:border-border [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-950 [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-5 [&_pre]:text-zinc-100 [&_code]:rounded [&_code]:bg-secondary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-left [&_th]:border [&_th]:border-border [&_th]:bg-secondary/80 [&_th]:px-3 [&_th]:py-2 [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_tbody_tr:nth-child(odd)]:bg-card [&_tbody_tr:nth-child(even)]:bg-secondary/35"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }
 
 export default function AIChatPage() {
@@ -412,7 +338,7 @@ export default function AIChatPage() {
                       : 'rounded-bl-md border border-border bg-card text-card-foreground'
                   }`}
                 >
-                  {message.content ? renderMarkdown(message.content) : (thinking && message.role === 'assistant' ? (
+                  {message.content ? (message.role === 'assistant' ? renderMarkdown(message.content) : message.content) : (thinking && message.role === 'assistant' ? (
                     <span className="inline-flex items-center gap-1.5 py-1" aria-label="AI is thinking">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
