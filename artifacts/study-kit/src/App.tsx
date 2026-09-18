@@ -1390,9 +1390,12 @@ function NewPage() {
     useState<Material[]>([]);
 
   const [sourceMode, setSourceMode] =
-    useState<'materials' | 'video'>(
+    useState<'materials' | 'video' | 'paste'>(
       'materials',
     );
+
+  const [pastedTexts, setPastedTexts] =
+    useState<string[]>(['']);
 
   const [videoUrl, setVideoUrl] =
     useState('');
@@ -1505,6 +1508,8 @@ function NewPage() {
       !title.trim() ||
       (sourceMode === 'materials' &&
         materials.length === 0) ||
+      (sourceMode === 'paste' &&
+        pastedTexts.every((text) => !text.trim())) ||
       (sourceMode === 'video' &&
         !videoUrl.trim() &&
         !videoFile)
@@ -1520,7 +1525,18 @@ function NewPage() {
     setProgress(12);
 
     let generationMaterials =
-      materials;
+      sourceMode === 'paste'
+        ? [
+            ...materials,
+            ...pastedTexts
+              .filter((text) => text.trim())
+              .map((text) => ({
+                name: 'Pasted text',
+                kind: 'notes' as const,
+                text: text.trim(),
+              })),
+          ]
+        : materials;
 
     if (sourceMode === 'video') {
       try {
@@ -1812,7 +1828,16 @@ function NewPage() {
       overview:
         'A starting structure for your material. Refine it as you study.',
       reviewPlan,
-      materials,
+      materials: [
+        ...materials,
+        ...pastedTexts
+          .filter((text) => text.trim())
+          .map((text) => ({
+            name: 'Pasted text',
+            kind: 'notes' as const,
+            text: text.trim(),
+          })),
+      ],
       createdAt:
         new Date().toISOString(),
     };
@@ -1960,6 +1985,19 @@ function NewPage() {
                   />
                   Video
                 </button>
+
+                <button
+                  onClick={() => setSourceMode('paste')}
+                  className={\`rounded-full border px-3 py-1.5 text-xs \${
+                    sourceMode === 'paste'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground'
+                  }\`}
+                  data-testid="button-source-paste"
+                >
+                  <FileText size={13} className="mr-1 inline" />
+                  Paste Text
+                </button>
               </div>
 
               {sourceMode ===
@@ -2043,6 +2081,63 @@ function NewPage() {
                     )}
                   </label>
                 </div>
+              ) : sourceMode === 'paste' ? (
+                <div className="space-y-3">
+                  {pastedTexts.map((text, index) => (
+                    <div
+                      key={`pasted-text-${index}`}
+                      className="rounded-xl border border-border bg-card p-4"
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-sm font-medium">
+                          {pastedTexts.length > 1
+                            ? `Snippet ${index + 1}`
+                            : 'Pasted text'}
+                        </span>
+                        {pastedTexts.length > 1 && (
+                          <button
+                            type="button"
+                            className="focus-ring rounded p-1 text-muted-foreground hover:text-foreground"
+                            onClick={() =>
+                              setPastedTexts((prev) =>
+                                prev.filter((_, snippetIndex) => snippetIndex !== index),
+                              )
+                            }
+                            aria-label={`Remove snippet ${index + 1}`}
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+                      <textarea
+                        value={text}
+                        onChange={(e) =>
+                          setPastedTexts((prev) =>
+                            prev.map((value, snippetIndex) =>
+                              snippetIndex === index ? e.target.value : value,
+                            ),
+                          )
+                        }
+                        placeholder="Paste any text here — articles, website snippets, notes, or anything you want to study..."
+                        rows={9}
+                        className="focus-ring w-full resize-y rounded-lg border border-input bg-background px-3 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground/60"
+                        data-testid={`textarea-pasted-text-${index}`}
+                      />
+                      <div className="mt-2 flex justify-end font-mono text-[10px] text-muted-foreground">
+                        {text.length.toLocaleString()} characters
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setPastedTexts((prev) => [...prev, ''])}
+                    className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    data-testid="button-add-pasted-text"
+                  >
+                    <Plus size={14} />
+                    Add another snippet
+                  </button>
+                </div>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="focus-ring flex min-h-[122px] cursor-pointer flex-col justify-between rounded-xl border border-dashed border-primary/50 bg-primary/[.04] p-4 transition-colors hover:bg-primary/[.08]">
@@ -2106,13 +2201,23 @@ function NewPage() {
                 </div>
               )}
 
-              {materials.length >
-                0 && (
+              {(materials.length > 0 || pastedTexts.some((text) => text.trim())) && (
                 <div className="mt-3 space-y-2">
-                  {materials.map(
+                  {[
+                    ...materials.map((m, i) => ({ ...m, listKey: `material-${i}`, materialIndex: i })),
+                    ...pastedTexts
+                      .map((text, i) => ({
+                        name: 'Pasted text',
+                        kind: 'notes' as const,
+                        text: text.trim(),
+                        listKey: `pasted-${i}`,
+                        pastedIndex: i,
+                      }))
+                      .filter((m) => m.text),
+                  ].map(
                     (m, i) => (
                       <div
-                        key={`${m.name}-${i}`}
+                        key={m.listKey}
                         className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
                       >
                         <FileText
@@ -2121,7 +2226,9 @@ function NewPage() {
                         />
 
                         <span className="min-w-0 flex-1 truncate text-xs">
-                          {m.name}
+                          {m.pastedIndex !== undefined
+                            ? m.text.slice(0, 70) + (m.text.length > 70 ? '…' : '')
+                            : m.name}
                         </span>
 
                         <span className="font-mono text-[10px] text-emerald-300">
@@ -2130,15 +2237,17 @@ function NewPage() {
 
                         <button
                           className="focus-ring rounded p-1 text-muted-foreground hover:text-foreground"
-                          onClick={() =>
-                            setMaterials(
-                              materials.filter(
-                                (_, j) =>
-                                  j !==
-                                  i,
-                              ),
-                            )
-                          }
+                          onClick={() => {
+                            if (m.pastedIndex !== undefined) {
+                              setPastedTexts((prev) =>
+                                prev.filter((_, j) => j !== m.pastedIndex),
+                              );
+                              return;
+                            }
+                            setMaterials((prev) =>
+                              prev.filter((_, j) => j !== m.materialIndex),
+                            );
+                          }}
                           aria-label={`Remove ${m.name}`}
                           data-testid={`button-remove-material-${i}`}
                         >
