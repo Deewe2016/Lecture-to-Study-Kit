@@ -5,6 +5,7 @@ import { getAccessToken } from './auth';
 export type ChatUser = { id: string; email: string; display_name: string };
 export type ChatSpace = { id: string; name: string; members: string[]; created_by: string; created_at: string };
 export type DbMessage = { id: string; sender_id: string; recipient_id: string | null; space_id: string | null; text: string; created_at: string };
+export type SharedKitRow = { id: string; kit_data: unknown; shared_by: string; created_at: string };
 
 function ensureConfigured() { if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error('Chat is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.'); }
 
@@ -62,6 +63,14 @@ export async function getMessagesForSpace(spaceId: string): Promise<DbMessage[]>
 export async function sendDmMessage(senderId: string, recipientId: string, text: string): Promise<DbMessage> {
   const rows = await rest<DbMessage[]>('/rest/v1/messages', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ sender_id: senderId, recipient_id: recipientId, text: text.trim() }) });
   if (!rows[0]) throw new Error('Supabase did not return the new message.'); return rows[0];
+}
+export async function createSharedKit(kitData: unknown, sharedBy: string): Promise<SharedKitRow> {
+  const rows = await rest<SharedKitRow[]>('/rest/v1/shared_kits', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ kit_data: kitData, shared_by: sharedBy }) });
+  if (!rows[0]) throw new Error('Supabase did not return the shared kit.'); return rows[0];
+}
+export async function getSharedKit(id: string): Promise<SharedKitRow> {
+  const rows = await rest<SharedKitRow[]>(`/rest/v1/shared_kits?select=id,kit_data,shared_by,created_at&id=eq.${encodeURIComponent(id)}&limit=1`);
+  if (!rows[0]) throw new Error('The shared study kit could not be found.'); return rows[0];
 }
 export async function sendSpaceMessage(senderId: string, spaceId: string, text: string): Promise<DbMessage> {
   const rows = await rest<DbMessage[]>('/rest/v1/messages', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ sender_id: senderId, space_id: spaceId, text: text.trim() }) });
