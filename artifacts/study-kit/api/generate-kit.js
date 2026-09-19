@@ -77,11 +77,17 @@ function buildReviewPlan(chapters, days) {
   }));
 }
 
-async function generateWithGroq(title, source, syllabus, days) {
+async function generateWithGroq(title, source, syllabus, days, mode = "material", existingKit = null) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("GROQ_API_KEY is not configured in Vercel.");
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+  const promptSource = mode === "prompt"
+    ? "The student asked for a study kit about: " + title + ". Build the kit from your own subject knowledge. Cover the topic accurately at a student-friendly level."
+    : mode === "update"
+      ? "EXISTING STUDY KIT (preserve useful existing content and IDs where concepts remain the same):\n" + JSON.stringify(existingKit || {}) + "\n\nNEW MATERIAL TO INCORPORATE:\n" + source
+      : "SOURCE MATERIAL START\n" + source + "\nSOURCE MATERIAL END";
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions",
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -89,7 +95,7 @@ async function generateWithGroq(title, source, syllabus, days) {
       temperature: 0.1,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: `You are an expert teacher and document analyst. Read the ENTIRE supplied lecture material and synthesize it. Never create the result by copying, concatenating, or rearranging source chunks.
+        { role: "system", content: `You are an expert teacher and document analyst. Read the ENTIRE supplied material and synthesize it. Never create the result by copying, concatenating, or rearranging source chunks. If this is a prompt-only request, use accurate general subject knowledge. If this is an update, preserve existing useful material while incorporating the new material.
 
 Return ONLY JSON with: title, courseLabel, overview, chapters, reviewPlan, questions, flashcards.
 
@@ -104,13 +110,13 @@ Rules:
 - Every back must directly answer its question in 1-3 concise sentences. Never paste slide headings, metadata, unrelated fragments, or bullet lists.
 - Practice questions must test understanding, not document structure.
 - Use ONLY information supported by the source. Do not invent facts.
-- If PDF extraction mixed columns, reconstruct the intended meaning from context before writing.
+- If PDF extraction mixed columns, reconstruct the intended meaning from context before writing.\n- For an update, keep existing chapter IDs and flashcard IDs when their underlying concepts remain valid; add new IDs only for genuinely new content.\n- For an update, revise chapter summaries/key points and review tasks when the new material changes or deepens them. Do not discard useful existing material merely to make room for the new source.
 
 Object shapes:
 chapter: {id,title,summary,keyPoints,objective}
 question: {id,chapterId,prompt,options,answer,explanation,difficulty}
 flashcard: {id,chapterId,front,back,hint}` },
-        { role: "user", content: `Student title: ${title}\nReview plan: ${days} days\nSyllabus: ${syllabus || "Not provided"}\n\nSOURCE MATERIAL START\n${source}\nSOURCE MATERIAL END\n\nFirst understand the concepts and relationships in the entire source. Then write original teaching-oriented content.` }
+        { role: "user", content: `Student title: ${title}\nReview plan: ${days} days\nSyllabus: ${syllabus || "Not provided"}\nMode: ${mode}\n\n${promptSource}\n\nFirst understand the concepts and relationships. Then write original teaching-oriented content.` }
       ]
     })
   });
@@ -146,16 +152,33 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const title = typeof body.title === "string" ? body.title.trim() : "";
   const materials = Array.isArray(body.materials) ? body.materials : [];
-  const source = cleanText(materials.map((m) => m?.text || "").join("\n\n")).slice(0, 50000);
+  const additionalMaterials = Array.isArray(body.additionalMaterials) ? body.additionalMaterials : [];
+  const existingKit = body.existingKit && typeof body.existingKit === "object" ? body.existingKit : null;
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  const mode = existingKit && additionalMaterials.length ? "update" : prompt ? "prompt" : "material";
+  const rawMaterials = mode === "update" ? additionalMaterials : materials;
+  const source = cleanText(rawMaterials.map((m) => m?.text || "").join("\n\n")).slice(0, 50000);
   const days = Math.max(1, Math.min(30, Number(body.planDays) || 7));
   const syllabus = typeof body.syllabus === "string" ? body.syllabus : "";
-  if (!title || !source) return res.status(400).json({ error: "Add a title and at least one valid material." });
+  const generationTitle = title || prompt;
+  if (!generationTitle || (mode !== "prompt" && !source) || (mode === "update" && !existingKit)) return res.status(400).json({ error: "Add a title and study material." });
 
   try {
-    const generated = await generateWithGroq(title, source, syllabus, days);
-    const kit = normalizeKit(generated, title);
+    const generated = await generateWithGroq(generationTitle, source, syllabus, days, mode, existingKit);
+    const kit = normalizeKit(generated, generationTitle);
     if (!kit) return res.status(502).json({ error: "Groq returned a study kit that did not pass the quality checks. Please try again." });
     kit.reviewPlan = buildReviewPlan(kit.chapters, days);
+    if (mode === "update") {
+      const oldCards = new Map((Array.isArray(existingKit.flashcards) ? existingKit.flashcards : []).map((card) => [String(card.front || "").trim().toLowerCase(), card]));
+      const oldChapters = new Map((Array.isArray(existingKit.chapters) ? existingKit.chapters : []).map((chapter) => [String(chapter.id || chapter.title || "").trim().toLowerCase(), chapter]));
+      const addedFlashcards = kit.flashcards.filter((card) => !oldCards.has(String(card.front || "").trim().toLowerCase())).length;
+      const updatedChapters = kit.chapters.filter((chapter) => {
+        const old = oldChapters.get(String(chapter.id || chapter.title || "").trim().toLowerCase());
+        if (!old) return true;
+        return JSON.stringify({ title: old.title, summary: old.summary, keyPoints: old.keyPoints, objective: old.objective }) !== JSON.stringify({ title: chapter.title, summary: chapter.summary, keyPoints: chapter.keyPoints, objective: chapter.objective });
+      }).length;
+      return res.status(200).json({ kit: shuffleAnswers(kit), changes: { addedFlashcards, updatedChapters } });
+    }
     return res.status(200).json(shuffleAnswers(kit));
   } catch (error) {
     console.error("Study kit generation failed:", error);
