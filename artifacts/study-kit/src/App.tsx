@@ -1392,9 +1392,9 @@ function NewPage() {
     useState<Material[]>([]);
 
   const [sourceMode, setSourceMode] =
-    useState<'materials' | 'video' | 'paste'>(
-      'materials',
-    );
+    useState<'materials' | 'video' | 'paste' | 'ai'>('materials');
+
+  const [aiTopic, setAiTopic] = useState('');
 
   const [pastedTexts, setPastedTexts] =
     useState<string[]>(['']);
@@ -1514,7 +1514,8 @@ function NewPage() {
         pastedTexts.every((text) => !text.trim())) ||
       (sourceMode === 'video' &&
         !videoUrl.trim() &&
-        !videoFile)
+        !videoFile) ||
+      (sourceMode === 'ai' && !aiTopic.trim())
     ) {
       setError(
         'Add a title and a lecture source to continue.',
@@ -1539,6 +1540,18 @@ function NewPage() {
               })),
           ]
         : materials;
+
+    if (sourceMode === 'ai') {
+      try {
+        setStageLabel('Creating detailed AI study material…');
+        const aiResponse = await fetch('/api/ai-material', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: aiTopic.trim() }) });
+        const aiMaterial = await aiResponse.json().catch(() => null);
+        if (!aiResponse.ok || !aiMaterial?.text) throw new Error(aiMaterial?.error || 'Could not generate AI study material.');
+        generationMaterials = [{ name: aiMaterial.name || `${aiTopic.trim()} - AI Generated`, kind: 'notes', text: aiMaterial.text }];
+      } catch (e) {
+        setStage('error'); setError(e instanceof Error ? e.message : 'Could not generate AI study material.'); return;
+      }
+    }
 
     if (sourceMode === 'video') {
       try {
@@ -1989,6 +2002,15 @@ function NewPage() {
                 </button>
 
                 <button
+                  onClick={() => setSourceMode('ai')}
+                  className={`rounded-full border px-3 py-1.5 text-xs ${sourceMode === 'ai' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
+                  data-testid="button-source-ai"
+                >
+                  <Sparkles size={13} className="mr-1 inline" />
+                  Ask AI
+                </button>
+
+                <button
                   onClick={() => setSourceMode('paste')}
                   className={`rounded-full border px-3 py-1.5 text-xs ${sourceMode === 'paste' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
                   data-testid="button-source-paste"
@@ -1998,8 +2020,16 @@ function NewPage() {
                 </button>
               </div>
 
-              {sourceMode ===
-              'video' ? (
+              {sourceMode === 'ai' ? (
+                <div className="space-y-3">
+                  <textarea value={aiTopic} onChange={(e) => setAiTopic(e.target.value)} placeholder="Describe what you want to study... e.g. Division A Science Olympiad circuit lab, the French Revolution, calculus derivatives" rows={8} className="focus-ring w-full resize-none rounded-xl border border-input bg-card px-4 py-4 text-sm outline-none placeholder:text-muted-foreground/60" data-testid="textarea-ask-ai" />
+                  <div className="flex flex-wrap gap-2">
+                    {['Circuit lab basics', 'Photosynthesis', 'World War 2', 'Algebra fundamentals'].map((prompt) => (
+                      <button key={prompt} type="button" onClick={() => setAiTopic(prompt)} className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary">{prompt}</button>
+                    ))}
+                  </div>
+                </div>
+              ) : sourceMode === 'video' ? (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="rounded-xl border border-border bg-card p-4">
                     <span className="text-sm font-medium">
