@@ -85,6 +85,7 @@
     "@tiptap/extension-highlight": "^3.31.3",
     "@tiptap/extension-underline": "^3.31.3",
     "@tiptap/extension-link": "^3.31.3",
-    "@tiptap/extension-text-style": "^3.31.3"
+    "@tiptap/extension-text-style": "^3.31.3",
+    "@tiptap/core": "^3.31.3"
   }
 }
