@@ -111,7 +111,7 @@ export default function FilesPage() {
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify({ name: 'My Files', owner_id: me.id, parent_folder_id: null }),
       });
-      if (created[0]) { setFolders(prev => [...prev, created[0]]); setSelected(created[0].id); }
+      if (created[0]) { setFolders(prev => [...prev, created[0]]); }
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not create My Files.'); }
   };
   useEffect(() => { void ensureRoot(); }, [me?.id, folders.length]);
@@ -299,20 +299,30 @@ export default function FilesPage() {
         {[['Total Files', mine.length], ['Total Storage Used', formatBytes(totalBytes)], ['Shared with Me', sharedFiles.length], ['Recent Uploads', recentCount]].map(([label,value]) => <div key={String(label)} className="rounded-xl border border-border bg-card p-5"><p className="text-[10px] uppercase tracking-[.16em] text-muted-foreground">{label}</p><p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p></div>)}
       </div>
 
-      {!mine.length ? <div className="mt-8 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-10 text-center"><UploadCloud className="mx-auto text-primary" size={34}/><h2 className="mt-4 font-serif text-2xl">Upload your first file</h2><p className="mt-2 text-sm text-muted-foreground">Keep your study materials, documents, images, and more in one place.</p></div> : <div className="mt-8 grid gap-8 xl:grid-cols-[280px_1fr]">
+      <div className="mt-8 grid gap-8 xl:grid-cols-[280px_1fr]">
         <aside className="rounded-xl border border-border bg-card p-4">
-          <div className="flex gap-1 rounded-lg bg-secondary p-1"><button onClick={()=>setSection('mine')} className={`flex-1 rounded-md px-2 py-1.5 text-xs ${section==='mine'?'bg-card font-medium':''}`}>My Files</button><button onClick={()=>setSection('shared')} className={`flex-1 rounded-md px-2 py-1.5 text-xs ${section==='shared'?'bg-card font-medium':''}`}>Shared with Me</button></div>
-          <div className="mt-4">{folderTree(section==='mine' ? null : null)}</div>
-          {quick.length > 0 && <div className="mt-6 border-t border-border pt-4"><p className="px-2 text-[10px] uppercase tracking-[.16em] text-muted-foreground">Quick Access</p>{quick.map(f=><button key={f.id} onClick={()=>setSelected(f.id)} className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-secondary"><Pin size={13} className="text-primary"/>{f.name}</button>)}</div>}
+          <button onClick={() => { setSection('mine'); setSelected(null); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium hover:bg-secondary">
+            <FolderOpen size={15} className="text-primary" /> My Files
+          </button>
+          <button onClick={() => { setSection('shared'); setSelected(null); }} className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium hover:bg-secondary">
+            <Share2 size={15} className="text-primary" /> Shared with Me
+          </button>
+          <div className="mt-4 border-t border-border pt-3">{folderTree(null)}</div>
+          {quick.length > 0 && <div className="mt-6 border-t border-border pt-4"><p className="px-2 text-[10px] uppercase tracking-[.16em] text-muted-foreground">Quick Access</p>{quick.map(f=><button key={f.id} onClick={()=>{setSection('mine');setSelected(f.id)}} className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-secondary"><Pin size={13} className="text-primary"/>{f.name}</button>)}</div>}
         </aside>
-        <div className="min-w-0">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search files by name" className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-xs outline-none"/></div><div className="flex rounded-lg border border-border p-1"><button onClick={()=>setView('grid')} className={`rounded-md p-1.5 ${view==='grid'?'bg-secondary':''}`}><Grid2X2 size={15}/></button><button onClick={()=>setView('list')} className={`rounded-md p-1.5 ${view==='list'?'bg-secondary':''}`}><List size={15}/></button></div></div>
-          <div className="mt-5 flex items-center justify-between"><h2 className="font-serif text-2xl">{section==='shared'?'Shared with Me':(folders.find(f=>f.id===selected)?.name || 'My Files')}</h2><span className="text-xs text-muted-foreground">{currentFiles.length} files</span></div>
-          {currentFiles.length ? <div className={view==='grid'?'mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4':'mt-4 divide-y divide-border rounded-xl border border-border bg-card'}>{currentFiles.map(fileCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No files in this folder.</div>}
 
-          <div className="mt-10"><h2 className="font-serif text-2xl">Recent Files</h2><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">{recent.map(fileCard)}</div></div>
+        <div className="min-w-0">
+          {!selected ? <div>
+            <div className="flex items-center justify-between"><div><h2 className="font-serif text-2xl">Recent Files</h2><p className="mt-1 text-xs text-muted-foreground">Your latest uploads</p></div></div>
+            {!mine.length ? <div className="mt-5 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-12 text-center"><UploadCloud className="mx-auto text-primary" size={36}/><h2 className="mt-4 font-serif text-2xl">Upload your first file</h2><p className="mt-2 text-sm text-muted-foreground">Keep your study materials, documents, images, and more in one place.</p><button onClick={()=>root && setSelected(root.id)} className="mt-5 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground">Open My Files to upload</button></div> : <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">{recent.map(fileCard)}</div>}
+            <div className="mt-10"><h2 className="font-serif text-2xl">Quick Access</h2>{quick.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{quick.map(f=><button key={f.id} onClick={()=>{setSection('mine');setSelected(f.id)}} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left hover:border-primary/40"><Folder size={20} className="text-primary"/><span className="truncate text-sm font-medium">{f.name}</span></button>)}</div> : <p className="mt-3 text-xs text-muted-foreground">Pin folders from their menu to keep them here.</p>}</div>
+          </div> : <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search files by name" className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-xs outline-none"/></div><div className="flex rounded-lg border border-border p-1"><button onClick={()=>setView('grid')} className={`rounded-md p-1.5 ${view==='grid'?'bg-secondary':''}`}><Grid2X2 size={15}/></button><button onClick={()=>setView('list')} className={`rounded-md p-1.5 ${view==='list'?'bg-secondary':''}`}><List size={15}/></button></div></div>
+            <div className="mt-5 flex items-center justify-between"><h2 className="font-serif text-2xl">{section==='shared'?'Shared with Me':(folders.find(f=>f.id===selected)?.name || 'My Files')}</h2><span className="text-xs text-muted-foreground">{currentFiles.length} files</span></div>
+            {currentFiles.length ? <div className={view==='grid'?'mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4':'mt-4 space-y-2'}>{currentFiles.map(fileCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No files in this folder.</div>}
+          </div>}
         </div>
-      </div>}
+      </div>
 
       {modal?.url && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-background/80 p-5" onClick={()=>setModal(null)}><div className="relative max-h-[90vh] max-w-5xl overflow-auto rounded-xl border border-border bg-card p-3" onClick={e=>e.stopPropagation()}><button onClick={()=>setModal(null)} className="absolute right-3 top-3 rounded-full bg-background/80 p-2"><X size={16}/></button>{modal.file.type.startsWith('image/')?<img src={modal.url} alt={modal.file.name} className="max-h-[82vh] max-w-full object-contain"/>:<iframe title={modal.file.name} src={modal.url} className="h-[80vh] w-[80vw] min-w-[320px]"/>}</div></div>}
 
