@@ -80,6 +80,7 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
   const [fontSizeValue, setFontSizeValue] = useState('16');
   const resizeState = useRef<{direction:string;startX:number;startY:number;startWidth:number;startHeight:number} | null>(null);
   const fontSizeTyping = useRef(false);
+  const imageDragIndex = useRef<number | null>(null);
   const [document, setDocument] = useState<DocumentRow | null>(null);
   const [title, setTitle] = useState('Untitled Document');
   const [editingTitle, setEditingTitle] = useState(false);
@@ -202,9 +203,48 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
       event.preventDefault();
       void insertImageFile(file);
     };
+    const onDragStart = (event: DragEvent) => {
+      const image = (event.target as HTMLElement | null)?.closest('img') as HTMLImageElement | null;
+      if (!image) return;
+      const blot = Quill.find(image);
+      if (!blot) return;
+      imageDragIndex.current = blot.offset(editor);
+      selectedImage.current = image;
+      refreshImageBox();
+      event.dataTransfer?.setData('text/plain', 'flexus-document-image');
+    };
+    const onDrop = (event: DragEvent) => {
+      const fromIndex = imageDragIndex.current;
+      if (fromIndex === null) return;
+      event.preventDefault();
+      const image = selectedImage.current;
+      if (!image) {
+        imageDragIndex.current = null;
+        return;
+      }
+      const value = (DocumentImage as any).value(image);
+      const selection = editor.getSelection();
+      let targetIndex = selection?.index ?? editor.getLength() - 1;
+      if (targetIndex > fromIndex) targetIndex -= 1;
+      targetIndex = Math.max(0, Math.min(targetIndex, editor.getLength() - 1));
+      editor.deleteText(fromIndex, 1, 'user');
+      editor.insertEmbed(targetIndex, 'image', value, 'user');
+      editor.setSelection(targetIndex + 1, 0, 'silent');
+      imageDragIndex.current = null;
+      window.setTimeout(() => {
+        const images = Array.from(editor.root.querySelectorAll('img'));
+        const nextImage = images.find(img => img.getAttribute('src') === value.url && img.style.width === (value.width || ''));
+        if (nextImage) {
+          selectedImage.current = nextImage as HTMLImageElement;
+          refreshImageBox();
+        }
+      }, 0);
+    };
     editor.root.addEventListener('click', onClick);
     editor.root.addEventListener('keydown', onKeyDown);
     editor.root.addEventListener('paste', onPaste);
+    editor.root.addEventListener('dragstart', onDragStart);
+    editor.root.addEventListener('drop', onDrop);
     window.addEventListener('resize', refreshImageBox);
     editor.on('text-change', () => {
       setWords(wordCount(editor.getText()));
@@ -218,6 +258,8 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
       editor.root.removeEventListener('click', onClick);
       editor.root.removeEventListener('keydown', onKeyDown);
       editor.root.removeEventListener('paste', onPaste);
+      editor.root.removeEventListener('dragstart', onDragStart);
+      editor.root.removeEventListener('drop', onDrop);
       window.removeEventListener('resize', refreshImageBox);
       quill.current = null;
     };
