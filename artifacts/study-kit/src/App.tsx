@@ -1309,11 +1309,11 @@ function KitCard({
       <div className="relative flex items-start justify-between">
         <div>
           <span className="font-mono text-[10px] uppercase tracking-[.15em] text-primary">
-            {kit.courseLabel}
+            {currentKit.courseLabel}
           </span>
 
           <h3 className="mt-3 font-serif text-2xl tracking-[-.03em]">
-            {kit.title}
+            {currentKit.title}
           </h3>
         </div>
 
@@ -2737,7 +2737,6 @@ function KitWorkspace({
         Progress is saved locally in
         this browser.
       </div>
-    </section>
       {showAddMaterial && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-5 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
@@ -2786,6 +2785,7 @@ function KitWorkspace({
           </div>
         </div>
       )}
+    </section>
   );
 }
 
