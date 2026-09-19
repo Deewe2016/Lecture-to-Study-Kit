@@ -68,7 +68,7 @@ function quillToHtml(delta:any){
   return html+'</p>';
 }
 function initialContent(content:any){if(!content)return '<p></p>';if(content.type==='doc')return content;if(Array.isArray(content.ops))return quillToHtml(content);if(typeof content==='string')return content;return '<p></p>';}
-function documentStats(editor:Editor){const text=editor.getText();const trimmed=text.trim();const words=trimmed?trimmed.split(/\s+/).length:0;const characters=text.length;const charactersNoSpaces=text.replace(/\s/g,'').length;const pages=Math.max(1,Math.ceil(Math.max(editor.view.dom.scrollHeight,960)/1056));return{words,characters,charactersNoSpaces,pages};}
+function documentStats(editor:Editor){const text=editor.getText();const trimmed=text.trim();const words=trimmed?trimmed.split(/\s+/).length:0;const characters=text.length;const charactersNoSpaces=text.replace(/\s/g,'').length;const pages=Math.max(1,Math.ceil(Math.max(editor.view.dom.scrollHeight,960)/864));return{words,characters,charactersNoSpaces,pages};}
 
 const Indent=Extension.create({
   name:'indent',
@@ -89,6 +89,8 @@ export default function DocumentPage({params}:{params:{id:string}}){
   const [status,setStatus]=useState<'Loading...'|'Saving...'|'Saved'|'Error'>('Loading...');
   const [savedAt,setSavedAt]=useState('');
   const [stats,setStats]=useState({words:0,characters:0,charactersNoSpaces:0,pages:1});
+  const [pageCount,setPageCount]=useState(1);
+  const pageRefs=useRef<(HTMLDivElement|null)[]>([]);
   const [showWordCount,setShowWordCount]=useState(false);
   const [wordCountWhileTyping,setWordCountWhileTyping]=useState(false);
   const [ready,setReady]=useState(false);
@@ -112,6 +114,7 @@ export default function DocumentPage({params}:{params:{id:string}}){
 
   useEffect(()=>{let cancelled=false;void api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(id)+'&select=*').then(rows=>{if(cancelled||!rows[0])throw new Error('Document not found.');const d=rows[0];documentRef.current=d;setDocument(d);titleRef.current=d.title||'Untitled Document';setTitle(titleRef.current);setSavedAt(new Date(d.updated_at||d.created_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));setStatus('Saved');setReady(true);}).catch(()=>{if(!cancelled)setStatus('Error');});return()=>{cancelled=true;};},[id]);
   useEffect(()=>{if(!editor||!ready||!document)return;editor.commands.setContent(initialContent(document.content),{emitUpdate:false});setStats(documentStats(editor));},[editor,ready,document?.id]);
+  useEffect(()=>{if(!editor)return;const measure=()=>{const height=Math.max(1056,editor.view.dom.scrollHeight);setPageCount(Math.max(1,Math.ceil(height/1056)));};measure();const ro=new ResizeObserver(measure);ro.observe(editor.view.dom);return()=>ro.disconnect();},[editor]);
 
   const save=async()=>{const e=editor,d=documentRef.current;if(!e||!d)return;setStatus('Saving...');try{const updated=await api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(d.id)+'&select=*',{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({title:titleRef.current.trim()||'Untitled Document',content:e.getJSON(),updated_at:new Date().toISOString()})});if(updated[0]){documentRef.current=updated[0];setDocument(updated[0]);}setSavedAt(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));setStatus('Saved');}catch{setStatus('Error');}};
   useEffect(()=>{if(!ready)return;const timer=window.setInterval(()=>void save(),30000);return()=>window.clearInterval(timer);},[ready,editor,document?.id]);
@@ -173,7 +176,7 @@ export default function DocumentPage({params}:{params:{id:string}}){
 
     <div className="document-page relative min-h-0 flex-1 overflow-auto px-4 py-8 sm:px-8">
       <div className="document-paper"><EditorContent editor={editor}/><div className="absolute bottom-5 left-0 right-0 text-center text-[11px] text-zinc-500">1</div></div>
-      {stats.pages>1&&Array.from({length:stats.pages-1},(_,i)=><div key={i} className="document-paper"><div className="min-h-[864px]"></div><div className="absolute bottom-5 left-0 right-0 text-center text-[11px] text-zinc-500">{i+2}</div></div>)}
+      {pageCount>1&&Array.from({length:pageCount-1},(_,i)=><div key={i} className="document-paper"><div className="min-h-[864px]"></div><div className="absolute bottom-5 left-0 right-0 text-center text-[11px] text-zinc-500">{i+2}</div></div>)}
       {wordCountWhileTyping&&<div className="fixed bottom-3 left-3 rounded bg-white/95 px-2 py-1 text-[11px] text-zinc-600 shadow">{stats.words} {stats.words===1?'word':'words'}</div>}
     </div>
     {showWordCount&&<div className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/20">
