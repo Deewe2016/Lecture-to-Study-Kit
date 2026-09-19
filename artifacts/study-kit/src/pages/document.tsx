@@ -18,7 +18,7 @@ type DocumentRow = { id:string; title:string; content:any; owner_id:string; fold
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const IMAGE_TYPES = new Set(['image/jpeg','image/png','image/gif','image/webp']);
-const FONT_SIZES = [5,6,7,8,9,10,11,12,14,16,18,20,24,28,32,36,40,48,56,64,72,96,100];
+const FONT_SIZES = [5,6,7,8,9,10,11,12,14,16,18,20,24,28,32,36,40,48,56,64,72,96,100]; // TipTap document font sizes
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
