@@ -68,7 +68,7 @@ function quillToHtml(delta:any){
   return html+'</p>';
 }
 function initialContent(content:any){if(!content)return '<p></p>';if(content.type==='doc')return content;if(Array.isArray(content.ops))return quillToHtml(content);if(typeof content==='string')return content;return '<p></p>';}
-function wordCount(editor:Editor){const text=editor.getText().trim();return text?text.split(/\s+/).length:0;}
+function documentStats(editor:Editor){const text=editor.getText();const trimmed=text.trim();const words=trimmed?trimmed.split(/\s+/).length:0;const characters=text.length;const charactersNoSpaces=text.replace(/\s/g,'').length;const pages=Math.max(1,Math.ceil(Math.max(editor.view.dom.scrollHeight,960)/1056));return{words,characters,charactersNoSpaces,pages};}
 
 const Indent=Extension.create({
   name:'indent',
@@ -88,7 +88,9 @@ export default function DocumentPage({params}:{params:{id:string}}){
   const titleRef=useRef('Untitled Document');
   const [status,setStatus]=useState<'Loading...'|'Saving...'|'Saved'|'Error'>('Loading...');
   const [savedAt,setSavedAt]=useState('');
-  const [words,setWords]=useState(0);
+  const [stats,setStats]=useState({words:0,characters:0,charactersNoSpaces:0,pages:1});
+  const [showWordCount,setShowWordCount]=useState(false);
+  const [wordCountWhileTyping,setWordCountWhileTyping]=useState(false);
   const [ready,setReady]=useState(false);
   const [fontSize,setFontSize]=useState('16');
   const [fontFamily,setFontFamily]=useState('Arial');
@@ -105,11 +107,11 @@ export default function DocumentPage({params}:{params:{id:string}}){
       DraggableImage.configure({resize:{enabled:true,directions:['top-left','top-right','bottom-left','bottom-right'],minWidth:50,minHeight:50,alwaysPreserveAspectRatio:true},HTMLAttributes:{class:'document-image'}}),
     ],
     content:'<p></p>',
-    onUpdate:({editor:e})=>{setWords(wordCount(e));setStatus('Saving...');},
+    onUpdate:({editor:e})=>{setStats(documentStats(e));setStatus('Saving...');},
   });
 
   useEffect(()=>{let cancelled=false;void api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(id)+'&select=*').then(rows=>{if(cancelled||!rows[0])throw new Error('Document not found.');const d=rows[0];documentRef.current=d;setDocument(d);titleRef.current=d.title||'Untitled Document';setTitle(titleRef.current);setSavedAt(new Date(d.updated_at||d.created_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));setStatus('Saved');setReady(true);}).catch(()=>{if(!cancelled)setStatus('Error');});return()=>{cancelled=true;};},[id]);
-  useEffect(()=>{if(!editor||!ready||!document)return;editor.commands.setContent(initialContent(document.content),{emitUpdate:false});setWords(wordCount(editor));},[editor,ready,document?.id]);
+  useEffect(()=>{if(!editor||!ready||!document)return;editor.commands.setContent(initialContent(document.content),{emitUpdate:false});setStats(documentStats(editor));},[editor,ready,document?.id]);
 
   const save=async()=>{const e=editor,d=documentRef.current;if(!e||!d)return;setStatus('Saving...');try{const updated=await api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(d.id)+'&select=*',{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({title:titleRef.current.trim()||'Untitled Document',content:e.getJSON(),updated_at:new Date().toISOString()})});if(updated[0]){documentRef.current=updated[0];setDocument(updated[0]);}setSavedAt(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));setStatus('Saved');}catch{setStatus('Error');}};
   useEffect(()=>{if(!ready)return;const timer=window.setInterval(()=>void save(),30000);return()=>window.clearInterval(timer);},[ready,editor,document?.id]);
@@ -121,17 +123,23 @@ export default function DocumentPage({params}:{params:{id:string}}){
   const link=()=>{if(!editor)return;const old=editor.getAttributes('link').href||'';const href=window.prompt('Enter a URL',old);if(href===null)return;if(href.trim())editor.chain().focus().setLink({href:href.trim()}).run();else editor.chain().focus().unsetLink().run();};
   const setSize=(v:string)=>{const n=Number.parseInt(v,10);if(!Number.isFinite(n)||!editor)return;const size=Math.max(5,Math.min(100,n));setFontSize(String(size));editor.chain().focus().setFontSize(size+'px').run();};
   const setFamily=(v:string)=>{setFontFamily(v);editor?.chain().focus().setFontFamily(v).run();};
+  useEffect(()=>{const onKeyDown=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.key.toLowerCase()==='c'){e.preventDefault();setStats(documentStats(editor));setShowWordCount(true);}};window.addEventListener('keydown',onKeyDown);return()=>window.removeEventListener('keydown',onKeyDown);},[editor]);
 
   if(status==='Error'&&!document)return <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-zinc-950 text-white"><div className="text-center"><p className="text-lg">Could not open this document.</p><button onClick={()=>window.location.assign('/files')} className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm">Back to Files</button></div></div>;
   if(!editor||!document)return <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-zinc-950 text-white">Loading document…</div>;
 
   return <div className="fixed inset-0 z-[10000] flex h-[100dvh] w-[100vw] flex-col bg-zinc-900 text-slate-900">
     <style>{`
-      .document-page .ProseMirror{box-sizing:border-box;width:816px;min-height:1056px;padding:96px;background:#fff;outline:none;font-family:Arial,sans-serif;font-size:16px;line-height:1.7}
-      .document-page .ProseMirror p,.document-page .ProseMirror h1,.document-page .ProseMirror h2,.document-page .ProseMirror h3,.document-page .ProseMirror h4,.document-page .ProseMirror h5,.document-page .ProseMirror h6{margin:0 0 .75em}
-      .document-page .ProseMirror ul,.document-page .ProseMirror ol{padding-left:1.5rem}.document-page .ProseMirror a{color:#2563eb;text-decoration:underline}.document-page .ProseMirror img{max-width:100%}
-      .document-page .ProseMirror-selectednode{outline:2px solid #3b82f6;outline-offset:2px}.document-toolbar button{display:inline-flex;align-items:center;justify-content:center;height:30px;min-width:30px;border-radius:5px}.document-toolbar button:hover{background:#f4f4f5}.document-toolbar button[data-active="true"]{background:#e4e4e7}
+      .document-page{background:#52525b}
+      .document-paper{position:relative;width:816px;min-height:1056px;margin:0 auto 32px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.28);padding:96px;box-sizing:border-box}
+      .document-paper .ProseMirror{box-sizing:border-box;width:624px;min-height:864px;padding:0;background:#fff;outline:none;font-family:Arial,sans-serif;font-size:16px;line-height:1.7}
+      .document-paper .ProseMirror p,.document-paper .ProseMirror h1,.document-paper .ProseMirror h2,.document-paper .ProseMirror h3,.document-paper .ProseMirror h4,.document-paper .ProseMirror h5,.document-paper .ProseMirror h6{margin:0 0 .75em}
+      .document-paper .ProseMirror ul,.document-paper .ProseMirror ol{padding-left:1.5rem}.document-paper .ProseMirror a{color:#2563eb;text-decoration:underline}.document-paper .ProseMirror img{max-width:100%}
+      .document-paper .ProseMirror-selectednode{outline:2px solid #3b82f6;outline-offset:2px}.document-toolbar button{display:inline-flex;align-items:center;justify-content:center;height:30px;min-width:30px;border-radius:5px}.document-toolbar button:hover{background:#f4f4f5}.document-toolbar button[data-active="true"]{background:#e4e4e7}
       .document-toolbar select,.document-toolbar input{height:30px;border:1px solid #d4d4d8;border-radius:5px;background:#fff;color:#18181b;padding:0 6px;font-size:12px}.document-toolbar input[type=color]{width:34px;padding:3px}
+      .document-word-count-modal{width:380px;border-radius:10px;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:24px}
+      .document-word-count-modal h2{font-size:20px;font-weight:500;margin:0 0 20px}
+      .document-word-count-row{display:flex;justify-content:space-between;margin:9px 0;font-size:14px;color:#27272a}
     `}</style>
 
     <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-zinc-950 px-4 text-white">
@@ -163,7 +171,21 @@ export default function DocumentPage({params}:{params:{id:string}}){
       <input ref={fileInput} type="file" accept=".jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(f)void insertFile(f)}}/>
     </div>
 
-    <div className="document-page min-h-0 flex-1 overflow-auto bg-zinc-700 px-4 py-8 sm:px-8"><div className="mx-auto min-h-[1056px] w-[816px] shrink-0 bg-white shadow-xl"><EditorContent editor={editor}/></div></div>
-    <div className="flex h-8 shrink-0 items-center justify-end border-t border-black/10 bg-white px-6 text-[11px] text-slate-500">{words} {words===1?'word':'words'}</div>
+    <div className="document-page relative min-h-0 flex-1 overflow-auto px-4 py-8 sm:px-8">
+      <div className="document-paper"><EditorContent editor={editor}/><div className="absolute bottom-5 left-0 right-0 text-center text-[11px] text-zinc-500">1</div></div>
+      {stats.pages>1&&Array.from({length:stats.pages-1},(_,i)=><div key={i} className="document-paper"><div className="min-h-[864px]"></div><div className="absolute bottom-5 left-0 right-0 text-center text-[11px] text-zinc-500">{i+2}</div></div>)}
+      {wordCountWhileTyping&&<div className="fixed bottom-3 left-3 rounded bg-white/95 px-2 py-1 text-[11px] text-zinc-600 shadow">{stats.words} {stats.words===1?'word':'words'}</div>}
+    </div>
+    {showWordCount&&<div className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/20">
+      <div className="document-word-count-modal">
+        <h2>Word Count</h2>
+        <div className="document-word-count-row"><span>Pages</span><span>{stats.pages}</span></div>
+        <div className="document-word-count-row"><span>Words</span><span>{stats.words}</span></div>
+        <div className="document-word-count-row"><span>Characters</span><span>{stats.characters}</span></div>
+        <div className="document-word-count-row"><span>Characters excluding spaces</span><span>{stats.charactersNoSpaces}</span></div>
+        <label className="mt-5 flex items-center gap-2 text-sm text-zinc-700"><input type="checkbox" checked={wordCountWhileTyping} onChange={e=>setWordCountWhileTyping(e.target.checked)}/>Display word count while typing</label>
+        <div className="mt-6 flex justify-end gap-2"><button onClick={()=>setShowWordCount(false)} className="rounded px-4 py-2 text-sm hover:bg-zinc-100">Cancel</button><button onClick={()=>setShowWordCount(false)} className="rounded bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-800">OK</button></div>
+      </div>
+    </div>}
   </div>;
 }
