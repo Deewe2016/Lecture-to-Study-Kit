@@ -219,6 +219,8 @@ export default function FilesPage() {
   const [modal, setModal] = useState<{ file: FileRow; url?: string } | null>(null);
   const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share'; id?: string; name?: string; fileId?: string } | null>(null);
   const [dialogValue, setDialogValue] = useState('');
+  const [editingItem, setEditingItem] = useState<{ kind: 'file' | 'folder'; id: string } | null>(null);
+  const [editingValue, setEditingValue] = useState('');
   const [sharedUser, setSharedUser] = useState<UserRow[]>([]);
   const [pinned, setPinned] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('flexus-file-pins') || '[]'); } catch { return []; }
@@ -348,6 +350,41 @@ export default function FilesPage() {
     finally { setBusy(false); }
   };
 
+  const renameFile = async (file: FileRow, nextName: string) => {
+    const name = nextName.trim();
+    if (!name || name === file.name) return;
+    setBusy(true);
+    try {
+      await api("/rest/v1/files?id=eq." + file.id, { method: 'PATCH', body: JSON.stringify({ name }) });
+      setFiles(prev => prev.map(f => f.id === file.id ? { ...f, name } : f));
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not rename file.'); }
+    finally { setBusy(false); }
+  };
+
+  const renameFolderById = async (id: string, name: string) => {
+    setBusy(true);
+    try {
+      await api("/rest/v1/folders?id=eq." + id, { method: 'PATCH', body: JSON.stringify({ name }) });
+      setFolders(prev => prev.map(f => f.id === id ? { ...f, name } : f));
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not rename folder.'); }
+    finally { setBusy(false); }
+  };
+
+  const saveInlineRename = async () => {
+    const item = editingItem;
+    const name = editingValue.trim();
+    if (!item) return;
+    if (!name) { setEditingItem(null); return; }
+    if (item.kind === 'file') {
+      const file = files.find(f => f.id === item.id);
+      if (file) await renameFile(file, name);
+    } else {
+      const folder = folders.find(f => f.id === item.id);
+      if (folder && folder.name !== name) await renameFolderById(item.id, name);
+    }
+    setEditingItem(null);
+  };
+
   const renameFolder = async () => {
     if (!dialog?.id || !dialogValue.trim()) return;
     setBusy(true);
@@ -445,6 +482,35 @@ export default function FilesPage() {
       await api('/rest/v1/file_shares', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(body) });
       setDialog(null); setSharedUser([]);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not share.'); }
+    finally { setBusy(false); }
+  };
+
+  const createDocument = async () => {
+    if (!me) return;
+    const folderId = selected || root?.id || null;
+    setBusy(true); setError('');
+    try {
+      const created = await api<DocumentRow[]>('/rest/v1/documents?select=*', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ title: 'Untitled Document', content: { ops: [{ insert: '\n' }] }, owner_id: me.id, folder_id: folderId }),
+      });
+      if (created[0]) {
+        setDocuments(prev => [created[0], ...prev]);
+        window.location.assign('/document/' + created[0].id);
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create document.'); }
+    finally { setBusy(false); }
+  };
+
+  const shareDocument = async (user: UserRow) => {
+    if (!dialog?.id || !me) return;
+    setBusy(true);
+    try {
+      await api('/rest/v1/document_shares', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ document_id: dialog.id, shared_with_user_id: user.id, shared_by_user_id: me.id }) });
+      setDialog(null); setSharedUser([]);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not share document.'); }
     finally { setBusy(false); }
   };
 
