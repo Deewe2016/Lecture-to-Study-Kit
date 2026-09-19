@@ -61,6 +61,7 @@ import AuthPage from '@/pages/auth';
 import AiChatPage from '@/pages/ai-chat';
 import ChatPage from '@/pages/chat';
 import FilesPage from '@/pages/files';
+import DocumentPage from '@/pages/document';
 import {
   getCurrentUser,
   getStoredUser,
@@ -4038,6 +4039,11 @@ function Router() {
           <Route
             path="/new"
             component={NewPage}
+          />
+
+          <Route
+            path="/document/:id"
+            component={DocumentPage}
           />
 
           <Route
