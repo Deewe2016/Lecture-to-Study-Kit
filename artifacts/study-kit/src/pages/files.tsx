@@ -305,19 +305,23 @@ export default function FilesPage() {
 
   useEffect(() => {
     if (!me || !root || studyKitsFolder) return;
-    void api<FolderRow[]>('/rest/v1/folders?select=*', {
+    void api<FolderRow[]>('/rest/v1/folders?select=*&on_conflict=owner_id%2Cparent_folder_id%2Cname', {
       method: 'POST',
-      headers: { Prefer: 'return=representation' },
+      headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
       body: JSON.stringify({ name: 'Study Kits', owner_id: me.id, parent_folder_id: root.id }),
     }).then((created) => {
-      if (created[0]) setFolders(prev => [...prev, created[0]]);
+      if (created[0]) setFolders(prev => [...prev.filter(folder => folder.id !== created[0].id), created[0]]);
     }).catch((e) => setError(e instanceof Error ? e.message : 'Could not create Study Kits folder.'));
   }, [me?.id, root?.id, studyKitsFolder?.id]);
 
   const createFolder = async () => {
     if (!me || !dialogValue.trim()) return;
     const parent = section === 'mine' ? (selected || root?.id || null) : null;
-    if (!parent && section === 'mine') { await ensureRoot(); return; }
+    if (!parent && section === 'mine') {
+      const normalized = await ensureRoot(folders);
+      setFolders(normalized);
+      return;
+    }
     setBusy(true);
     try {
       const created = await api<FolderRow[]>('/rest/v1/folders?select=*', {
@@ -470,44 +474,71 @@ export default function FilesPage() {
   const fileCard = (file: FileRow) => {
     const Icon = iconFor(file.type, file.name);
     return (
-      <div
-        key={file.id}
-        className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40"
-      >
+      <div key={file.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
         <button
           type="button"
           onClick={() => void openFile(file)}
           className="w-full text-left"
           aria-label={`Open ${file.name}`}
         >
-        <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60"><Icon size={34} className="text-primary" /></div>
-        <p
-          className="mt-3 truncate text-sm font-medium"
-          title={file.name}
-        >
-          {file.name.length > 15 ? file.name.slice(0, 15) + '…' : file.name}
-        </p>
-        <p className="mt-1 text-[10px] text-muted-foreground">{formatBytes(Number(file.size))} · {formatDate(file.created_at)}</p>
-      </button>
-      <div className="mt-3 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        <button onClick={() => void download(file)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground" title="Download"><Download size={14}/></button>
-        {file.owner_id === me?.id && <div className="relative">
-          <button onClick={() => setMenu(menu === file.id ? null : file.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground" title="More options" aria-label="More options"><MoreHorizontal size={14}/></button>
-          {menu === file.id && <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-border bg-card p-1 shadow-xl">
-            <button onClick={() => { setDialog({ kind:'share', fileId:file.id }); setDialogValue(''); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
-            <button onClick={() => { setMenu(null); void deleteFile(file); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
-          </div>}
-        </div>}
+          <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60">
+            <Icon size={34} className="text-primary" />
+          </div>
+          <p className="mt-3 truncate text-sm font-medium" title={file.name}>
+            {file.name.length > 15 ? file.name.slice(0, 15) + '…' : file.name}
+          </p>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {formatBytes(Number(file.size))} · {formatDate(file.created_at)}
+          </p>
         </button>
         <div className="mt-3 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <button onClick={() => void download(file)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground" title="Download" aria-label={`Download ${file.name}`}><Download size={14}/></button>
-          {file.owner_id === me?.id && <div className="relative">
-            <button onClick={() => setMenu(menu === file.id ? null : file.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground" title="More options" aria-label="More options"><MoreHorizontal size={14}/></button>
-            {menu === file.id && <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-border bg-card p-1 shadow-xl">
-              <button onClick={() => { setDialog({ kind:'share', fileId:file.id }); setDialogValue(''); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
-              <button onClick={() => { setMenu(null); void deleteFile(file); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
-            </div>}
-          </div>}
+          <button
+            type="button"
+            onClick={() => void download(file)}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+            title="Download"
+            aria-label={`Download ${file.name}`}
+          >
+            <Download size={14}/>
+          </button>
+          {file.owner_id === me?.id && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMenu(menu === file.id ? null : file.id)}
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                title="More options"
+                aria-label="More options"
+              >
+                <MoreHorizontal size={14}/>
+              </button>
+              {menu === file.id && (
+                <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-border bg-card p-1 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDialog({ kind:'share', fileId:file.id });
+                      setDialogValue('');
+                      setMenu(null);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"
+                  >
+                    <Share2 size={13}/> Share
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      void deleteFile(file);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"
+                  >
+                    <Trash2 size={13}/> Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
