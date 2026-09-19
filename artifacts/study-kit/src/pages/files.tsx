@@ -519,7 +519,7 @@ export default function FilesPage() {
   const folderTree = (parent: string | null, depth = 0): JSX.Element[] => children(parent).map(folder => (
     <div key={folder.id}>
       <div className="group flex items-center">
-        <button onClick={() => setSelected(folder.id)} className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-secondary ${selected === folder.id ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`} style={{ paddingLeft: 8 + depth * 14 }}>
+        <div role="button" tabIndex={0} onClick={() => setSelected(folder.id)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' ') setSelected(folder.id)}} className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-secondary ${selected === folder.id ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`} style={{ paddingLeft: 8 + depth * 14 }}>
           {children(folder.id).length ? <ChevronRight size={13} /> : <span className="w-[13px]" />}
           {selected === folder.id ? <FolderOpen size={15} className="text-primary" /> : <Folder size={15} className="text-primary" />}
           {editingItem?.kind === 'folder' && editingItem.id === folder.id ? (
@@ -530,7 +530,7 @@ export default function FilesPage() {
           ) : (
             <span onDoubleClick={(e)=>{e.stopPropagation(); setEditingItem({kind:'folder',id:folder.id}); setEditingValue(folder.name);}} className="truncate">{folder.name}</span>
           )}
-        </button>
+        </div>
         {folder.owner_id === me?.id && <button onClick={() => setMenu(menu === folder.id ? null : folder.id)} className="rounded p-1 opacity-0 group-hover:opacity-100 hover:bg-secondary"><MoreHorizontal size={14} /></button>}
       </div>
       {menu === folder.id && <div className="ml-auto mr-1 flex items-center gap-1 rounded-lg border border-border bg-card p-1 shadow-xl">
@@ -583,9 +583,11 @@ export default function FilesPage() {
     const Icon = iconFor(file.type, file.name);
     return (
       <div key={file.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => void openFile(file)}
+          onKeyDown={e=>{if(e.key==='Enter'||e.key===' ') void openFile(file)}}
           className="w-full text-left"
           aria-label={`Open ${file.name}`}
         >
@@ -605,7 +607,7 @@ export default function FilesPage() {
           <p className="mt-1 text-[10px] text-muted-foreground">
             {formatBytes(Number(file.size))} · {formatDate(file.created_at)}
           </p>
-        </button>
+        </div>
         <div className="mt-3 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           <button
             type="button"
