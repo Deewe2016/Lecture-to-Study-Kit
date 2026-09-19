@@ -517,13 +517,7 @@ importers:
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.101.4(react@19.1.0)
-      '@tiptap/core':
-        specifier: ^3.31.3
-        version: 3.31.3(@tiptap/pm@3.31.3)
       '@tiptap/extension-color':
-        specifier: ^3.31.3
-        version: 3.31.3(@tiptap/extension-text-style@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3)))
-      '@tiptap/extension-font-family':
         specifier: ^3.31.3
         version: 3.31.3(@tiptap/extension-text-style@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3)))
       '@tiptap/extension-highlight':
@@ -544,6 +538,9 @@ importers:
       '@tiptap/extension-underline':
         specifier: ^3.31.3
         version: 3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))
+      '@tiptap/pm':
+        specifier: ^3.31.3
+        version: 3.31.3
       '@tiptap/react':
         specifier: ^3.31.3
         version: 3.31.3(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)

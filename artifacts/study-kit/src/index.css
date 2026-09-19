@@ -94,16 +94,139 @@
   box-shadow: 0 0 20px hsl(195 100% 62% / .12), inset 0 0 14px hsl(195 100% 62% / .05) !important;
 }
 [data-testid="link-brand"] > span:first-child > svg { display: none !important; }
-/* Document editor */
-.document-page{background:#52525b}
-.document-pages{position:relative;width:816px;margin:0 auto}
-.document-paper-bg{position:relative;width:816px;height:1056px;margin-bottom:32px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.28)}
-.document-editor-layer{position:absolute;top:0;left:0;width:816px;box-sizing:border-box;padding:96px}
-.document-editor-layer .ProseMirror{box-sizing:border-box;width:624px;min-height:864px;padding:0;background:transparent;outline:none;font-family:Arial,sans-serif;font-size:16px;line-height:1.7}
-.document-editor-layer .ProseMirror p,.document-editor-layer .ProseMirror h1,.document-editor-layer .ProseMirror h2,.document-editor-layer .ProseMirror h3,.document-editor-layer .ProseMirror h4,.document-editor-layer .ProseMirror h5,.document-editor-layer .ProseMirror h6{margin:0 0 .75em}
-.document-editor-layer .ProseMirror ul,.document-editor-layer .ProseMirror ol{padding-left:1.5rem}.document-editor-layer .ProseMirror a{color:#2563eb;text-decoration:underline}.document-editor-layer .ProseMirror img{max-width:100%}
-.document-editor-layer .ProseMirror-selectednode{outline:2px solid #3b82f6;outline-offset:2px}.document-toolbar button{display:inline-flex;align-items:center;justify-content:center;height:30px;min-width:30px;border-radius:5px}.document-toolbar button:hover{background:#f4f4f5}.document-toolbar button[data-active="true"]{background:#e4e4e7}
-.document-toolbar select,.document-toolbar input{height:30px;border:1px solid #d4d4d8;border-radius:5px;background:#fff;color:#18181b;padding:0 6px;font-size:12px}.document-toolbar input[type=color]{width:34px;padding:3px}
-.document-word-count-modal{width:380px;border-radius:10px;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:24px}
-.document-word-count-modal h2{font-size:20px;font-weight:500;margin:0 0 20px}
-.document-word-count-row{display:flex;justify-content:space-between;margin:9px 0;font-size:14px;color:#27272a}
+/* Clean TipTap document editor */
+.document-editor-page {
+  min-height: 100dvh;
+  background: #52525b;
+  color: #18181b;
+}
+
+.document-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 16px;
+  background: #18181b;
+  color: #fff;
+  box-sizing: border-box;
+}
+
+.document-editor-button,
+.document-editor-toolbar-button {
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #fff;
+  color: #18181b;
+  cursor: pointer;
+  font: inherit;
+}
+
+.document-editor-button {
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+.document-editor-title {
+  flex: 1;
+  min-width: 0;
+  max-width: 640px;
+  height: 34px;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #27272a;
+  color: #fff;
+  font: 500 14px/1.2 Arial, sans-serif;
+  outline: none;
+}
+
+.document-editor-status {
+  margin-left: auto;
+  font-size: 12px;
+  color: #a1a1aa;
+}
+
+.document-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 48px;
+  padding: 7px 12px;
+  border-bottom: 1px solid #d4d4d8;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.document-editor-toolbar-button {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+}
+
+.document-editor-toolbar-button[aria-pressed="true"] {
+  background: #e4e4e7;
+}
+
+.document-editor-workspace {
+  min-height: calc(100dvh - 104px);
+  padding: 40px 20px;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.document-editor-paper {
+  width: 816px;
+  min-height: 1056px;
+  margin: 0 auto;
+  padding: 96px;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .28);
+}
+
+.document-editor-paper .ProseMirror {
+  min-height: 864px;
+  outline: none;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.document-editor-paper .ProseMirror p {
+  margin: 0 0 12px;
+}
+
+.document-editor-paper .ProseMirror:focus {
+  outline: none;
+}
+
+.document-editor-loading,
+.document-editor-error {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: #18181b;
+  color: #fff;
+  text-align: center;
+}
+
+.document-editor-error .document-editor-button {
+  margin-top: 12px;
+}
+
+@media (max-width: 880px) {
+  .document-editor-paper {
+    width: 100%;
+    min-height: 1056px;
+  }
+
+  .document-editor-workspace {
+    padding: 24px 12px;
+  }
+}
