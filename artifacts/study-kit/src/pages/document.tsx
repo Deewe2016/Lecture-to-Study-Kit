@@ -122,18 +122,86 @@ const Pagination=Extension.create({
     decreaseIndent:()=>({state,tr})=>{let changed=false;state.doc.nodesBetween(state.selection.from,state.selection.to,(node,pos)=>{if(!['paragraph','heading','listItem'].includes(node.type.name))return;const n=Math.max(0,Number(node.attrs.indent||0)-1);if(n!==Number(node.attrs.indent||0)){tr.setNodeMarkup(pos,undefined,{...node.attrs,indent:n});changed=true;}});return changed;}
   };},
 });
-const DraggableImage=Image.extend({draggable:true})      .document-page{background:#52525b}
-      .document-pages{position:relative;width:816px;margin:0 auto}
-      .document-paper-bg{position:relative;width:816px;height:1056px;margin-bottom:32px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.28)}
-      .document-editor-layer{position:absolute;top:0;left:0;width:816px;box-sizing:border-box;padding:96px}
-      .document-editor-layer .ProseMirror{box-sizing:border-box;width:624px;min-height:864px;padding:0;background:transparent;outline:none;font-family:Arial,sans-serif;font-size:16px;line-height:1.7}
-      .document-editor-layer .ProseMirror p,.document-editor-layer .ProseMirror h1,.document-editor-layer .ProseMirror h2,.document-editor-layer .ProseMirror h3,.document-editor-layer .ProseMirror h4,.document-editor-layer .ProseMirror h5,.document-editor-layer .ProseMirror h6{margin:0 0 .75em}
-      .document-editor-layer .ProseMirror ul,.document-editor-layer .ProseMirror ol{padding-left:1.5rem}.document-editor-layer .ProseMirror a{color:#2563eb;text-decoration:underline}.document-editor-layer .ProseMirror img{max-width:100%}
-      .document-editor-layer .ProseMirror-selectednode{outline:2px solid #3b82f6;outline-offset:2px}.document-toolbar button{display:inline-flex;align-items:center;justify-content:center;height:30px;min-width:30px;border-radius:5px}.document-toolbar button:hover{background:#f4f4f5}.document-toolbar button[data-active="true"]{background:#e4e4e7}
-      .document-toolbar select,.document-toolbar input{height:30px;border:1px solid #d4d4d8;border-radius:5px;background:#fff;color:#18181b;padding:0 6px;font-size:12px}.document-toolbar input[type=color]{width:34px;padding:3px}
-      .document-word-count-modal{width:380px;border-radius:10px;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:24px}
-      .document-word-count-modal h2{font-size:20px;font-weight:500;margin:0 0 20px}
-      .document-word-count-row{display:flex;justify-content:space-between;margin:9px 0;font-size:14px;color:#27272a}
+const DraggableImage=Image.extend({draggable:true});
+
+export default function DocumentPage({params}:{params:{id:string}}){
+  const id=params.id;
+  const [document,setDocument]=useState<DocumentRow|null>(null);
+  const documentRef=useRef<DocumentRow|null>(null);
+  const [title,setTitle]=useState('Untitled Document');
+  const titleRef=useRef('Untitled Document');
+  const [status,setStatus]=useState<'Loading...'|'Saving...'|'Saved'|'Error'>('Loading...');
+  const [savedAt,setSavedAt]=useState('');
+  const [stats,setStats]=useState({words:0,characters:0,charactersNoSpaces:0,pages:1});
+  const [showWordCount,setShowWordCount]=useState(false);
+  const [wordCountWhileTyping,setWordCountWhileTyping]=useState(false);
+  const [ready,setReady]=useState(false);
+  const [fontSize,setFontSize]=useState('16');
+  const [fontFamily,setFontFamily]=useState('Arial');
+  const fileInput=useRef<HTMLInputElement|null>(null);
+
+  const editor=useEditor({
+    immediatelyRender:false,
+    extensions:[
+      StarterKit,TextStyle,FontSize,FontFamily,Color,Highlight.configure({multicolor:true}),Underline,
+      Link.configure({autolink:true,openOnClick:false,defaultProtocol:'https'}),
+      TextAlign.configure({types:['heading','paragraph'],alignments:['left','center','right','justify']}),
+      Indent,
+      DraggableImage.configure({resize:{enabled:true,directions:['top-left','top-right','bottom-left','bottom-right'],minWidth:50,minHeight:50,alwaysPreserveAspectRatio:true},HTMLAttributes:{class:'document-image'}}),
+      Pagination,
+    ],
+    content:'<p></p>',
+    onUpdate:({editor:e})=>{setStats(documentStats(e));setStatus('Saving...');},
+  });
+
+  useEffect(()=>{let cancelled=false;void api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(id)+'&select=*').then(rows=>{if(cancelled||!rows[0])throw new Error('Document not found.');const d=rows[0];documentRef.current=d;setDocument(d);titleRef.current=d.title||'Untitled Document';setTitle(titleRef.current);setSavedAt(new Date(d.updated_at||d.created_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));setStatus('Saved');setReady(true);}).catch(()=>{if(!cancelled)setStatus('Error');});return()=>{cancelled=true;};},[id]);
+  useEffect(()=>{if(!editor||!ready||!document)return;editor.commands.setContent(initialContent(document.content),{emitUpdate:false});setStats(documentStats(editor));},[editor,ready,document?.id]);
+
+  const save=async()=>{const e=editor,d=documentRef.current;if(!e||!d)return;setStatus('Saving...');try{const updated=await api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(d.id)+'&select=*',{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({title:titleRef.current.trim()||'Untitled Document',content:e.getJSON(),updated_at:new Date().toISOString()})});if(updated[0]){documentRef.current=updated[0];setDocument(updated[0]);}setSavedAt(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));setStatus('Saved');}catch{setStatus('Error');}};
+  useEffect(()=>{if(!ready)return;const timer=window.setInterval(()=>void save(),30000);return()=>window.clearInterval(timer);},[ready,editor,document?.id]);
+
+  const insertFile=async(file:File)=>{if(!editor)return;try{const src=await uploadImage(file,id);editor.chain().focus().setImage({src,alt:file.name}).run();}catch(e){window.alert(e instanceof Error?e.message:'Could not insert image.');}};
+  useEffect(()=>{if(!editor)return;const onPaste=(event:ClipboardEvent)=>{const item=Array.from(event.clipboardData?.items||[]).find(i=>IMAGE_TYPES.has(i.type));const file=item?.getAsFile();if(file){event.preventDefault();void insertFile(file);}};editor.view.dom.addEventListener('paste',onPaste);return()=>editor.view.dom.removeEventListener('paste',onPaste);},[editor,id]);
+
+  const imageFromUrl=()=>{const src=window.prompt('Enter an image URL');if(src?.trim())editor?.chain().focus().setImage({src:src.trim()}).run();};
+  const link=()=>{if(!editor)return;const old=editor.getAttributes('link').href||'';const href=window.prompt('Enter a URL',old);if(href===null)return;if(href.trim())editor.chain().focus().setLink({href:href.trim()}).run();else editor.chain().focus().unsetLink().run();};
+  const setSize=(v:string)=>{const n=Number.parseInt(v,10);if(!Number.isFinite(n)||!editor)return;const size=Math.max(5,Math.min(100,n));setFontSize(String(size));editor.chain().focus().setFontSize(size+'px').run();};
+  const setFamily=(v:string)=>{setFontFamily(v);editor?.chain().focus().setFontFamily(v).run();};
+  useEffect(()=>{const onKeyDown=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.key.toLowerCase()==='c'){e.preventDefault();if(editor)setStats(documentStats(editor));setShowWordCount(true);}};window.addEventListener('keydown',onKeyDown);return()=>window.removeEventListener('keydown',onKeyDown);},[editor]);
+
+  if(status==='Error'&&!document)return <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-zinc-950 text-white"><div className="text-center"><p className="text-lg">Could not open this document.</p><button onClick={()=>window.location.assign('/files')} className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm">Back to Files</button></div></div>;
+  if(!editor||!document)return <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-zinc-950 text-white">Loading document…</div>;
+
+  return <div className="fixed inset-0 z-[10000] flex h-[100dvh] w-[100vw] flex-col bg-zinc-900 text-slate-900">
+    <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-zinc-950 px-4 text-white">
+      <button onClick={async()=>{await save();window.location.assign('/files')}} className="rounded-lg p-2 hover:bg-white/10" title="Back to Files"><ArrowLeft size={18}/></button>
+      <input value={title} onChange={e=>{titleRef.current=e.target.value;setTitle(e.target.value);setStatus('Saving...')}} onBlur={()=>void save()} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();if(e.key==='Escape'){const t=documentRef.current?.title||'Untitled Document';titleRef.current=t;setTitle(t);e.currentTarget.blur();}}} className="h-8 w-full max-w-xl rounded border border-white/15 bg-white/10 px-2 text-sm font-medium text-white outline-none" aria-label="Document title"/>
+      <div className="flex items-center gap-2 text-xs text-white/60">{status==='Saved'&&<Check size={14}/>} {status==='Saving...'&&<Save size={14}/>}<span>{status}{status==='Saved'&&savedAt?' '+savedAt:''}</span></div>
+      <button onClick={()=>void save()} className="rounded-lg border border-white/15 px-3 py-1.5 text-xs hover:bg-white/10">Save</button>
+    </div>
+
+    <div className="document-toolbar flex shrink-0 flex-wrap items-center gap-1 border-b border-zinc-200 bg-white px-3 py-1.5 shadow-sm">
+      <select value={fontFamily} onChange={e=>setFamily(e.target.value)} aria-label="Font family"><option>Arial</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option><option>Verdana</option><option>Trebuchet MS</option><option>system-ui</option></select>
+      <input type="number" min="5" max="100" step="1" value={fontSize} list="document-font-sizes" onChange={e=>setFontSize(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();setSize(e.currentTarget.value);e.currentTarget.blur();}else if(e.key==='ArrowUp'||e.key==='ArrowDown')window.setTimeout(()=>setSize(e.currentTarget.value),0)}} onBlur={e=>setSize(e.currentTarget.value)} aria-label="Font size" className="w-16 text-center"/>
+      <datalist id="document-font-sizes">{FONT_SIZES.map(n=><option key={n} value={n}/>)}</datalist>
+      <span className="mx-1 h-6 w-px bg-zinc-200"/>
+      <button onClick={()=>editor.chain().focus().toggleBold().run()} data-active={editor.isActive('bold')} title="Bold"><Bold size={16}/></button>
+      <button onClick={()=>editor.chain().focus().toggleItalic().run()} data-active={editor.isActive('italic')} title="Italic"><Italic size={16}/></button>
+      <button onClick={()=>editor.chain().focus().toggleUnderline().run()} data-active={editor.isActive('underline')} title="Underline"><UnderlineIcon size={16}/></button>
+      <button onClick={()=>editor.chain().focus().toggleStrike().run()} data-active={editor.isActive('strike')} title="Strikethrough"><Strikethrough size={16}/></button>
+      <label className="flex h-[30px] items-center gap-1 rounded border border-zinc-300 px-1" title="Text color"><Type size={14}/><input type="color" defaultValue="#000000" onChange={e=>editor.chain().focus().setColor(e.target.value).run()}/></label>
+      <label className="flex h-[30px] items-center gap-1 rounded border border-zinc-300 px-1" title="Highlight color"><Highlighter size={14}/><input type="color" defaultValue="#fff59d" onChange={e=>editor.chain().focus().setHighlight({color:e.target.value}).run()}/></label>
+      <span className="mx-1 h-6 w-px bg-zinc-200"/>
+      <button onClick={()=>editor.chain().focus().setTextAlign('left').run()} title="Align left"><AlignLeft size={16}/></button><button onClick={()=>editor.chain().focus().setTextAlign('center').run()} title="Align center"><AlignCenter size={16}/></button><button onClick={()=>editor.chain().focus().setTextAlign('right').run()} title="Align right"><AlignRight size={16}/></button><button onClick={()=>editor.chain().focus().setTextAlign('justify').run()} title="Justify"><AlignJustify size={16}/></button>
+      <button onClick={()=>editor.chain().focus().toggleBulletList().run()} data-active={editor.isActive('bulletList')} title="Bullet list"><List size={16}/></button><button onClick={()=>editor.chain().focus().toggleOrderedList().run()} data-active={editor.isActive('orderedList')} title="Numbered list"><ListOrdered size={16}/></button>
+      <button onClick={()=>editor.chain().focus().increaseIndent().run()} title="Indent"><Plus size={16}/></button><button onClick={()=>editor.chain().focus().decreaseIndent().run()} title="Outdent"><Minus size={16}/></button>
+      <span className="mx-1 h-6 w-px bg-zinc-200"/>
+      <button onClick={link} title="Insert link"><LinkIcon size={16}/></button><button onClick={imageFromUrl} title="Insert image from URL"><ImagePlus size={16}/></button><button onClick={()=>fileInput.current?.click()} title="Upload image"><ImagePlus size={16}/></button>
+      <span className="mx-1 h-6 w-px bg-zinc-200"/>
+      <button onClick={()=>editor.chain().focus().undo().run()} disabled={!editor.can().undo()} title="Undo"><Undo2 size={16}/></button><button onClick={()=>editor.chain().focus().redo().run()} disabled={!editor.can().redo()} title="Redo"><Redo2 size={16}/></button>
+      <input ref={fileInput} type="file" accept=".jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(f)void insertFile(f)}}/>
+    </div>
+
     <div className="document-page relative min-h-0 flex-1 overflow-auto px-4 py-8 sm:px-8">
       <div className="document-pages" style={{minHeight:Math.max(PAGE_HEIGHT,stats.pages*PAGE_STEP-PAGE_GAP)}}>
         {Array.from({length:stats.pages},(_,i)=><div key={i} className="document-paper-bg"><div className="absolute bottom-5 left-0 right-0 text-center text-[11px] text-zinc-500">{i+1}</div></div>)}
@@ -141,4 +209,16 @@ const DraggableImage=Image.extend({draggable:true})      .document-page{backgrou
       </div>
       {wordCountWhileTyping&&<div className="fixed bottom-3 left-3 rounded bg-white/95 px-2 py-1 text-[11px] text-zinc-600 shadow">{stats.words} {stats.words===1?'word':'words'}</div>}
     </div>
-;
+    {showWordCount&&<div className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/20">
+      <div className="document-word-count-modal">
+        <h2>Word Count</h2>
+        <div className="document-word-count-row"><span>Pages</span><span>{stats.pages}</span></div>
+        <div className="document-word-count-row"><span>Words</span><span>{stats.words}</span></div>
+        <div className="document-word-count-row"><span>Characters</span><span>{stats.characters}</span></div>
+        <div className="document-word-count-row"><span>Characters excluding spaces</span><span>{stats.charactersNoSpaces}</span></div>
+        <label className="mt-5 flex items-center gap-2 text-sm text-zinc-700"><input type="checkbox" checked={wordCountWhileTyping} onChange={e=>setWordCountWhileTyping(e.target.checked)}/>Display word count while typing</label>
+        <div className="mt-6 flex justify-end gap-2"><button onClick={()=>setShowWordCount(false)} className="rounded px-4 py-2 text-sm hover:bg-zinc-100">Cancel</button><button onClick={()=>setShowWordCount(false)} className="rounded bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-800">OK</button></div>
+      </div>
+    </div>}
+  </div>;
+}
