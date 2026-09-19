@@ -652,15 +652,6 @@ export default function FilesPage() {
           </p>
         </div>
         <div className="mt-3 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <button
-            type="button"
-            onClick={() => void download(file)}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-            title="Download"
-            aria-label={`Download ${file.name}`}
-          >
-            <Download size={14}/>
-          </button>
           {file.owner_id === me?.id && (
             <div className="relative">
               <button
@@ -674,6 +665,7 @@ export default function FilesPage() {
               </button>
               {menu === file.id && (
                 <div className="absolute right-0 top-8 z-20 w-48 rounded-lg border border-border bg-card p-1 shadow-xl">
+                  <button type="button" onClick={() => { void download(file); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Download size={13}/> Download</button>
                   <button type="button" onClick={() => { setEditingItem({kind:'file',id:file.id}); setEditingValue(file.name); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
                   <button
                     type="button"
