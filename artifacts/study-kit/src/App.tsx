@@ -2531,6 +2531,9 @@ function KitWorkspace({
   const [addMaterialBusy, setAddMaterialBusy] = useState(false);
   const [addMaterialError, setAddMaterialError] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [addMaterialMode, setAddMaterialMode] = useState<'file' | 'video' | 'paste' | 'ai'>('file');
+  const [additionalText, setAdditionalText] = useState('');
+  const [additionalAiTopic, setAdditionalAiTopic] = useState('');
   const [updateSummary, setUpdateSummary] = useState('');
   const addMaterialInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -2606,6 +2609,30 @@ function KitWorkspace({
     } finally {
       setAddMaterialBusy(false);
     }
+  };
+
+  const handleAdditionalAi = async () => {
+    const topic = additionalAiTopic.trim();
+    if (!topic) return;
+    setAddMaterialBusy(true);
+    setAddMaterialError('');
+    try {
+      const response = await fetch('/api/ai-material', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic }) });
+      const material = await response.json().catch(() => null);
+      if (!response.ok || !material?.text) throw new Error(material?.error || 'Could not generate AI study material.');
+      await updateKitWithMaterial({ name: material.name || (topic + ' - AI Generated'), kind: 'notes', text: material.text });
+      setAdditionalAiTopic('');
+    } catch (e) {
+      setAddMaterialError(e instanceof Error ? e.message : 'Could not generate AI study material.');
+      setAddMaterialBusy(false);
+    }
+  };
+
+  const handleAdditionalText = async () => {
+    const text = additionalText.trim();
+    if (!text) return;
+    await updateKitWithMaterial({ name: 'Pasted text', kind: 'notes', text });
+    setAdditionalText('');
   };
 
   const handleAdditionalFile = async (file: File | undefined) => {
@@ -2769,47 +2796,29 @@ function KitWorkspace({
       </div>
       {showAddMaterial && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-5 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
+          <div className="w-full max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="font-mono text-[10px] uppercase tracking-[.18em] text-primary">Expand this kit</p>
-                <h2 className="mt-2 font-serif text-2xl">Add more material</h2>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">Flexus will read the new material and update the existing chapters, flashcards, and review plan.</p>
-              </div>
+              <div><p className="font-mono text-[10px] uppercase tracking-[.18em] text-primary">Expand this kit</p><h2 className="mt-2 font-serif text-2xl">Add more material</h2><p className="mt-2 text-xs leading-5 text-muted-foreground">Add a source and Flexus will update this existing kit rather than creating a new one.</p></div>
               <button type="button" onClick={() => !addMaterialBusy && setShowAddMaterial(false)} className="rounded-lg p-2 hover:bg-secondary"><X size={17}/></button>
             </div>
-
-            <label className="mt-6 flex min-h-28 cursor-pointer flex-col justify-center rounded-xl border border-dashed border-primary/50 bg-primary/[.04] p-5 hover:bg-primary/[.08]">
-              <input
-                ref={addMaterialInputRef}
-                type="file"
-                accept=".pdf,.txt,.md,video/mp4,video/quicktime,video/webm,video/mpeg,video/ogg,audio/*,.mp4,.mov,.webm"
-                className="sr-only"
-                disabled={addMaterialBusy}
-                onChange={(e) => { void handleAdditionalFile(e.target.files?.[0]); e.currentTarget.value = ''; }}
-              />
-              <span className="flex items-center gap-2 text-sm font-medium"><UploadCloud size={18} className="text-primary"/> Upload a video or file</span>
-              <span className="mt-1 text-xs text-muted-foreground">PDF, TXT, Markdown, MP4, MOV, or WebM</span>
-            </label>
-
-            <div className="my-5 flex items-center gap-3 text-[10px] uppercase tracking-[.15em] text-muted-foreground"><span className="h-px flex-1 bg-border"/><span>or</span><span className="h-px flex-1 bg-border"/></div>
-
-            <div className="rounded-xl border border-border bg-background p-4">
-              <label className="text-sm font-medium">YouTube URL</label>
-              <div className="mt-3 flex gap-2">
-                <input
-                  value={youtubeUrl}
-                  onChange={(e) => setYoutubeUrl(e.target.value)}
-                  placeholder="https://youtube.com/watch?v=..."
-                  disabled={addMaterialBusy}
-                  className="focus-ring min-w-0 flex-1 rounded-lg border border-input bg-card px-3 py-2.5 text-xs outline-none"
-                />
-                <button type="button" onClick={() => void handleYoutubeUpdate()} disabled={addMaterialBusy || !youtubeUrl.trim()} className="rounded-lg bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40">
-                  Update
+            <div className="mt-6 flex flex-wrap gap-2">
+              {[
+                ['file', 'Upload a file', FileText],
+                ['video', 'Upload a video', Video],
+                ['paste', 'Paste text', PenLine],
+                ['ai', 'Ask AI', Sparkles],
+              ].map(([mode, label, Icon]) => (
+                <button key={mode as string} type="button" onClick={() => setAddMaterialMode(mode as typeof addMaterialMode)} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs ${addMaterialMode === mode ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>
+                  <Icon size={13} />{label}
                 </button>
-              </div>
+              ))}
             </div>
-
+            <div className="mt-5">
+              {addMaterialMode === 'file' && <label className="flex min-h-32 cursor-pointer flex-col justify-center rounded-xl border border-dashed border-primary/50 bg-primary/[.04] p-5"><input type="file" accept=".pdf,.txt,.md,.ppt,.pptx" className="sr-only" disabled={addMaterialBusy} onChange={(e) => { void handleAdditionalFile(e.target.files?.[0]); e.currentTarget.value = ''; }} /><span className="flex items-center gap-2 text-sm font-medium"><UploadCloud size={18} className="text-primary"/> Upload a file</span><span className="mt-1 text-xs text-muted-foreground">PDF, PowerPoint, TXT, or Markdown</span></label>}
+              {addMaterialMode === 'video' && <label className="flex min-h-32 cursor-pointer flex-col justify-center rounded-xl border border-dashed border-primary/50 bg-primary/[.04] p-5"><input type="file" accept="video/mp4,video/quicktime,video/webm,video/mpeg,video/ogg,audio/*,.mp4,.mov,.webm" className="sr-only" disabled={addMaterialBusy} onChange={(e) => { void handleAdditionalFile(e.target.files?.[0]); e.currentTarget.value = ''; }} /><span className="flex items-center gap-2 text-sm font-medium"><Video size={18} className="text-primary"/> Upload a video</span><span className="mt-1 text-xs text-muted-foreground">Uses the existing Supabase upload and Groq transcription flow.</span></label>}
+              {addMaterialMode === 'paste' && <div><textarea value={additionalText} onChange={(e) => setAdditionalText(e.target.value)} placeholder="Paste the material you want to add..." rows={9} className="focus-ring w-full resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/60" disabled={addMaterialBusy}/><button type="button" onClick={() => void handleAdditionalText()} disabled={addMaterialBusy || !additionalText.trim()} className="mt-3 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40">Add text</button></div>}
+              {addMaterialMode === 'ai' && <div><textarea value={additionalAiTopic} onChange={(e) => setAdditionalAiTopic(e.target.value)} placeholder="Describe what you want to add to this study kit..." rows={8} className="focus-ring w-full resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/60" disabled={addMaterialBusy}/><div className="mt-3 flex flex-wrap gap-2">{['Circuit lab basics', 'Photosynthesis', 'World War 2', 'Algebra fundamentals'].map((prompt) => <button key={prompt} type="button" onClick={() => setAdditionalAiTopic(prompt)} className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary">{prompt}</button>)}</div><button type="button" onClick={() => void handleAdditionalAi()} disabled={addMaterialBusy || !additionalAiTopic.trim()} className="mt-3 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40">Generate & update kit</button></div>}
+            </div>
             {addMaterialBusy && <p className="mt-4 text-xs text-primary">Reading the new material and rebuilding your study kit…</p>}
             {addMaterialError && <div className="mt-4 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-200">{addMaterialError}</div>}
           </div>
