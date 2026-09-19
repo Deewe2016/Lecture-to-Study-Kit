@@ -1309,11 +1309,11 @@ function KitCard({
       <div className="relative flex items-start justify-between">
         <div>
           <span className="font-mono text-[10px] uppercase tracking-[.15em] text-primary">
-            {currentKit.courseLabel}
+            {kit.courseLabel}
           </span>
 
           <h3 className="mt-3 font-serif text-2xl tracking-[-.03em]">
-            {currentKit.title}
+            {kit.title}
           </h3>
         </div>
 
