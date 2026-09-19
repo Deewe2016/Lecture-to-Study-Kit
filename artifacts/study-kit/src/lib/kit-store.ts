@@ -101,7 +101,7 @@ export async function saveKit(kit: StoredKit) {
 // Deletion is local-first and synchronous from the caller's perspective.
 // The tombstone is written before any async cleanup so late saves/loads can
 // never make this kit live again.
-export function deleteKit(id: string) {
+export async function deleteKit(id: string) {
   markDeleted(id);
 
   try {
@@ -116,9 +116,23 @@ export function deleteKit(id: string) {
     // IndexedDB synchronization to resurrect the kit.
   }
 
-  void (async () => {
-    try {
-      const db = await open();
+  try {
+    const token = getAccessToken();
+    const base = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    const user = getStoredUser();
+    if (token && base && anonKey && user?.id) {
+      await fetch(`${base}/rest/v1/study_kits?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, {
+        method: 'DELETE',
+        headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+      });
+    }
+  } catch {
+    // Local deletion and tombstone still guarantee the kit disappears from this device.
+  }
+
+  try {
+    const db = await open();
       await new Promise<void>((resolve, reject) => {
         const request = db.transaction(['kits', 'progress'], 'readwrite');
         request.objectStore('kits').delete(id);
@@ -132,7 +146,7 @@ export function deleteKit(id: string) {
       // Tombstone + localStorage removal keep the kit deleted even when the
       // IndexedDB cleanup cannot complete.
     }
-  })();
+  };
 }
 
 export async function saveProgress(progress: StoredProgress) {
