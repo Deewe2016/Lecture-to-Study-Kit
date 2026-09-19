@@ -75,6 +75,7 @@
     "wouter": "^3.3.5",
     "zod": "catalog:",
     "marked": "^15.0.12",
-    "dompurify": "^3.2.6"
+    "dompurify": "^3.2.6",
+    "quill": "^2.0.3"
   }
 }
