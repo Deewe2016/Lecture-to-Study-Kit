@@ -1,527 +1,168 @@
 import { useEffect, useRef, useState } from 'react';
-import Quill from 'quill';
-import 'quill/dist/quill.snow.css';
-import { ArrowLeft, Check, Link as LinkIcon, Save, X } from 'lucide-react';
+import { EditorContent, useEditor } from '@tiptap/react';
+import type { Editor } from '@tiptap/core';
+import { Extension } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
+import Image from '@tiptap/extension-image';
+import TextAlign from '@tiptap/extension-text-align';
+import FontFamily from '@tiptap/extension-font-family';
+import Color from '@tiptap/extension-color';
+import Highlight from '@tiptap/extension-highlight';
+import Underline from '@tiptap/extension-underline';
+import Link from '@tiptap/extension-link';
+import { TextStyle, FontSize } from '@tiptap/extension-text-style';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowLeft, Bold, Check, Highlighter, ImagePlus, Italic, Link as LinkIcon, List, ListOrdered, Minus, Plus, Redo2, Save, Strikethrough, Type, Undo2, Underline as UnderlineIcon } from 'lucide-react';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
 
-type DocumentRow = {
-  id: string;
-  title: string;
-  content: any;
-  owner_id: string;
-  folder_id: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-const url = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+type DocumentRow = { id:string; title:string; content:any; owner_id:string; folder_id:string|null; created_at:string; updated_at:string };
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const IMAGE_TYPES = new Set(['image/jpeg','image/png','image/gif','image/webp']);
+const FONT_SIZES = [5,6,7,8,9,10,11,12,14,16,18,20,24,28,32,36,40,48,56,64,72,96,100];
 
-const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-
-async function uploadDocumentImage(file: File, documentId: string) {
-  if (!IMAGE_TYPES.has(file.type)) throw new Error('Please choose a JPG, PNG, GIF, or WebP image.');
-  const token = getAccessToken();
-  const user = getStoredUser();
-  if (!token || !user?.id || !url || !anon) throw new Error('Image storage is not configured.');
-  const ext = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
-  const path = user.id + '/documents/' + documentId + '/' + crypto.randomUUID() + '.' + ext;
-
-  const upload = await fetch(url + '/storage/v1/object/user-files/' + path, {
-    method: 'POST',
-    headers: { apikey: anon, Authorization: 'Bearer ' + token, 'Content-Type': file.type, 'x-upsert': 'false' },
-    body: file,
-  });
-  if (!upload.ok) throw new Error((await upload.text()) || 'Could not upload image.');
-
-  const signed = await fetch(url + '/storage/v1/object/sign/user-files/' + path, {
-    method: 'POST',
-    headers: { apikey: anon, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ expiresIn: 31536000 }),
-  });
-  const data = await signed.json().catch(() => ({}));
-  if (!signed.ok || !data?.signedURL) throw new Error(data?.message || 'Could not create an image URL.');
-  return String(data.signedURL).startsWith('http') ? data.signedURL : url + '/storage/v1' + data.signedURL;
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    indent: { increaseIndent: () => ReturnType; decreaseIndent: () => ReturnType };
+  }
 }
 
-async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = getAccessToken();
-  if (!token || !url || !anon) throw new Error('Document storage is not configured.');
-  const response = await fetch(url + path, {
-    ...init,
-    headers: {
-      apikey: anon,
-      Authorization: 'Bearer ' + token,
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-    },
-  });
-  const body = await response.text();
-  let data: any = null;
-  try { data = body ? JSON.parse(body) : null; } catch { data = body; }
-  if (!response.ok) {
-    throw new Error(typeof data === 'object' && data ? String(data.message || data.details || 'Request failed') : 'Request failed');
-  }
+async function api<T>(path:string, init:RequestInit={}):Promise<T> {
+  const token=getAccessToken();
+  if(!token || !supabaseUrl || !anon) throw new Error('Document storage is not configured.');
+  const response=await fetch(supabaseUrl+path,{...init,headers:{apikey:anon,Authorization:'Bearer '+token,'Content-Type':'application/json',...(init.headers||{})}});
+  const body=await response.text();
+  let data:any=null; try{data=body?JSON.parse(body):null;}catch{data=body;}
+  if(!response.ok) throw new Error(typeof data==='object'&&data?String(data.message||data.details||'Request failed'):'Request failed');
   return data as T;
 }
 
-function wordCount(text: string) {
-  return text.trim() ? text.trim().split(/\s+/).length : 0;
+async function uploadImage(file:File, documentId:string) {
+  if(!IMAGE_TYPES.has(file.type)) throw new Error('Please choose a JPG, PNG, GIF, or WebP image.');
+  const token=getAccessToken(), user=getStoredUser();
+  if(!token||!user?.id||!supabaseUrl||!anon) throw new Error('Image storage is not configured.');
+  const ext=file.type==='image/jpeg'?'jpg':file.type.split('/')[1];
+  const path=user.id+'/documents/'+documentId+'/'+crypto.randomUUID()+'.'+ext;
+  const upload=await fetch(supabaseUrl+'/storage/v1/object/user-files/'+path,{method:'POST',headers:{apikey:anon,Authorization:'Bearer '+token,'Content-Type':file.type,'x-upsert':'false'},body:file});
+  if(!upload.ok) throw new Error((await upload.text())||'Could not upload image.');
+  const signed=await fetch(supabaseUrl+'/storage/v1/object/sign/user-files/'+path,{method:'POST',headers:{apikey:anon,Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({expiresIn:31536000})});
+  const data=await signed.json().catch(()=>({}));
+  if(!signed.ok||!data?.signedURL) throw new Error(data?.message||'Could not create an image URL.');
+  return String(data.signedURL).startsWith('http')?data.signedURL:supabaseUrl+'/storage/v1'+data.signedURL;
 }
 
-export default function DocumentPage({ params }: { params: { id: string } }) {
-  const id = params.id;
-  const editorHost = useRef<HTMLDivElement | null>(null);
-  const quill = useRef<Quill | null>(null);
-  const sizeSelection = useRef<{ index: number; length: number } | null>(null);
-  const imageFileInput = useRef<HTMLInputElement | null>(null);
-  const selectedImage = useRef<HTMLImageElement | null>(null);
-  const [selectedImageBox, setSelectedImageBox] = useState<{left:number;top:number;width:number;height:number} | null>(null);
-  const [fontSizeValue, setFontSizeValue] = useState('16');
-  const resizeState = useRef<{direction:string;startX:number;startY:number;startWidth:number;startHeight:number} | null>(null);
-  const fontSizeTyping = useRef(false);
-  const imageDragIndex = useRef<number | null>(null);
-  const [document, setDocument] = useState<DocumentRow | null>(null);
-  const [title, setTitle] = useState('Untitled Document');
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [status, setStatus] = useState<'Loading...' | 'Saving...' | 'Saved' | 'Error'>('Loading...');
-  const [words, setWords] = useState(0);
-  const [ready, setReady] = useState(false);
-  const saveTimer = useRef<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void api<DocumentRow[]>('/rest/v1/documents?id=eq.' + encodeURIComponent(id) + '&select=*')
-      .then(rows => {
-        if (cancelled || !rows[0]) throw new Error('Document not found.');
-        const doc = rows[0];
-        setDocument(doc);
-        setTitle(doc.title || 'Untitled Document');
-        setStatus('Saved');
-        setReady(true);
-      })
-      .catch(() => {
-        if (!cancelled) setStatus('Error');
-      });
-    return () => { cancelled = true; };
-  }, [id]);
-
-  useEffect(() => {
-    if (!ready || !editorHost.current || quill.current) return;
-
-    const Font = Quill.import('formats/font') as any;
-    Font.whitelist = ['sans-serif', 'serif', 'monospace', 'arial', 'georgia', 'times-new-roman', 'courier-new'];
-    Quill.register(Font, true);
-
-    const Size = Quill.import('attributors/style/size') as any;
-    Size.whitelist = Array.from({ length: 96 }, (_, index) => `${index + 5}px`);
-    Quill.register(Size, true);
-
-    const BaseImage = Quill.import('formats/image') as any;
-    class DocumentImage extends BaseImage {
-      static blotName = 'image';
-      static create(value: any) {
-        const node = super.create(typeof value === 'string' ? value : value?.url || '');
-        if (value && typeof value === 'object') {
-          if (value.width) node.style.width = value.width;
-          if (value.height) node.style.height = value.height;
-        }
-        node.style.maxWidth = '100%';
-        node.setAttribute('draggable', 'true');
-        return node;
-      }
-      static value(node: HTMLImageElement) {
-        return { url: node.getAttribute('src') || '', width: node.style.width || null, height: node.style.height || null };
-      }
-    }
-    Quill.register(DocumentImage, true);
-
-    const editor = new Quill(editorHost.current, {
-      theme: 'snow',
-      placeholder: 'Start writing…',
-      modules: {
-        toolbar: {
-          container: '#document-toolbar',
-          handlers: {
-            link: function(this: any, value: boolean) {
-              if (!value) return this.quill.format('link', false);
-              const link = window.prompt('Enter a URL');
-              if (link) this.quill.format('link', link);
-            },
-            image: function(this: any) {
-              const image = window.prompt('Enter an image URL. To upload from your device, use the Upload Image button next to the toolbar.');
-              if (image) {
-                const index = this.quill.getSelection()?.index || 0;
-                this.quill.insertEmbed(index, 'image', image.trim(), 'user');
-                this.quill.setSelection(index + 1, 0, 'silent');
-              }
-            },
-          },
-        },
-      },
-    });
-
-    const initial = document?.content;
-    if (initial && Array.isArray(initial.ops)) editor.setContents(initial);
-    else editor.setContents({ ops: [{ insert: '\n' }] });
-
-    const refreshImageBox = () => {
-      const image = selectedImage.current;
-      const host = editorHost.current;
-      if (!image || !host || !host.contains(image)) {
-        selectedImage.current = null;
-        setSelectedImageBox(null);
-        return;
-      }
-      const a = image.getBoundingClientRect();
-      const b = host.getBoundingClientRect();
-      setSelectedImageBox({ left: a.left - b.left, top: a.top - b.top, width: a.width, height: a.height });
-    };
-    const onClick = (event: MouseEvent) => {
-      const image = (event.target as HTMLElement | null)?.closest('img') as HTMLImageElement | null;
-      if (image) {
-        event.preventDefault();
-        selectedImage.current = image;
-        refreshImageBox();
-      } else {
-        selectedImage.current = null;
-        setSelectedImageBox(null);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!selectedImage.current || (event.key !== 'Delete' && event.key !== 'Backspace')) return;
-      event.preventDefault();
-      const blot = Quill.find(selectedImage.current);
-      if (blot) editor.deleteText(blot.offset(editor), 1, 'user');
-      selectedImage.current = null;
-      setSelectedImageBox(null);
-    };
-    const onPaste = (event: ClipboardEvent) => {
-      const item = Array.from(event.clipboardData?.items || []).find(i => IMAGE_TYPES.has(i.type));
-      const file = item?.getAsFile();
-      if (!file) return;
-      event.preventDefault();
-      void insertImageFile(file);
-    };
-    const onDragStart = (event: DragEvent) => {
-      const image = (event.target as HTMLElement | null)?.closest('img') as HTMLImageElement | null;
-      if (!image) return;
-      const blot = Quill.find(image);
-      if (!blot) return;
-      imageDragIndex.current = blot.offset(editor);
-      selectedImage.current = image;
-      refreshImageBox();
-      event.dataTransfer?.setData('text/plain', 'flexus-document-image');
-    };
-    const onDrop = (event: DragEvent) => {
-      const fromIndex = imageDragIndex.current;
-      if (fromIndex === null) return;
-      event.preventDefault();
-      const image = selectedImage.current;
-      if (!image) {
-        imageDragIndex.current = null;
-        return;
-      }
-      const value = (DocumentImage as any).value(image);
-      const selection = editor.getSelection();
-      let targetIndex = selection?.index ?? editor.getLength() - 1;
-      if (targetIndex > fromIndex) targetIndex -= 1;
-      targetIndex = Math.max(0, Math.min(targetIndex, editor.getLength() - 1));
-      editor.deleteText(fromIndex, 1, 'user');
-      editor.insertEmbed(targetIndex, 'image', value, 'user');
-      editor.setSelection(targetIndex + 1, 0, 'silent');
-      imageDragIndex.current = null;
-      window.setTimeout(() => {
-        const images = Array.from(editor.root.querySelectorAll('img'));
-        const nextImage = images.find(img => img.getAttribute('src') === value.url && img.style.width === (value.width || ''));
-        if (nextImage) {
-          selectedImage.current = nextImage as HTMLImageElement;
-          refreshImageBox();
-        }
-      }, 0);
-    };
-    editor.root.addEventListener('click', onClick);
-    editor.root.addEventListener('keydown', onKeyDown);
-    editor.root.addEventListener('paste', onPaste);
-    editor.root.addEventListener('dragstart', onDragStart);
-    editor.root.addEventListener('drop', onDrop);
-    window.addEventListener('resize', refreshImageBox);
-    editor.on('text-change', () => {
-      setWords(wordCount(editor.getText()));
-      setStatus('Saving...');
-      window.setTimeout(refreshImageBox, 0);
-    });
-    setWords(wordCount(editor.getText()));
-    quill.current = editor;
-
-    return () => {
-      editor.root.removeEventListener('click', onClick);
-      editor.root.removeEventListener('keydown', onKeyDown);
-      editor.root.removeEventListener('paste', onPaste);
-      editor.root.removeEventListener('dragstart', onDragStart);
-      editor.root.removeEventListener('drop', onDrop);
-      window.removeEventListener('resize', refreshImageBox);
-      quill.current = null;
-    };
-  }, [ready, document?.id]);
-
-  const applyFontSize = (value: string) => {
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed)) return;
-    const size = Math.max(5, Math.min(100, parsed));
-    setFontSizeValue(String(size));
-    const editor = quill.current;
-    if (!editor) return;
-    const range = sizeSelection.current || editor.getSelection();
-    if (!range) return;
-    editor.setSelection(range.index, range.length, 'silent');
-    editor.format('size', `${size}px`, 'user');
-    sizeSelection.current = range;
-  };
-
-  const insertImageFile = async (file: File) => {
-    if (!quill.current || !document) return;
-    try {
-      const imageUrl = await uploadDocumentImage(file, document.id);
-      const editor = quill.current;
-      const index = editor.getSelection()?.index || editor.getLength() - 1;
-      editor.insertEmbed(index, 'image', imageUrl, 'user');
-      editor.setSelection(index + 1, 0, 'silent');
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Could not insert image.');
-    }
-  };
-
-  const handleImageFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (file) void insertImageFile(file);
-  };
-
-  const startResize = (event: React.PointerEvent, direction: string) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const image = selectedImage.current;
-    if (!image) return;
-    resizeState.current = {
-      direction, startX: event.clientX, startY: event.clientY,
-      startWidth: image.getBoundingClientRect().width,
-      startHeight: image.getBoundingClientRect().height,
-    };
-  };
-
-  useEffect(() => {
-    const move = (event: PointerEvent) => {
-      const state = resizeState.current;
-      const image = selectedImage.current;
-      if (!state || !image) return;
-      const ratio = state.startWidth / Math.max(1, state.startHeight);
-      let width = state.startWidth;
-      let height = state.startHeight;
-      if (state.direction.includes('e')) width = Math.max(40, state.startWidth + event.clientX - state.startX);
-      if (state.direction.includes('w')) width = Math.max(40, state.startWidth - event.clientX + state.startX);
-      if (state.direction.includes('s')) height = Math.max(40, state.startHeight + event.clientY - state.startY);
-      if (state.direction.includes('n')) height = Math.max(40, state.startHeight - event.clientY + state.startY);
-      if (state.direction.includes('e') || state.direction.includes('w')) height = width / ratio;
-      else width = height * ratio;
-      image.style.width = Math.round(width) + 'px';
-      image.style.height = Math.round(height) + 'px';
-      const host = editorHost.current;
-      if (host) {
-        const a = image.getBoundingClientRect(), b = host.getBoundingClientRect();
-        setSelectedImageBox({ left:a.left-b.left, top:a.top-b.top, width:a.width, height:a.height });
-      }
-    };
-    const up = () => {
-      const image = selectedImage.current;
-      const editor = quill.current;
-      if (image && editor) {
-        const blot = Quill.find(image);
-        if (blot) {
-          const index = blot.offset(editor);
-          const value = { url: image.getAttribute('src') || '', width: image.style.width || null, height: image.style.height || null };
-          editor.deleteText(index, 1, 'user');
-          editor.insertEmbed(index, 'image', value, 'user');
-          editor.setSelection(index + 1, 0, 'silent');
-          window.setTimeout(() => {
-            const images = editor.root.querySelectorAll('img');
-            const nextImage = images[index] as HTMLImageElement | undefined;
-            if (nextImage) {
-              selectedImage.current = nextImage;
-            }
-          }, 0);
-        }
-      }
-      resizeState.current = null;
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-  }, []);
-
-  const save = async () => {
-    if (!quill.current || !document) return;
-    setStatus('Saving...');
-    try {
-      const content = quill.current.getContents();
-      const updated = await api<DocumentRow[]>('/rest/v1/documents?id=eq.' + encodeURIComponent(document.id) + '&select=*', {
-        method: 'PATCH',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify({ title: title.trim() || 'Untitled Document', content, updated_at: new Date().toISOString() }),
-      });
-      if (updated[0]) setDocument(updated[0]);
-      setStatus('Saved');
-    } catch {
-      setStatus('Error');
-    }
-  };
-
-  useEffect(() => {
-    if (!ready) return;
-    const timer = window.setInterval(() => void save(), 30000);
-    saveTimer.current = timer;
-    return () => {
-      window.clearInterval(timer);
-      saveTimer.current = null;
-    };
-  }, [ready, document?.id, title]);
-
-  useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => {
-      if (status === 'Saving...') event.preventDefault();
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [status]);
-
-  const updateTitle = async () => {
-    setEditingTitle(false);
-    const next = title.trim() || 'Untitled Document';
-    setTitle(next);
-    if (!document) return;
-    try {
-      await api('/rest/v1/documents?id=eq.' + encodeURIComponent(document.id), {
-        method: 'PATCH',
-        body: JSON.stringify({ title: next, updated_at: new Date().toISOString() }),
-      });
-      setStatus('Saved');
-    } catch {
-      setStatus('Error');
-    }
-  };
-
-  if (status === 'Error' && !document) {
-    return <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-zinc-950 text-white"><div className="text-center"><p className="text-lg">Could not open this document.</p><button onClick={() => window.location.assign('/files')} className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm">Back to Files</button></div></div>;
+function esc(s:string){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function markText(text:string,a:any={}) {
+  let out=esc(text).replace(/\n/g,'<br>');
+  if(a.bold)out='<strong>'+out+'</strong>'; if(a.italic)out='<em>'+out+'</em>'; if(a.underline)out='<u>'+out+'</u>'; if(a.strike)out='<s>'+out+'</s>';
+  const styles:string[]=[]; if(a.color)styles.push('color:'+a.color); if(a.background)styles.push('background-color:'+a.background);
+  if(a.font)styles.push('font-family:'+a.font); if(a.size)styles.push('font-size:'+String(a.size).replace(/px$/,'')+'px');
+  if(styles.length)out='<span style="'+styles.join(';')+'">'+out+'</span>'; if(a.link)out='<a href="'+esc(String(a.link))+'">'+out+'</a>'; return out;
+}
+function quillToHtml(delta:any){
+  if(!Array.isArray(delta?.ops))return '<p></p>'; let html='<p>';
+  for(const op of delta.ops){
+    if(typeof op.insert==='object'&&op.insert?.image){html+='<img src="'+esc(String(op.insert.image))+'" />';continue;}
+    if(typeof op.insert!=='string')continue;
+    const parts=op.insert.split('\n'); parts.forEach((part:string,i:number)=>{if(part)html+=markText(part,op.attributes);if(i<parts.length-1)html+='</p><p>';});
   }
+  return html+'</p>';
+}
+function initialContent(content:any){if(!content)return '<p></p>';if(content.type==='doc')return content;if(Array.isArray(content.ops))return quillToHtml(content);if(typeof content==='string')return content;return '<p></p>';}
+function wordCount(editor:Editor){const text=editor.getText().trim();return text?text.split(/\s+/).length:0;}
 
-  return (
-    <div className="fixed inset-0 z-[10000] flex h-[100dvh] w-[100vw] flex-col bg-zinc-900 text-slate-900">
-      <style>{`
-        .doc-toolbar .ql-picker.ql-font .ql-picker-label[data-value="arial"]::before, .doc-toolbar .ql-picker.ql-font .ql-picker-item[data-value="arial"]::before { content: "Arial"; }
-        .doc-toolbar .ql-picker.ql-font .ql-picker-label[data-value="georgia"]::before, .doc-toolbar .ql-picker.ql-font .ql-picker-item[data-value="georgia"]::before { content: "Georgia"; }
-        .doc-toolbar .ql-picker.ql-font .ql-picker-label[data-value="times-new-roman"]::before, .doc-toolbar .ql-picker.ql-font .ql-picker-item[data-value="times-new-roman"]::before { content: "Times New Roman"; }
-        .doc-toolbar .ql-picker.ql-font .ql-picker-label[data-value="courier-new"]::before, .doc-toolbar .ql-picker.ql-font .ql-picker-item[data-value="courier-new"]::before { content: "Courier New"; }
-        .ql-font-arial { font-family: Arial, sans-serif; }
-        .ql-font-georgia { font-family: Georgia, serif; }
-        .ql-font-times-new-roman { font-family: "Times New Roman", serif; }
-        .ql-font-courier-new { font-family: "Courier New", monospace; }
-        .document-size-input { width: 54px; height: 24px; border: 1px solid #d4d4d8; border-radius: 4px; background: white; color: #18181b; padding: 0 5px; font-size: 12px; text-align: center; }
-        .document-size-input:focus { outline: 2px solid #a1a1aa; outline-offset: 1px; }
-        .ql-editor { box-sizing: border-box; width: 816px; min-height: 1056px; padding: 96px; font-size: 16px; line-height: 1.7; }
-        .ql-container.ql-snow { border: 0; }
-        .ql-toolbar.ql-snow { border: 0; }
-      `}</style>
+const Indent=Extension.create({
+  name:'indent',
+  addGlobalAttributes(){return[{types:['paragraph','heading','listItem'],attributes:{indent:{default:0,parseHTML:el=>Number(el.getAttribute('data-indent')||0),renderHTML:a=>{const n=Number(a.indent||0);return n?{'data-indent':String(n),style:'margin-left:'+n*32+'px'}:{}}}}}];},
+  addCommands(){return{
+    increaseIndent:()=>({state,tr})=>{let changed=false;state.doc.nodesBetween(state.selection.from,state.selection.to,(node,pos)=>{if(!['paragraph','heading','listItem'].includes(node.type.name))return;const n=Math.min(8,Number(node.attrs.indent||0)+1);if(n!==Number(node.attrs.indent||0)){tr.setNodeMarkup(pos,undefined,{...node.attrs,indent:n});changed=true;}});return changed;},
+    decreaseIndent:()=>({state,tr})=>{let changed=false;state.doc.nodesBetween(state.selection.from,state.selection.to,(node,pos)=>{if(!['paragraph','heading','listItem'].includes(node.type.name))return;const n=Math.max(0,Number(node.attrs.indent||0)-1);if(n!==Number(node.attrs.indent||0)){tr.setNodeMarkup(pos,undefined,{...node.attrs,indent:n});changed=true;}});return changed;}
+  };},
+});
+const DraggableImage=Image.extend({draggable:true});
 
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-zinc-950 px-4 text-white">
-        <button onClick={() => { void save(); window.location.assign('/files'); }} className="rounded-lg p-2 hover:bg-white/10" aria-label="Back to Files"><ArrowLeft size={18}/></button>
-        <div className="min-w-0 flex-1">
-          {editingTitle ? (
-            <input autoFocus value={title} onChange={e=>setTitle(e.target.value)} onBlur={()=>void updateTitle()} onKeyDown={e=>{if(e.key==='Enter') void updateTitle(); if(e.key==='Escape'){setEditingTitle(false); setTitle(document?.title || 'Untitled Document');}}} className="h-8 w-full max-w-xl rounded border border-white/20 bg-white/10 px-2 text-sm text-white outline-none" />
-          ) : (
-            <button onClick={()=>setEditingTitle(true)} className="max-w-xl truncate text-left text-sm font-medium hover:underline">{title}</button>
-          )}
-        </div>
-        <div className="flex items-center gap-2 text-xs text-white/60">{status === 'Saved' ? <Check size={14}/> : status === 'Saving...' ? <Save size={14}/> : null}<span>{status}</span></div>
-        <button onClick={() => void save()} className="rounded-lg border border-white/15 px-3 py-1.5 text-xs hover:bg-white/10">Save</button>
-      </div>
+export default function DocumentPage({params}:{params:{id:string}}){
+  const id=params.id;
+  const [document,setDocument]=useState<DocumentRow|null>(null);
+  const documentRef=useRef<DocumentRow|null>(null);
+  const [title,setTitle]=useState('Untitled Document');
+  const titleRef=useRef('Untitled Document');
+  const [status,setStatus]=useState<'Loading...'|'Saving...'|'Saved'|'Error'>('Loading...');
+  const [savedAt,setSavedAt]=useState('');
+  const [words,setWords]=useState(0);
+  const [ready,setReady]=useState(false);
+  const [fontSize,setFontSize]=useState('16');
+  const [fontFamily,setFontFamily]=useState('Arial');
+  const fileInput=useRef<HTMLInputElement|null>(null);
 
-      <div id="document-toolbar" className="doc-toolbar shrink-0 bg-white px-3 py-1 shadow-sm">
-        <span className="ql-formats">
-          <select className="ql-font"><option value="sans-serif">Sans Serif</option><option value="serif">Serif</option><option value="monospace">Monospace</option><option value="arial">Arial</option><option value="georgia">Georgia</option><option value="times-new-roman">Times New Roman</option><option value="courier-new">Courier New</option></select>
-          <input
-            className="document-size-input"
-            type="number"
-            min="5"
-            max="100"
-            step="1"
-            value={fontSizeValue}
-            list="document-size-options"
-            aria-label="Font size"
-            onFocus={() => { sizeSelection.current = quill.current?.getSelection() || null; }}
-            onChange={e => {
-              setFontSizeValue(e.target.value);
-              if (!fontSizeTyping.current) applyFontSize(e.target.value);
-            }}
-            onKeyDown={e => {
-              if (/^[0-9]$/.test(e.key) || e.key === 'Backspace' || e.key === 'Delete') {
-                fontSizeTyping.current = true;
-              }
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                fontSizeTyping.current = false;
-                applyFontSize(e.currentTarget.value);
-                e.currentTarget.blur();
-              } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                fontSizeTyping.current = false;
-                window.setTimeout(() => applyFontSize(e.currentTarget.value), 0);
-              }
-            }}
-            onBlur={e => {
-              fontSizeTyping.current = false;
-              applyFontSize(e.currentTarget.value);
-            }}
-          />
-          <datalist id="document-size-options">
-            <option value="5"/><option value="6"/><option value="7"/><option value="8"/><option value="9"/>
-            <option value="10"/><option value="11"/><option value="12"/><option value="14"/><option value="16"/>
-            <option value="18"/><option value="20"/><option value="24"/><option value="28"/><option value="32"/>
-            <option value="36"/><option value="40"/><option value="48"/><option value="56"/><option value="64"/>
-            <option value="72"/><option value="80"/><option value="96"/><option value="100"/>
-          </datalist>
-        </span>
-        <span className="ql-formats">
-          <button className="ql-bold"/><button className="ql-italic"/><button className="ql-underline"/><button className="ql-strike"/>
-        </span>
-        <span className="ql-formats">
-          <select className="ql-color"/><select className="ql-background"/>
-        </span>
-        <span className="ql-formats">
-          <select className="ql-align"><option value="center"/><option value="right"/><option value="justify"/></select>
-          <button className="ql-list" value="ordered"/><button className="ql-list" value="bullet"/>
-          <button className="ql-indent" value="-1"/><button className="ql-indent" value="+1"/>
-        </span>
-        <span className="ql-formats">
-          <button className="ql-link"/><button className="ql-image"/>
-          <button type="button" onClick={() => imageFileInput.current?.click()} title="Upload Image" className="ml-1 rounded px-2 text-xs hover:bg-zinc-100">Upload Image</button>
-        </span>
-      </div>
+  const editor=useEditor({
+    immediatelyRender:false,
+    extensions:[
+      StarterKit,TextStyle,FontSize,FontFamily,Color,Highlight.configure({multicolor:true}),Underline,
+      Link.configure({autolink:true,openOnClick:false,defaultProtocol:'https'}),
+      TextAlign.configure({types:['heading','paragraph'],alignments:['left','center','right','justify']}),
+      Indent,
+      DraggableImage.configure({resize:{enabled:true,directions:['top-left','top-right','bottom-left','bottom-right'],minWidth:50,minHeight:50,alwaysPreserveAspectRatio:true},HTMLAttributes:{class:'document-image'}}),
+    ],
+    content:'<p></p>',
+    onUpdate:({editor:e})=>{setWords(wordCount(e));setStatus('Saving...');},
+  });
 
-      <div className="min-h-0 flex-1 overflow-auto bg-zinc-700 px-4 py-8 sm:px-8">
-        <div className="relative mx-auto h-[1056px] w-[816px] shrink-0 bg-white shadow-xl">
-          <div ref={editorHost} className="h-full w-full" />
-          {selectedImageBox && (
-            <div className="pointer-events-none absolute left-0 top-0 z-20 border-2 border-blue-500" style={{left:selectedImageBox.left,top:selectedImageBox.top,width:selectedImageBox.width,height:selectedImageBox.height}}>
-              {['nw','ne','sw','se'].map(direction => {
-                const pos = direction === 'nw' ? 'left-[-5px] top-[-5px]' : direction === 'ne' ? 'right-[-5px] top-[-5px]' : direction === 'sw' ? 'left-[-5px] bottom-[-5px]' : 'right-[-5px] bottom-[-5px]';
-                const cursor = direction === 'nw' || direction === 'se' ? 'cursor-nwse-resize' : 'cursor-nesw-resize';
-                return <button key={direction} type="button" className={`pointer-events-auto absolute h-2.5 w-2.5 rounded-sm border border-blue-600 bg-white ${pos} ${cursor}`} onPointerDown={e => startResize(e, direction)} />;
-              })}
-            </div>
-          )}
-          <input ref={imageFileInput} type="file" accept=".jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={handleImageFileChange} />
-        </div>
-      </div>
-      <div className="flex h-8 shrink-0 items-center justify-end border-t border-black/10 bg-white px-6 text-[11px] text-slate-500">{words} {words === 1 ? 'word' : 'words'}</div>
+  useEffect(()=>{let cancelled=false;void api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(id)+'&select=*').then(rows=>{if(cancelled||!rows[0])throw new Error('Document not found.');const d=rows[0];documentRef.current=d;setDocument(d);titleRef.current=d.title||'Untitled Document';setTitle(titleRef.current);setStatus('Saved');setReady(true);}).catch(()=>{if(!cancelled)setStatus('Error');});return()=>{cancelled=true;};},[id]);
+  useEffect(()=>{if(!editor||!ready||!document)return;editor.commands.setContent(initialContent(document.content),{emitUpdate:false});setWords(wordCount(editor));},[editor,ready,document?.id]);
+
+  const save=async()=>{const e=editor,d=documentRef.current;if(!e||!d)return;setStatus('Saving...');try{const updated=await api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(d.id)+'&select=*',{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({title:titleRef.current.trim()||'Untitled Document',content:e.getJSON(),updated_at:new Date().toISOString()})});if(updated[0]){documentRef.current=updated[0];setDocument(updated[0]);}setSavedAt(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));setStatus('Saved');}catch{setStatus('Error');}};
+  useEffect(()=>{if(!ready)return;const timer=window.setInterval(()=>void save(),30000);return()=>window.clearInterval(timer);},[ready,editor,document?.id]);
+
+  const insertFile=async(file:File)=>{if(!editor)return;try{const src=await uploadImage(file,id);editor.chain().focus().setImage({src,alt:file.name}).run();}catch(e){window.alert(e instanceof Error?e.message:'Could not insert image.');}};
+  useEffect(()=>{if(!editor)return;const onPaste=(event:ClipboardEvent)=>{const item=Array.from(event.clipboardData?.items||[]).find(i=>IMAGE_TYPES.has(i.type));const file=item?.getAsFile();if(file){event.preventDefault();void insertFile(file);}};editor.view.dom.addEventListener('paste',onPaste);return()=>editor.view.dom.removeEventListener('paste',onPaste);},[editor,id]);
+
+  const imageFromUrl=()=>{const src=window.prompt('Enter an image URL');if(src?.trim())editor?.chain().focus().setImage({src:src.trim()}).run();};
+  const link=()=>{if(!editor)return;const old=editor.getAttributes('link').href||'';const href=window.prompt('Enter a URL',old);if(href===null)return;if(href.trim())editor.chain().focus().setLink({href:href.trim()}).run();else editor.chain().focus().unsetLink().run();};
+  const setSize=(v:string)=>{const n=Number.parseInt(v,10);if(!Number.isFinite(n)||!editor)return;const size=Math.max(5,Math.min(100,n));setFontSize(String(size));editor.chain().focus().setFontSize(size+'px').run();};
+  const setFamily=(v:string)=>{setFontFamily(v);editor?.chain().focus().setFontFamily(v).run();};
+
+  if(status==='Error'&&!document)return <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-zinc-950 text-white"><div className="text-center"><p className="text-lg">Could not open this document.</p><button onClick={()=>window.location.assign('/files')} className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm">Back to Files</button></div></div>;
+  if(!editor||!document)return <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-zinc-950 text-white">Loading document…</div>;
+
+  return <div className="fixed inset-0 z-[10000] flex h-[100dvh] w-[100vw] flex-col bg-zinc-900 text-slate-900">
+    <style>{`
+      .document-page .ProseMirror{box-sizing:border-box;width:816px;min-height:1056px;padding:96px;background:#fff;outline:none;font-family:Arial,sans-serif;font-size:16px;line-height:1.7}
+      .document-page .ProseMirror p,.document-page .ProseMirror h1,.document-page .ProseMirror h2,.document-page .ProseMirror h3,.document-page .ProseMirror h4,.document-page .ProseMirror h5,.document-page .ProseMirror h6{margin:0 0 .75em}
+      .document-page .ProseMirror ul,.document-page .ProseMirror ol{padding-left:1.5rem}.document-page .ProseMirror a{color:#2563eb;text-decoration:underline}.document-page .ProseMirror img{max-width:100%}
+      .document-page .ProseMirror-selectednode{outline:2px solid #3b82f6;outline-offset:2px}.document-toolbar button{display:inline-flex;align-items:center;justify-content:center;height:30px;min-width:30px;border-radius:5px}.document-toolbar button:hover{background:#f4f4f5}.document-toolbar button[data-active="true"]{background:#e4e4e7}
+      .document-toolbar select,.document-toolbar input{height:30px;border:1px solid #d4d4d8;border-radius:5px;background:#fff;color:#18181b;padding:0 6px;font-size:12px}.document-toolbar input[type=color]{width:34px;padding:3px}
+    `}</style>
+
+    <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-zinc-950 px-4 text-white">
+      <button onClick={()=>{void save();window.location.assign('/files')}} className="rounded-lg p-2 hover:bg-white/10" title="Back to Files"><ArrowLeft size={18}/></button>
+      <input value={title} onChange={e=>{titleRef.current=e.target.value;setTitle(e.target.value);setStatus('Saving...')}} onBlur={()=>void save()} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();if(e.key==='Escape'){const t=documentRef.current?.title||'Untitled Document';titleRef.current=t;setTitle(t);e.currentTarget.blur();}}} className="h-8 w-full max-w-xl rounded border border-white/15 bg-white/10 px-2 text-sm font-medium text-white outline-none" aria-label="Document title"/>
+      <div className="flex items-center gap-2 text-xs text-white/60">{status==='Saved'&&<Check size={14}/>} {status==='Saving...'&&<Save size={14}/>}<span>{status}{status==='Saved'&&savedAt?' '+savedAt:''}</span></div>
+      <button onClick={()=>void save()} className="rounded-lg border border-white/15 px-3 py-1.5 text-xs hover:bg-white/10">Save</button>
     </div>
-  );
+
+    <div className="document-toolbar flex shrink-0 flex-wrap items-center gap-1 border-b border-zinc-200 bg-white px-3 py-1.5 shadow-sm">
+      <select value={fontFamily} onChange={e=>setFamily(e.target.value)} aria-label="Font family"><option>Arial</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option><option>Verdana</option><option>Trebuchet MS</option><option>system-ui</option></select>
+      <input type="number" min="5" max="100" step="1" value={fontSize} list="document-font-sizes" onChange={e=>setFontSize(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();setSize(e.currentTarget.value);e.currentTarget.blur();}else if(e.key==='ArrowUp'||e.key==='ArrowDown')window.setTimeout(()=>setSize(e.currentTarget.value),0)}} onBlur={e=>setSize(e.currentTarget.value)} aria-label="Font size" className="w-16 text-center"/>
+      <datalist id="document-font-sizes">{FONT_SIZES.map(n=><option key={n} value={n}/>)}</datalist>
+      <span className="mx-1 h-6 w-px bg-zinc-200"/>
+      <button onClick={()=>editor.chain().focus().toggleBold().run()} data-active={editor.isActive('bold')} title="Bold"><Bold size={16}/></button>
+      <button onClick={()=>editor.chain().focus().toggleItalic().run()} data-active={editor.isActive('italic')} title="Italic"><Italic size={16}/></button>
+      <button onClick={()=>editor.chain().focus().toggleUnderline().run()} data-active={editor.isActive('underline')} title="Underline"><UnderlineIcon size={16}/></button>
+      <button onClick={()=>editor.chain().focus().toggleStrike().run()} data-active={editor.isActive('strike')} title="Strikethrough"><Strikethrough size={16}/></button>
+      <label className="flex h-[30px] items-center gap-1 rounded border border-zinc-300 px-1" title="Text color"><Type size={14}/><input type="color" defaultValue="#000000" onChange={e=>editor.chain().focus().setColor(e.target.value).run()}/></label>
+      <label className="flex h-[30px] items-center gap-1 rounded border border-zinc-300 px-1" title="Highlight color"><Highlighter size={14}/><input type="color" defaultValue="#fff59d" onChange={e=>editor.chain().focus().setHighlight({color:e.target.value}).run()}/></label>
+      <span className="mx-1 h-6 w-px bg-zinc-200"/>
+      <button onClick={()=>editor.chain().focus().setTextAlign('left').run()} title="Align left"><AlignLeft size={16}/></button><button onClick={()=>editor.chain().focus().setTextAlign('center').run()} title="Align center"><AlignCenter size={16}/></button><button onClick={()=>editor.chain().focus().setTextAlign('right').run()} title="Align right"><AlignRight size={16}/></button><button onClick={()=>editor.chain().focus().setTextAlign('justify').run()} title="Justify"><AlignJustify size={16}/></button>
+      <button onClick={()=>editor.chain().focus().toggleBulletList().run()} data-active={editor.isActive('bulletList')} title="Bullet list"><List size={16}/></button><button onClick={()=>editor.chain().focus().toggleOrderedList().run()} data-active={editor.isActive('orderedList')} title="Numbered list"><ListOrdered size={16}/></button>
+      <button onClick={()=>editor.chain().focus().increaseIndent().run()} title="Indent"><Plus size={16}/></button><button onClick={()=>editor.chain().focus().decreaseIndent().run()} title="Outdent"><Minus size={16}/></button>
+      <span className="mx-1 h-6 w-px bg-zinc-200"/>
+      <button onClick={link} title="Insert link"><LinkIcon size={16}/></button><button onClick={imageFromUrl} title="Insert image from URL"><ImagePlus size={16}/></button><button onClick={()=>fileInput.current?.click()} title="Upload image"><ImagePlus size={16}/></button>
+      <span className="mx-1 h-6 w-px bg-zinc-200"/>
+      <button onClick={()=>editor.chain().focus().undo().run()} disabled={!editor.can().undo()} title="Undo"><Undo2 size={16}/></button><button onClick={()=>editor.chain().focus().redo().run()} disabled={!editor.can().redo()} title="Redo"><Redo2 size={16}/></button>
+      <input ref={fileInput} type="file" accept=".jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(f)void insertFile(f)}}/>
+    </div>
+
+    <div className="document-page min-h-0 flex-1 overflow-auto bg-zinc-700 px-4 py-8 sm:px-8"><div className="mx-auto min-h-[1056px] w-[816px] shrink-0 bg-white shadow-xl"><EditorContent editor={editor}/></div></div>
+    <div className="flex h-8 shrink-0 items-center justify-end border-t border-black/10 bg-white px-6 text-[11px] text-slate-500">{words} {words===1?'word':'words'}</div>
+  </div>;
 }
