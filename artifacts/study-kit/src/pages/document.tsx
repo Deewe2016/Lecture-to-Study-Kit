@@ -93,6 +93,7 @@ export default function DocumentPage({params}:{params:{id:string}}){
   const [fontSize,setFontSize]=useState('16');
   const [fontFamily,setFontFamily]=useState('Arial');
   const fileInput=useRef<HTMLInputElement|null>(null);
+  const draggedImagePos=useRef<number|null>(null);
 
   const editor=useEditor({
     immediatelyRender:false,
@@ -107,7 +108,7 @@ export default function DocumentPage({params}:{params:{id:string}}){
     onUpdate:({editor:e})=>{setWords(wordCount(e));setStatus('Saving...');},
   });
 
-  useEffect(()=>{let cancelled=false;void api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(id)+'&select=*').then(rows=>{if(cancelled||!rows[0])throw new Error('Document not found.');const d=rows[0];documentRef.current=d;setDocument(d);titleRef.current=d.title||'Untitled Document';setTitle(titleRef.current);setStatus('Saved');setReady(true);}).catch(()=>{if(!cancelled)setStatus('Error');});return()=>{cancelled=true;};},[id]);
+  useEffect(()=>{let cancelled=false;void api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(id)+'&select=*').then(rows=>{if(cancelled||!rows[0])throw new Error('Document not found.');const d=rows[0];documentRef.current=d;setDocument(d);titleRef.current=d.title||'Untitled Document';setTitle(titleRef.current);setSavedAt(new Date(d.updated_at||d.created_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));setStatus('Saved');setReady(true);}).catch(()=>{if(!cancelled)setStatus('Error');});return()=>{cancelled=true;};},[id]);
   useEffect(()=>{if(!editor||!ready||!document)return;editor.commands.setContent(initialContent(document.content),{emitUpdate:false});setWords(wordCount(editor));},[editor,ready,document?.id]);
 
   const save=async()=>{const e=editor,d=documentRef.current;if(!e||!d)return;setStatus('Saving...');try{const updated=await api<DocumentRow[]>('/rest/v1/documents?id=eq.'+encodeURIComponent(d.id)+'&select=*',{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({title:titleRef.current.trim()||'Untitled Document',content:e.getJSON(),updated_at:new Date().toISOString()})});if(updated[0]){documentRef.current=updated[0];setDocument(updated[0]);}setSavedAt(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));setStatus('Saved');}catch{setStatus('Error');}};
@@ -134,7 +135,7 @@ export default function DocumentPage({params}:{params:{id:string}}){
     `}</style>
 
     <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-zinc-950 px-4 text-white">
-      <button onClick={()=>{void save();window.location.assign('/files')}} className="rounded-lg p-2 hover:bg-white/10" title="Back to Files"><ArrowLeft size={18}/></button>
+      <button onClick={async()=>{await save();window.location.assign('/files')}} className="rounded-lg p-2 hover:bg-white/10" title="Back to Files"><ArrowLeft size={18}/></button>
       <input value={title} onChange={e=>{titleRef.current=e.target.value;setTitle(e.target.value);setStatus('Saving...')}} onBlur={()=>void save()} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();if(e.key==='Escape'){const t=documentRef.current?.title||'Untitled Document';titleRef.current=t;setTitle(t);e.currentTarget.blur();}}} className="h-8 w-full max-w-xl rounded border border-white/15 bg-white/10 px-2 text-sm font-medium text-white outline-none" aria-label="Document title"/>
       <div className="flex items-center gap-2 text-xs text-white/60">{status==='Saved'&&<Check size={14}/>} {status==='Saving...'&&<Save size={14}/>}<span>{status}{status==='Saved'&&savedAt?' '+savedAt:''}</span></div>
       <button onClick={()=>void save()} className="rounded-lg border border-white/15 px-3 py-1.5 text-xs hover:bg-white/10">Save</button>
