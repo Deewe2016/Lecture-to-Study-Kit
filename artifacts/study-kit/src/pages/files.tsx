@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
-  Archive, ChevronDown, ChevronRight, Download, File, FileArchive, FileAudio,
-  FileImage, FileText, FileVideo, Folder, FolderOpen, Grid2X2, List, MoreHorizontal,
-  Pencil, Pin, Plus, Search, Share2, Trash2, UploadCloud, X
+  ChevronRight, Download, File, FileArchive, FileAudio, FileImage, FileText,
+  FileVideo, Folder, FolderOpen, Grid2X2, List, MoreHorizontal, Pencil, Pin,
+  Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen
 } from 'lucide-react';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
 
@@ -13,6 +15,32 @@ type UserRow = { id: string; email: string; display_name: string };
 
 const url = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const KIT_STORAGE = 'lecture-study-kits';
+
+type LocalKit = {
+  id: string;
+  title: string;
+  courseLabel?: string;
+  chapters?: unknown[];
+  flashcards?: unknown[];
+  createdAt?: string;
+};
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+
+function readLocalKits(): LocalKit[] {
+  try {
+    const raw = localStorage.getItem(KIT_STORAGE);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((kit) => kit?.id && kit?.title) : [];
+  } catch {
+    return [];
+  }
+}
+
+function isStudyKitsFolder(folder: FolderRow, rootId?: string) {
+  return folder.name === 'Study Kits' && folder.parent_folder_id === rootId;
+}
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAccessToken();
@@ -58,11 +86,124 @@ function safeName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, '_');
 }
 
+
+function PdfPreview({ src, name }: { src: string; name: string }) {
+  const [canvases, setCanvases] = useState<HTMLCanvasElement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    void (async () => {
+      try {
+        const pdf = await pdfjsLib.getDocument(src).promise;
+        const rendered: HTMLCanvasElement[] = [];
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          if (cancelled) return;
+          const page = await pdf.getPage(pageNumber);
+          const viewport = page.getViewport({ scale: 1.35 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Could not create a PDF canvas.');
+          await page.render({ canvasContext: context, viewport }).promise;
+          rendered.push(canvas);
+        }
+        if (!cancelled) setCanvases(rendered);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not render this PDF.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [src]);
+
+  if (loading) return <div className="flex min-h-[70vh] items-center justify-center text-sm text-muted-foreground">Rendering PDF…</div>;
+  if (error) return <div className="flex min-h-[70vh] items-center justify-center text-sm text-red-200">{error}</div>;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-center gap-2 border-b border-border bg-card px-4 py-2">
+        <button onClick={() => setZoom((z) => Math.max(0.6, z - 0.15))} className="rounded-md p-2 hover:bg-secondary" aria-label="Zoom out"><ZoomOut size={16}/></button>
+        <span className="w-14 text-center text-xs text-muted-foreground">{Math.round(zoom * 100)}%</span>
+        <button onClick={() => setZoom((z) => Math.min(2.5, z + 0.15))} className="rounded-md p-2 hover:bg-secondary" aria-label="Zoom in"><ZoomIn size={16}/></button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto bg-zinc-900 p-5">
+        <div className="mx-auto flex w-fit flex-col gap-5" style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}>
+          {canvases.map((canvas, index) => (
+            <div key={index} className="bg-white shadow-2xl">
+              <canvas
+                width={canvas.width}
+                height={canvas.height}
+                ref={(node) => {
+                  if (!node) return;
+                  const context = node.getContext('2d');
+                  if (context) context.drawImage(canvas, 0, 0);
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FileViewer({ file, src, onClose }: { file: FileRow; src: string; onClose: () => void }) {
+  const [zoom, setZoom] = useState(1);
+  const isPdf = file.type.includes('pdf') || /\.pdf$/i.test(file.name);
+  const isImage = file.type.startsWith('image/');
+  const isVideo = file.type.startsWith('video/');
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex h-[100dvh] w-[100vw] flex-col bg-background text-foreground">
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card px-4">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{file.name}</p>
+          <p className="text-[10px] text-muted-foreground">{formatBytes(Number(file.size))}</p>
+        </div>
+        <button onClick={onClose} className="rounded-lg p-2.5 hover:bg-secondary" aria-label="Close full screen viewer"><X size={20}/></button>
+      </div>
+      <div className="min-h-0 flex-1">
+        {isPdf ? <PdfPreview src={src} name={file.name} /> : isImage ? (
+          <div className="relative flex h-full items-center justify-center overflow-auto bg-zinc-950 p-6">
+            <div className="absolute right-5 top-5 z-10 flex items-center gap-1 rounded-lg border border-white/10 bg-black/60 p-1">
+              <button onClick={() => setZoom((z) => Math.max(0.25, z - 0.2))} className="rounded-md p-2 text-white hover:bg-white/10" aria-label="Zoom out"><ZoomOut size={17}/></button>
+              <span className="w-12 text-center text-xs text-white">{Math.round(zoom * 100)}%</span>
+              <button onClick={() => setZoom((z) => Math.min(5, z + 0.2))} className="rounded-md p-2 text-white hover:bg-white/10" aria-label="Zoom in"><ZoomIn size={17}/></button>
+            </div>
+            <img src={src} alt={file.name} className="max-h-full max-w-full object-contain" style={{ transform: `scale(${zoom})` }} />
+          </div>
+        ) : isVideo ? (
+          <div className="flex h-full items-center justify-center bg-black p-5">
+            <video src={src} controls playsInline className="max-h-full max-w-full" />
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center p-6">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center">
+              <File size={40} className="mx-auto text-primary"/>
+              <h2 className="mt-4 font-serif text-2xl">Preview unavailable</h2>
+              <p className="mt-2 text-sm text-muted-foreground">This file type cannot be previewed in Flexus.</p>
+              <a href={src} download={file.name} target="_blank" rel="noreferrer" className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><Download size={15}/> Download file</a>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function FilesPage() {
   const me = getStoredUser();
   const [folders, setFolders] = useState<FolderRow[]>([]);
   const [files, setFiles] = useState<FileRow[]>([]);
   const [shares, setShares] = useState<ShareRow[]>([]);
+  const [kits, setKits] = useState<LocalKit[]>(() => readLocalKits());
   const [selected, setSelected] = useState<string | null>(null);
   const [section, setSection] = useState<'mine' | 'shared'>('mine');
   const [search, setSearch] = useState('');
@@ -90,6 +231,7 @@ export default function FilesPage() {
       setFolders(fs);
       setFiles(fl);
       setShares(sh);
+      setKits(readLocalKits());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load your files.');
     }
@@ -133,13 +275,28 @@ export default function FilesPage() {
     const q = search.trim().toLowerCase();
     return visibleFiles.filter(f => (!selected || f.folder_id === selected) && (!q || f.name.toLowerCase().includes(q)));
   }, [visibleFiles, selected, search]);
-  const recent = [...(section === 'shared' ? sharedFiles : mine)].sort((a,b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 5);
   const totalBytes = mine.reduce((n,f) => n + Number(f.size || 0), 0);
-  const recentCount = mine.filter(f => Date.now() - +new Date(f.created_at) < 7 * 86400000).length;
   const quick = folders.filter(f => pinned.includes(f.id) && f.owner_id === me?.id);
+  const studyKits = studyKitsFolder ? kits : [];
+  const recentItems = [...mine.slice(0, 5).map(file => ({ kind: 'file' as const, date: file.created_at, file })),
+    ...studyKits.slice(0, 3).map(kit => ({ kind: 'kit' as const, date: kit.createdAt || '', kit }))]
+    .sort((a, b) => +new Date(b.date || 0) - +new Date(a.date || 0))
+    .slice(0, 8);
 
   const children = (parent: string | null) => visibleFolders.filter(f => f.parent_folder_id === parent);
   const root = folders.find(f => f.owner_id === me?.id && f.parent_folder_id === null);
+  const studyKitsFolder = folders.find(f => isStudyKitsFolder(f, root?.id));
+
+  useEffect(() => {
+    if (!me || !root || studyKitsFolder) return;
+    void api<FolderRow[]>('/rest/v1/folders?select=*', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({ name: 'Study Kits', owner_id: me.id, parent_folder_id: root.id }),
+    }).then((created) => {
+      if (created[0]) setFolders(prev => [...prev, created[0]]);
+    }).catch((e) => setError(e instanceof Error ? e.message : 'Could not create Study Kits folder.'));
+  }, [me?.id, root?.id, studyKitsFolder?.id]);
 
   const createFolder = async () => {
     if (!me || !dialogValue.trim()) return;
@@ -180,9 +337,11 @@ export default function FilesPage() {
   };
 
   const upload = async (file: globalThis.File) => {
-    if (!me || !selected) return;
+    if (!me) return;
+    const folderId = selected || studyKitsFolder?.id || root?.id;
+    if (!folderId) { setError('Your My Files folder is still being created.'); return; }
     setBusy(true); setError('');
-    const path = `${me.id}/${selected}/${Date.now()}-${safeName(file.name)}`;
+    const path = `${me.id}/${folderId}/${Date.now()}-${safeName(file.name)}`;
     try {
       const storageResponse = await fetch(`${url}/storage/v1/object/user-files/${encodeURIComponent(path).replace(/%2F/g, '/')}`, {
         method: 'POST',
@@ -192,7 +351,7 @@ export default function FilesPage() {
       if (!storageResponse.ok) throw new Error((await storageResponse.text()).slice(0, 300) || 'Upload failed.');
       const created = await api<FileRow[]>('/rest/v1/files?select=*', {
         method: 'POST', headers: { Prefer: 'return=representation' },
-        body: JSON.stringify({ name: file.name, folder_id: selected, owner_id: me.id, storage_path: path, size: file.size, type: file.type || 'application/octet-stream' }),
+        body: JSON.stringify({ name: file.name, folder_id: folderId, owner_id: me.id, storage_path: path, size: file.size, type: file.type || 'application/octet-stream' }),
       });
       setFiles(prev => [...created, ...prev]);
     } catch (e) {
@@ -201,14 +360,24 @@ export default function FilesPage() {
     } finally { setBusy(false); }
   };
 
-  const download = async (file: FileRow, preview = false) => {
+  const openFile = async (file: FileRow) => {
     try {
       const response = await api<{ signedURL: string }>('/storage/v1/object/sign/user-files/' + file.storage_path.split('/').map(encodeURIComponent).join('/'), {
         method: 'POST', body: JSON.stringify({ expiresIn: 600 }),
       });
       const signed = response.signedURL.startsWith('http') ? response.signedURL : `${url}/storage/v1${response.signedURL}`;
-      if (preview) setModal({ file, url: signed }); else window.open(signed, '_blank', 'noopener,noreferrer');
+      setModal({ file, url: signed });
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open file.'); }
+  };
+
+  const download = async (file: FileRow) => {
+    try {
+      const response = await api<{ signedURL: string }>('/storage/v1/object/sign/user-files/' + file.storage_path.split('/').map(encodeURIComponent).join('/'), {
+        method: 'POST', body: JSON.stringify({ expiresIn: 600 }),
+      });
+      const signed = response.signedURL.startsWith('http') ? response.signedURL : `${url}/storage/v1${response.signedURL}`;
+      window.open(signed, '_blank', 'noopener,noreferrer');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not download file.'); }
   };
 
   const deleteFile = async (file: FileRow) => {
@@ -266,11 +435,26 @@ export default function FilesPage() {
     </div>
   ));
 
+  const kitCard = (kit: LocalKit) => (
+    <button key={kit.id} onClick={() => window.location.assign(`/kit/${kit.id}`)} className="group rounded-xl border border-border bg-card p-5 text-left transition-transform hover:-translate-y-0.5 hover:border-primary/40">
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><BookOpen size={19}/></div>
+        <div className="min-w-0">
+          <p className="truncate text-[10px] uppercase tracking-[.16em] text-primary">{kit.courseLabel || 'Study kit'}</p>
+          <h3 className="mt-2 truncate font-serif text-xl tracking-[-.02em]">{kit.title}</h3>
+        </div>
+      </div>
+      <div className="mt-5 flex gap-4 text-xs text-muted-foreground">
+        <span>{kit.flashcards?.length || 0} flashcards</span>
+        <span>{kit.chapters?.length || 0} chapters</span>
+      </div>
+    </button>
+  );
+
   const fileCard = (file: FileRow) => {
     const Icon = iconFor(file.type, file.name);
-    const previewable = file.type.startsWith('image/') || file.type === 'application/pdf' || /\\.(pdf)$/i.test(file.name);
     return <div key={file.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
-      <button onClick={() => previewable ? void download(file, true) : void download(file)} className="w-full text-left">
+      <button onClick={() => void openFile(file)} className="w-full text-left">
         <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60"><Icon size={34} className="text-primary" /></div>
         <p className="mt-3 truncate text-sm font-medium">{file.name}</p>
         <p className="mt-1 text-[10px] text-muted-foreground">{formatBytes(Number(file.size))} · {formatDate(file.created_at)}</p>
@@ -292,15 +476,16 @@ export default function FilesPage() {
     <div className="mx-auto max-w-[1500px]">
       {error && <div className="mb-4 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-200">{error}</div>}
       <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-        <div><p className="font-mono text-[10px] uppercase tracking-[.2em] text-primary">File storage</p><h1 className="mt-3 font-serif text-4xl tracking-[-.04em]">Your Files</h1><p className="mt-2 text-sm text-muted-foreground">Store, organize, and share your files</p></div>
+        <div><p className="font-mono text-[10px] uppercase tracking-[.2em] text-primary">Workspace</p><h1 className="mt-3 font-serif text-4xl tracking-[-.04em]">Your workspace</h1><p className="mt-2 text-sm text-muted-foreground">Files, study kits, and everything you need</p></div>
         <div className="flex gap-2">
           <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={15}/> Upload File<input type="file" className="hidden" disabled={!selected || busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label>
           <button onClick={() => { setDialog({kind:'folder'}); setDialogValue(''); }} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={15}/> New Folder</button>
+          <a href="/new" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-4 py-2.5 text-xs font-semibold text-primary hover:bg-primary/15"><Plus size={15}/> New Study Kit</a>
         </div>
       </div>
 
       <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[['Total Files', mine.length], ['Total Storage Used', formatBytes(totalBytes)], ['Shared with Me', sharedFiles.length], ['Recent Uploads', recentCount]].map(([label,value]) => <div key={String(label)} className="rounded-xl border border-border bg-card p-5"><p className="text-[10px] uppercase tracking-[.16em] text-muted-foreground">{label}</p><p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p></div>)}
+        {[['Total Files', mine.length], ['Study Kits', studyKits.length], ['Storage Used', formatBytes(totalBytes)], ['Shared with Me', sharedFiles.length]].map(([label,value]) => <div key={String(label)} className="rounded-xl border border-border bg-card p-5"><p className="text-[10px] uppercase tracking-[.16em] text-muted-foreground">{label}</p><p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p></div>)}
       </div>
 
       <div className="mt-8 grid gap-8 xl:grid-cols-[280px_1fr]">
@@ -317,13 +502,13 @@ export default function FilesPage() {
 
         <div className="min-w-0">
           {!selected ? <div>
-            <div className="flex items-center justify-between"><div><h2 className="font-serif text-2xl">Recent Files</h2><p className="mt-1 text-xs text-muted-foreground">Your latest uploads</p></div></div>
-            {!(section === 'shared' ? sharedFiles : mine).length ? <div className="mt-5 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-12 text-center"><UploadCloud className="mx-auto text-primary" size={36}/><h2 className="mt-4 font-serif text-2xl">Upload your first file</h2><p className="mt-2 text-sm text-muted-foreground">Keep your study materials, documents, images, and more in one place.</p><button onClick={()=>root && setSelected(root.id)} className="mt-5 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground">Open My Files to upload</button></div> : <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">{recent.map(fileCard)}</div>}
-            <div className="mt-10"><h2 className="font-serif text-2xl">Quick Access</h2>{quick.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{quick.map(f=><button key={f.id} onClick={()=>{setSection('mine');setSelected(f.id)}} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left hover:border-primary/40"><Folder size={20} className="text-primary"/><span className="truncate text-sm font-medium">{f.name}</span></button>)}</div> : <p className="mt-3 text-xs text-muted-foreground">Pin folders from their menu to keep them here.</p>}</div>
+            <div className="flex items-center justify-between"><div><h2 className="font-serif text-2xl">Recent</h2><p className="mt-1 text-xs text-muted-foreground">Your latest files and study kits</p></div></div>
+            {!recentItems.length ? <div className="mt-5 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-12 text-center"><div className="mx-auto flex w-fit items-center gap-2 text-primary"><UploadCloud size={30}/><BookOpen size={30}/></div><h2 className="mt-4 font-serif text-2xl">Nothing here yet</h2><p className="mt-2 text-sm text-muted-foreground">Add a file or create a study kit to get started.</p><div className="mt-5 flex justify-center gap-2"><label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={14}/> Upload a file<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label><a href="/new" className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={14}/> Create a study kit</a></div></div> : <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{recentItems.map(item => item.kind === 'file' ? fileCard(item.file) : kitCard(item.kit))}</div>}
+            <div className="mt-10"><h2 className="font-serif text-2xl">Quick access</h2>{quick.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{quick.map(f=><button key={f.id} onClick={()=>{setSection('mine');setSelected(f.id)}} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left hover:border-primary/40"><Folder size={20} className="text-primary"/><span className="truncate text-sm font-medium">{f.name}</span></button>)}</div> : <p className="mt-3 text-xs text-muted-foreground">Pin folders from their menu to keep them here.</p>}</div>
           </div> : <div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search files by name" className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-xs outline-none"/></div><div className="flex rounded-lg border border-border p-1"><button onClick={()=>setView('grid')} className={`rounded-md p-1.5 ${view==='grid'?'bg-secondary':''}`}><Grid2X2 size={15}/></button><button onClick={()=>setView('list')} className={`rounded-md p-1.5 ${view==='list'?'bg-secondary':''}`}><List size={15}/></button></div></div>
             <div className="mt-5 flex items-center justify-between"><h2 className="font-serif text-2xl">{section==='shared'?'Shared with Me':(folders.find(f=>f.id===selected)?.name || 'My Files')}</h2><span className="text-xs text-muted-foreground">{currentFiles.length} files</span></div>
-            {currentFiles.length ? <div className={view==='grid'?'mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4':'mt-4 space-y-2'}>{currentFiles.map(fileCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No files in this folder.</div>}
+            {selected === studyKitsFolder?.id ? (studyKits.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{studyKits.filter(k => !search || k.title.toLowerCase().includes(search.toLowerCase())).map(kitCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No study kits yet.</div>) : currentFiles.length ? <div className={view==='grid'?'mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4':'mt-4 space-y-2'}>{currentFiles.map(fileCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No files in this folder.</div>}
           </div>}
         </div>
       </div>
