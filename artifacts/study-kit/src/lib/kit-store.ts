@@ -1,3 +1,4 @@
+import { getAccessToken, getStoredUser } from '@/lib/auth';
 export type StoredMaterial = { name: string; kind: string; text: string; size?: string };
 export type StoredKit = {
   id: string;
@@ -18,6 +19,22 @@ const VERSION = 1;
 const DELETED_KEY = 'lecture-study-deleted-kits';
 const LOCAL_KITS_KEY = 'lecture-study-kits';
 const LOCAL_PROGRESS_PREFIX = 'lecture-study-progress-';
+
+async function saveKitToSupabase(kit: StoredKit) {
+  try {
+    const token = getAccessToken();
+    const base = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    const user = getStoredUser();
+    if (!token || !base || !anonKey || !user?.id) return;
+    await fetch(`${base}/rest/v1/study_kits?on_conflict=id`, {
+      method: 'POST',
+      headers: { apikey: anonKey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ id: kit.id, title: kit.title, kit_data: kit, owner_id: user.id, updated_at: new Date().toISOString() }),
+    });
+  } catch {}
+}
+
 
 function deletedIds(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(DELETED_KEY) || '[]')); } catch { return new Set(); }
@@ -76,7 +93,9 @@ function normalizeKit(kit: StoredKit): StoredKit {
 
 export async function saveKit(kit: StoredKit) {
   if (deletedIds().has(kit.id)) return;
-  try { await write('kits', normalizeKit(kit)); } catch { /* localStorage remains the primary UI fallback */ }
+  const normalized = normalizeKit(kit);
+  try { await write('kits', normalized); } catch { /* localStorage remains the primary UI fallback */ }
+  void saveKitToSupabase(normalized);
 }
 
 // Deletion is local-first and synchronous from the caller's perspective.
