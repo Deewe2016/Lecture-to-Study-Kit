@@ -258,11 +258,14 @@ export default function FilesPage() {
     if (existing) return loadedFolders;
 
     try {
-      const created = await api<FolderRow[]>('/rest/v1/folders?select=*', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify({ name: 'My Files', owner_id: me.id, parent_folder_id: null }),
-      });
+      const created = await api<FolderRow[]>(
+        '/rest/v1/folders?select=*&on_conflict=owner_id%2Cparent_folder_id%2Cname',
+        {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify({ name: 'My Files', owner_id: me.id, parent_folder_id: null }),
+        },
+      );
       return created[0] ? [...loadedFolders, created[0]] : loadedFolders;
     } catch {
       const roots = await api<FolderRow[]>(
