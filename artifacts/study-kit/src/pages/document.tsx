@@ -46,6 +46,7 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
   const id = params.id;
   const editorHost = useRef<HTMLDivElement | null>(null);
   const quill = useRef<Quill | null>(null);
+  const sizeSelection = useRef<{ index: number; length: number } | null>(null);
   const [document, setDocument] = useState<DocumentRow | null>(null);
   const [title, setTitle] = useState('Untitled Document');
   const [editingTitle, setEditingTitle] = useState(false);
@@ -79,7 +80,7 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
     Quill.register(Font, true);
 
     const Size = Quill.import('attributors/style/size') as any;
-    Size.whitelist = ['12px', '14px', '16px', '18px', '24px', '32px', '48px'];
+    Size.whitelist = Array.from({ length: 96 }, (_, index) => `${index + 5}px`);
     Quill.register(Size, true);
 
     const editor = new Quill(editorHost.current, {
@@ -118,6 +119,17 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
       quill.current = null;
     };
   }, [ready, document?.id]);
+
+  const applyFontSize = (value: string) => {
+    const size = Math.max(5, Math.min(100, Number.parseInt(value, 10) || 16));
+    const editor = quill.current;
+    if (!editor) return;
+    const range = sizeSelection.current || editor.getSelection();
+    if (!range) return;
+    editor.setSelection(range.index, range.length, 'silent');
+    editor.format('size', `${size}px`, 'user');
+    sizeSelection.current = range;
+  };
 
   const save = async () => {
     if (!quill.current || !document) return;
@@ -185,7 +197,9 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
         .ql-font-georgia { font-family: Georgia, serif; }
         .ql-font-times-new-roman { font-family: "Times New Roman", serif; }
         .ql-font-courier-new { font-family: "Courier New", monospace; }
-        .ql-editor { min-height: calc(100vh - 170px); font-size: 16px; line-height: 1.7; }
+        .document-size-input { width: 54px; height: 24px; border: 1px solid #d4d4d8; border-radius: 4px; background: white; color: #18181b; padding: 0 5px; font-size: 12px; text-align: center; }
+        .document-size-input:focus { outline: 2px solid #a1a1aa; outline-offset: 1px; }
+        .ql-editor { box-sizing: border-box; width: 816px; min-height: 1056px; padding: 96px; font-size: 16px; line-height: 1.7; }
         .ql-container.ql-snow { border: 0; }
         .ql-toolbar.ql-snow { border: 0; }
       `}</style>
@@ -206,7 +220,32 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
       <div id="document-toolbar" className="doc-toolbar shrink-0 bg-white px-3 py-1 shadow-sm">
         <span className="ql-formats">
           <select className="ql-font"><option value="sans-serif">Sans Serif</option><option value="serif">Serif</option><option value="monospace">Monospace</option><option value="arial">Arial</option><option value="georgia">Georgia</option><option value="times-new-roman">Times New Roman</option><option value="courier-new">Courier New</option></select>
-          <select className="ql-size"><option value="12px">12</option><option value="14px">14</option><option value="16px">16</option><option value="18px">18</option><option value="24px">24</option><option value="32px">32</option><option value="48px">48</option></select>
+          <input
+            className="document-size-input"
+            type="number"
+            min="5"
+            max="100"
+            step="1"
+            defaultValue="16"
+            list="document-size-options"
+            aria-label="Font size"
+            onMouseDown={() => { sizeSelection.current = quill.current?.getSelection() || null; }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                applyFontSize(e.currentTarget.value);
+                e.currentTarget.blur();
+              }
+            }}
+            onChange={e => applyFontSize(e.currentTarget.value)}
+          />
+          <datalist id="document-size-options">
+            <option value="5"/><option value="6"/><option value="7"/><option value="8"/><option value="9"/>
+            <option value="10"/><option value="11"/><option value="12"/><option value="14"/><option value="16"/>
+            <option value="18"/><option value="20"/><option value="24"/><option value="28"/><option value="32"/>
+            <option value="36"/><option value="40"/><option value="48"/><option value="56"/><option value="64"/>
+            <option value="72"/><option value="80"/><option value="96"/><option value="100"/>
+          </datalist>
         </span>
         <span className="ql-formats">
           <button className="ql-bold"/><button className="ql-italic"/><button className="ql-underline"/><button className="ql-strike"/>
@@ -224,9 +263,9 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto bg-zinc-900 px-4 py-8 sm:px-8">
-        <div className="mx-auto min-h-[calc(100vh-170px)] w-full max-w-[900px] bg-white shadow-2xl">
-          <div ref={editorHost} className="min-h-full" />
+      <div className="min-h-0 flex-1 overflow-auto bg-zinc-700 px-4 py-8 sm:px-8">
+        <div className="mx-auto h-[1056px] w-[816px] shrink-0 bg-white shadow-xl">
+          <div ref={editorHost} className="h-full w-full" />
         </div>
       </div>
       <div className="flex h-8 shrink-0 items-center justify-end border-t border-black/10 bg-white px-6 text-[11px] text-slate-500">{words} {words === 1 ? 'word' : 'words'}</div>
