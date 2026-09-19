@@ -138,6 +138,7 @@ function PdfPreview({ src, name }: { src: string; name: string }) {
           {canvases.map((canvas, index) => (
             <div key={index} className="bg-white shadow-2xl">
               <canvas
+                aria-label={`${name} page ${index + 1}`}
                 width={canvas.width}
                 height={canvas.height}
                 ref={(node) => {
@@ -277,6 +278,8 @@ export default function FilesPage() {
   }, [visibleFiles, selected, search]);
   const totalBytes = mine.reduce((n,f) => n + Number(f.size || 0), 0);
   const quick = folders.filter(f => pinned.includes(f.id) && f.owner_id === me?.id);
+  const root = folders.find(f => f.owner_id === me?.id && f.parent_folder_id === null);
+  const studyKitsFolder = folders.find(f => isStudyKitsFolder(f, root?.id));
   const studyKits = studyKitsFolder ? kits : [];
   const recentItems = [...mine.slice(0, 5).map(file => ({ kind: 'file' as const, date: file.created_at, file })),
     ...studyKits.slice(0, 3).map(kit => ({ kind: 'kit' as const, date: kit.createdAt || '', kit }))]
@@ -284,8 +287,6 @@ export default function FilesPage() {
     .slice(0, 8);
 
   const children = (parent: string | null) => visibleFolders.filter(f => f.parent_folder_id === parent);
-  const root = folders.find(f => f.owner_id === me?.id && f.parent_folder_id === null);
-  const studyKitsFolder = folders.find(f => isStudyKitsFolder(f, root?.id));
 
   useEffect(() => {
     if (!me || !root || studyKitsFolder) return;
@@ -478,7 +479,7 @@ export default function FilesPage() {
       <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="font-mono text-[10px] uppercase tracking-[.2em] text-primary">Workspace</p><h1 className="mt-3 font-serif text-4xl tracking-[-.04em]">Your workspace</h1><p className="mt-2 text-sm text-muted-foreground">Files, study kits, and everything you need</p></div>
         <div className="flex gap-2">
-          <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={15}/> Upload File<input type="file" className="hidden" disabled={!selected || busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={15}/> Upload File<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label>
           <button onClick={() => { setDialog({kind:'folder'}); setDialogValue(''); }} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={15}/> New Folder</button>
           <a href="/new" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-4 py-2.5 text-xs font-semibold text-primary hover:bg-primary/15"><Plus size={15}/> New Study Kit</a>
         </div>
@@ -513,7 +514,7 @@ export default function FilesPage() {
         </div>
       </div>
 
-      {modal?.url && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-background/80 p-5" onClick={()=>setModal(null)}><div className="relative max-h-[90vh] max-w-5xl overflow-auto rounded-xl border border-border bg-card p-3" onClick={e=>e.stopPropagation()}><button onClick={()=>setModal(null)} className="absolute right-3 top-3 rounded-full bg-background/80 p-2"><X size={16}/></button>{modal.file.type.startsWith('image/')?<img src={modal.url} alt={modal.file.name} className="max-h-[82vh] max-w-full object-contain"/>:<iframe title={modal.file.name} src={modal.url} className="h-[80vh] w-[80vw] min-w-[320px]"/>}</div></div>}
+      {modal?.url && <FileViewer file={modal.file} src={modal.url} onClose={() => setModal(null)} />}
 
       {dialog && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 p-5"><div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="flex items-center justify-between"><h2 className="font-serif text-2xl">{dialog.kind==='folder'?'New Folder':dialog.kind==='rename'?'Rename Folder':'Share with Flexus user'}</h2><button onClick={()=>setDialog(null)}><X size={17}/></button></div>
