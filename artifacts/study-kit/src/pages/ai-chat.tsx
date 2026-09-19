@@ -7,6 +7,7 @@ type Message = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  kitId?: string;
 };
 
 type Conversation = {
@@ -31,6 +32,7 @@ function normalizeMessages(value: unknown): Message[] {
     id: String(message.id || makeId()),
     role: message.role,
     content: String(message.content || ''),
+    kitId: message.kitId ? String(message.kitId) : undefined,
   })).filter((message) => message.content.trim());
 }
 
@@ -148,6 +150,59 @@ export default function AIChatPage() {
     setThinking(false);
   };
 
+  const saveGeneratedKit = (kit: any, materials: Array<{ name: string; kind: string; text: string }>) => {
+    const localKit = {
+      ...kit,
+      id: String(kit.id || `kit-${Date.now()}`),
+      materials,
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      const raw = localStorage.getItem('lecture-study-kits');
+      const current = raw ? JSON.parse(raw) : [];
+      const next = Array.isArray(current)
+        ? current.filter((item: any) => item?.id !== localKit.id)
+        : [];
+      localStorage.setItem('lecture-study-kits', JSON.stringify([localKit, ...next]));
+    } catch {
+      localStorage.setItem('lecture-study-kits', JSON.stringify([localKit]));
+    }
+    return localKit;
+  };
+
+  const makeStudyKitFromCommand = (topic: string, conversationId: string, history: Message[]) => {
+    const assistantMessage: Message = { id: makeId(), role: 'assistant', content: 'Your study kit is ready!' };
+    updateMessages(conversationId, () => [...history, assistantMessage]);
+    setInput('');
+    setError('');
+    setThinking(true);
+    void (async () => {
+      try {
+        const response = await fetch('/api/generate-kit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: topic, title: topic, planDays: 7 }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data) throw new Error(data?.error || 'Could not generate the study kit.');
+        const kit = saveGeneratedKit(data, [{
+          name: `AI prompt · ${topic}`,
+          kind: 'prompt',
+          text: topic,
+        }]);
+        updateMessages(conversationId, current => current.map(message =>
+          message.id === assistantMessage.id ? { ...message, kitId: kit.id } : message,
+        ));
+      } catch (requestError) {
+        const message = requestError instanceof Error ? requestError.message : 'Could not generate the study kit.';
+        setError(message);
+        updateMessages(conversationId, current => current.filter(item => item.id !== assistantMessage.id));
+      } finally {
+        setThinking(false);
+      }
+    })();
+  };
+
   const updateMessages = (conversationId: string, updater: (current: Message[]) => Message[]) => {
     setConversations((current) => current.map((conversation) =>
       conversation.id === conversationId
@@ -161,6 +216,8 @@ export default function AIChatPage() {
     const content = overrideContent ?? input.trim();
     if (!content || thinking) return;
 
+    const kitCommand = content.match(/^make\\s+(?:a\\s+)?(.+?)\\s+study\\s+kit$/i);
+
     let conversationId = selectedId;
     if (!conversationId) {
       const conversation: Conversation = { id: makeId(), messages: [], createdAt: Date.now() };
@@ -171,6 +228,11 @@ export default function AIChatPage() {
 
     const currentConversation = conversations.find((conversation) => conversation.id === conversationId);
     const history = [...(currentConversation?.messages || []), { id: makeId(), role: 'user' as const, content }];
+
+    if (kitCommand) {
+      makeStudyKitFromCommand(kitCommand[1].trim(), conversationId, history);
+      return;
+    }
     const assistantMessage: Message = { id: makeId(), role: 'assistant', content: '' };
 
     updateMessages(conversationId, () => [...history, assistantMessage]);
@@ -338,7 +400,21 @@ export default function AIChatPage() {
                       : 'rounded-bl-md border border-border bg-card text-card-foreground'
                   }`}
                 >
-                  {message.content ? (message.role === 'assistant' ? renderMarkdown(message.content) : message.content) : (thinking && message.role === 'assistant' ? (
+                  {message.content ? (message.role === 'assistant' ? (
+                    <div>
+                      {renderMarkdown(message.content)}
+                      {message.kitId && (
+                        <button
+                          type="button"
+                          onClick={() => window.location.assign(`/kit/${message.kitId}`)}
+                          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+                        >
+                          <Sparkles size={14} />
+                          Open Kit
+                        </button>
+                      )}
+                    </div>
+                  ) : message.content) : (thinking && message.role === 'assistant' ? (
                     <span className="inline-flex items-center gap-1.5 py-1" aria-label="AI is thinking">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
