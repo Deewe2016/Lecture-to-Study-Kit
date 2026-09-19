@@ -87,7 +87,7 @@ async function generateWithGroq(title, source, syllabus, days, mode = "material"
       ? "EXISTING STUDY KIT (preserve useful existing content and IDs where concepts remain the same):\n" + JSON.stringify(existingKit || {}) + "\n\nNEW MATERIAL TO INCORPORATE:\n" + source
       : "SOURCE MATERIAL START\n" + source + "\nSOURCE MATERIAL END";
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions",
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -95,7 +95,7 @@ async function generateWithGroq(title, source, syllabus, days, mode = "material"
       temperature: 0.1,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: `You are an expert teacher and document analyst. Read the ENTIRE supplied material and synthesize it. Never create the result by copying, concatenating, or rearranging source chunks. If this is a prompt-only request, use accurate general subject knowledge. If this is an update, preserve existing useful material while incorporating the new material.
+        { role: "system", content: `You are an expert teacher and document analyst. Read the ENTIRE supplied material and synthesize it. Never create the result by copying, concatenating, or rearranging source chunks. If this is a prompt-only request, use accurate general subject knowledge. If this is an update, follow this special instruction exactly: Update and improve this existing study kit by incorporating the new material. Add new flashcards, update or add chapters, and improve the review plan. Return the complete updated kit. Preserve useful existing material rather than replacing it unnecessarily.
 
 Return ONLY JSON with: title, courseLabel, overview, chapters, reviewPlan, questions, flashcards.
 
@@ -171,13 +171,15 @@ export default async function handler(req, res) {
     if (mode === "update") {
       const oldCards = new Map((Array.isArray(existingKit.flashcards) ? existingKit.flashcards : []).map((card) => [String(card.front || "").trim().toLowerCase(), card]));
       const oldChapters = new Map((Array.isArray(existingKit.chapters) ? existingKit.chapters : []).map((chapter) => [String(chapter.id || chapter.title || "").trim().toLowerCase(), chapter]));
+      const oldChapterIds = new Set(oldChapters.keys());
       const addedFlashcards = kit.flashcards.filter((card) => !oldCards.has(String(card.front || "").trim().toLowerCase())).length;
+      const addedChapters = kit.chapters.filter((chapter) => !oldChapterIds.has(String(chapter.id || chapter.title || "").trim().toLowerCase())).length;
       const updatedChapters = kit.chapters.filter((chapter) => {
         const old = oldChapters.get(String(chapter.id || chapter.title || "").trim().toLowerCase());
         if (!old) return true;
         return JSON.stringify({ title: old.title, summary: old.summary, keyPoints: old.keyPoints, objective: old.objective }) !== JSON.stringify({ title: chapter.title, summary: chapter.summary, keyPoints: chapter.keyPoints, objective: chapter.objective });
       }).length;
-      return res.status(200).json({ kit: shuffleAnswers(kit), changes: { addedFlashcards, updatedChapters } });
+      return res.status(200).json({ kit: shuffleAnswers(kit), changes: { addedFlashcards, addedChapters, updatedChapters, updatedReviewPlan: true } });
     }
     return res.status(200).json(shuffleAnswers(kit));
   } catch (error) {
