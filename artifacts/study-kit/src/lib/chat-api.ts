@@ -7,21 +7,63 @@ export type ChatSpace = { id: string; name: string; members: string[]; created_b
 export type DbMessage = { id: string; sender_id: string; recipient_id: string | null; space_id: string | null; text: string; created_at: string };
 export type SharedKitRow = { id: string; kit_data: unknown; shared_by: string; created_at: string };
 
+const AUTH_RETRY_DELAY_MS = 1000;
+const AUTH_RETRY_ATTEMPTS = 3;
+const JWT_CLOCK_SKEW_TOLERANCE_MS = 60_000;
+
 function ensureConfigured() { if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error('Chat is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.'); }
+
+export function isChatAuthError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /jwt|token|auth|unauthori[sz]ed|401|issued at future|not valid yet/i.test(message);
+}
+
+function getJwtIssuedAt(token: string) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.iat === 'number' ? payload.iat * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForClockSkew(token: string) {
+  const issuedAt = getJwtIssuedAt(token);
+  if (issuedAt === null) return;
+  const futureBy = issuedAt - Date.now();
+  if (futureBy > 0 && futureBy <= JWT_CLOCK_SKEW_TOLERANCE_MS) {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, Math.min(AUTH_RETRY_DELAY_MS, futureBy)));
+  }
+}
 
 async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
   ensureConfigured();
-  const token = getAccessToken();
-  if (!token) throw new Error('You must be signed in to use Chat.');
-  const response = await fetch(`${SUPABASE_URL}${path}`, { ...init, headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) } });
-  const body = await response.text();
-  let data: unknown = null;
-  try { data = body ? JSON.parse(body) : null; } catch { data = body; }
-  if (!response.ok) {
-    const message = typeof data === 'object' && data !== null ? String((data as any).message || (data as any).hint || (data as any).details || `Supabase request failed (${response.status})`) : `Supabase request failed (${response.status})`;
-    throw new Error(message);
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < AUTH_RETRY_ATTEMPTS; attempt += 1) {
+    const token = getAccessToken();
+    if (!token) throw new Error('You must be signed in to use Chat.');
+    try {
+      await waitForClockSkew(token);
+      const response = await fetch(`${SUPABASE_URL}${path}`, { ...init, headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) } });
+      const body = await response.text();
+      let data: unknown = null;
+      try { data = body ? JSON.parse(body) : null; } catch { data = body; }
+      if (!response.ok) {
+        const message = typeof data === 'object' && data !== null ? String((data as any).message || (data as any).hint || (data as any).details || `Supabase request failed (${response.status})`) : `Supabase request failed (${response.status})`;
+        const error = new Error(message);
+        if (!isChatAuthError(error) || attempt === AUTH_RETRY_ATTEMPTS - 1) throw error;
+        lastError = error;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, AUTH_RETRY_DELAY_MS));
+        continue;
+      }
+      return data as T;
+    } catch (error) {
+      if (!isChatAuthError(error) || attempt === AUTH_RETRY_ATTEMPTS - 1) throw error;
+      lastError = error instanceof Error ? error : new Error(String(error));
+      await new Promise<void>((resolve) => window.setTimeout(resolve, AUTH_RETRY_DELAY_MS));
+    }
   }
-  return data as T;
+  throw lastError || new Error('Supabase request failed.');
 }
 
 export async function searchUsers(query: string, currentUserId: string): Promise<ChatUser[]> {
