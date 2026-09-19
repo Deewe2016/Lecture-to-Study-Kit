@@ -4031,6 +4031,11 @@ function Router() {
           />
 
           <Route
+            path="/files"
+            component={FilesPage}
+          />
+
+          <Route
             path="/new"
             component={NewPage}
           />
