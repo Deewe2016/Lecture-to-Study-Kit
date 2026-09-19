@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Quill from 'quill';
 import 'quill/dist/quill.snow.css';
 import { ArrowLeft, Check, Link as LinkIcon, Save, X } from 'lucide-react';
-import { getAccessToken } from '@/lib/auth';
+import { getAccessToken, getStoredUser } from '@/lib/auth';
 
 type DocumentRow = {
   id: string;
@@ -16,6 +16,33 @@ type DocumentRow = {
 
 const url = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+
+async function uploadDocumentImage(file: File, documentId: string) {
+  if (!IMAGE_TYPES.has(file.type)) throw new Error('Please choose a JPG, PNG, GIF, or WebP image.');
+  const token = getAccessToken();
+  const user = getStoredUser();
+  if (!token || !user?.id || !url || !anon) throw new Error('Image storage is not configured.');
+  const ext = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
+  const path = user.id + '/documents/' + documentId + '/' + crypto.randomUUID() + '.' + ext;
+
+  const upload = await fetch(url + '/storage/v1/object/user-files/' + path, {
+    method: 'POST',
+    headers: { apikey: anon, Authorization: 'Bearer ' + token, 'Content-Type': file.type, 'x-upsert': 'false' },
+    body: file,
+  });
+  if (!upload.ok) throw new Error((await upload.text()) || 'Could not upload image.');
+
+  const signed = await fetch(url + '/storage/v1/object/sign/user-files/' + path, {
+    method: 'POST',
+    headers: { apikey: anon, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expiresIn: 31536000 }),
+  });
+  const data = await signed.json().catch(() => ({}));
+  if (!signed.ok || !data?.signedURL) throw new Error(data?.message || 'Could not create an image URL.');
+  return String(data.signedURL).startsWith('http') ? data.signedURL : url + '/storage/v1' + data.signedURL;
+}
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAccessToken();
@@ -47,6 +74,11 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
   const editorHost = useRef<HTMLDivElement | null>(null);
   const quill = useRef<Quill | null>(null);
   const sizeSelection = useRef<{ index: number; length: number } | null>(null);
+  const imageFileInput = useRef<HTMLInputElement | null>(null);
+  const selectedImage = useRef<HTMLImageElement | null>(null);
+  const [selectedImageBox, setSelectedImageBox] = useState<{left:number;top:number;width:number;height:number} | null>(null);
+  const [fontSizeValue, setFontSizeValue] = useState('16');
+  const resizeState = useRef<{direction:string;startX:number;startY:number;startWidth:number;startHeight:number} | null>(null);
   const [document, setDocument] = useState<DocumentRow | null>(null);
   const [title, setTitle] = useState('Untitled Document');
   const [editingTitle, setEditingTitle] = useState(false);
@@ -83,6 +115,25 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
     Size.whitelist = Array.from({ length: 96 }, (_, index) => `${index + 5}px`);
     Quill.register(Size, true);
 
+    const BaseImage = Quill.import('formats/image') as any;
+    class DocumentImage extends BaseImage {
+      static blotName = 'image';
+      static create(value: any) {
+        const node = super.create(typeof value === 'string' ? value : value?.url || '');
+        if (value && typeof value === 'object') {
+          if (value.width) node.style.width = value.width;
+          if (value.height) node.style.height = value.height;
+        }
+        node.style.maxWidth = '100%';
+        node.setAttribute('draggable', 'true');
+        return node;
+      }
+      static value(node: HTMLImageElement) {
+        return { url: node.getAttribute('src') || '', width: node.style.width || null, height: node.style.height || null };
+      }
+    }
+    Quill.register(DocumentImage, true);
+
     const editor = new Quill(editorHost.current, {
       theme: 'snow',
       placeholder: 'Start writing…',
@@ -96,8 +147,12 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
               if (link) this.quill.format('link', link);
             },
             image: function(this: any) {
-              const image = window.prompt('Enter an image URL');
-              if (image) this.quill.insertEmbed(this.quill.getSelection()?.index || 0, 'image', image, 'user');
+              const image = window.prompt('Enter an image URL. To upload from your device, use the Upload Image button next to the toolbar.');
+              if (image) {
+                const index = this.quill.getSelection()?.index || 0;
+                this.quill.insertEmbed(index, 'image', image.trim(), 'user');
+                this.quill.setSelection(index + 1, 0, 'silent');
+              }
             },
           },
         },
@@ -108,20 +163,70 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
     if (initial && Array.isArray(initial.ops)) editor.setContents(initial);
     else editor.setContents({ ops: [{ insert: '\n' }] });
 
+    const refreshImageBox = () => {
+      const image = selectedImage.current;
+      const host = editorHost.current;
+      if (!image || !host || !host.contains(image)) {
+        selectedImage.current = null;
+        setSelectedImageBox(null);
+        return;
+      }
+      const a = image.getBoundingClientRect();
+      const b = host.getBoundingClientRect();
+      setSelectedImageBox({ left: a.left - b.left, top: a.top - b.top, width: a.width, height: a.height });
+    };
+    const onClick = (event: MouseEvent) => {
+      const image = (event.target as HTMLElement | null)?.closest('img') as HTMLImageElement | null;
+      if (image) {
+        event.preventDefault();
+        selectedImage.current = image;
+        refreshImageBox();
+      } else {
+        selectedImage.current = null;
+        setSelectedImageBox(null);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!selectedImage.current || (event.key !== 'Delete' && event.key !== 'Backspace')) return;
+      event.preventDefault();
+      const blot = Quill.find(selectedImage.current);
+      if (blot) editor.deleteText(blot.offset(editor), 1, 'user');
+      selectedImage.current = null;
+      setSelectedImageBox(null);
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      const item = Array.from(event.clipboardData?.items || []).find(i => IMAGE_TYPES.has(i.type));
+      const file = item?.getAsFile();
+      if (!file) return;
+      event.preventDefault();
+      void insertImageFile(file);
+    };
+    editor.root.addEventListener('click', onClick);
+    editor.root.addEventListener('keydown', onKeyDown);
+    editor.root.addEventListener('paste', onPaste);
+    window.addEventListener('resize', refreshImageBox);
     editor.on('text-change', () => {
       setWords(wordCount(editor.getText()));
       setStatus('Saving...');
+      window.setTimeout(refreshImageBox, 0);
     });
     setWords(wordCount(editor.getText()));
     quill.current = editor;
 
     return () => {
+      editor.root.removeEventListener('click', onClick);
+      editor.root.removeEventListener('keydown', onKeyDown);
+      editor.root.removeEventListener('paste', onPaste);
+      window.removeEventListener('resize', refreshImageBox);
       quill.current = null;
     };
   }, [ready, document?.id]);
 
   const applyFontSize = (value: string) => {
-    const size = Math.max(5, Math.min(100, Number.parseInt(value, 10) || 16));
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return;
+    const size = Math.max(5, Math.min(100, parsed));
+    setFontSizeValue(String(size));
     const editor = quill.current;
     if (!editor) return;
     const range = sizeSelection.current || editor.getSelection();
@@ -130,6 +235,65 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
     editor.format('size', `${size}px`, 'user');
     sizeSelection.current = range;
   };
+
+  const insertImageFile = async (file: File) => {
+    if (!quill.current || !document) return;
+    try {
+      const imageUrl = await uploadDocumentImage(file, document.id);
+      const editor = quill.current;
+      const index = editor.getSelection()?.index || editor.getLength() - 1;
+      editor.insertEmbed(index, 'image', imageUrl, 'user');
+      editor.setSelection(index + 1, 0, 'silent');
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not insert image.');
+    }
+  };
+
+  const handleImageFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) void insertImageFile(file);
+  };
+
+  const startResize = (event: React.PointerEvent, direction: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const image = selectedImage.current;
+    if (!image) return;
+    resizeState.current = {
+      direction, startX: event.clientX, startY: event.clientY,
+      startWidth: image.getBoundingClientRect().width,
+      startHeight: image.getBoundingClientRect().height,
+    };
+  };
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const state = resizeState.current;
+      const image = selectedImage.current;
+      if (!state || !image) return;
+      const ratio = state.startWidth / Math.max(1, state.startHeight);
+      let width = state.startWidth;
+      let height = state.startHeight;
+      if (state.direction.includes('e')) width = Math.max(40, state.startWidth + event.clientX - state.startX);
+      if (state.direction.includes('w')) width = Math.max(40, state.startWidth - event.clientX + state.startX);
+      if (state.direction.includes('s')) height = Math.max(40, state.startHeight + event.clientY - state.startY);
+      if (state.direction.includes('n')) height = Math.max(40, state.startHeight - event.clientY + state.startY);
+      if (state.direction.includes('e') || state.direction.includes('w')) height = width / ratio;
+      else width = height * ratio;
+      image.style.width = Math.round(width) + 'px';
+      image.style.height = Math.round(height) + 'px';
+      const host = editorHost.current;
+      if (host) {
+        const a = image.getBoundingClientRect(), b = host.getBoundingClientRect();
+        setSelectedImageBox({ left:a.left-b.left, top:a.top-b.top, width:a.width, height:a.height });
+      }
+    };
+    const up = () => { resizeState.current = null; };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+  }, []);
 
   const save = async () => {
     if (!quill.current || !document) return;
@@ -226,18 +390,21 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
             min="5"
             max="100"
             step="1"
-            defaultValue="16"
+            value={fontSizeValue}
             list="document-size-options"
             aria-label="Font size"
-            onMouseDown={() => { sizeSelection.current = quill.current?.getSelection() || null; }}
+            onFocus={() => { sizeSelection.current = quill.current?.getSelection() || null; }}
+            onChange={e => setFontSizeValue(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter') {
                 e.preventDefault();
                 applyFontSize(e.currentTarget.value);
                 e.currentTarget.blur();
+              } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                window.setTimeout(() => applyFontSize(e.currentTarget.value), 0);
               }
             }}
-            onChange={e => applyFontSize(e.currentTarget.value)}
+            onBlur={e => applyFontSize(e.currentTarget.value)}
           />
           <datalist id="document-size-options">
             <option value="5"/><option value="6"/><option value="7"/><option value="8"/><option value="9"/>
@@ -260,12 +427,24 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
         </span>
         <span className="ql-formats">
           <button className="ql-link"/><button className="ql-image"/>
+          <button type="button" onClick={() => imageFileInput.current?.click()} title="Upload Image" className="ml-1 rounded px-2 text-xs hover:bg-zinc-100">Upload Image</button>
         </span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto bg-zinc-700 px-4 py-8 sm:px-8">
         <div className="mx-auto h-[1056px] w-[816px] shrink-0 bg-white shadow-xl">
-          <div ref={editorHost} className="h-full w-full" />
+          <div ref={editorHost} className="relative h-full w-full">
+            {selectedImageBox && (
+              <div className="pointer-events-none absolute z-20 border-2 border-blue-500" style={{left:selectedImageBox.left,top:selectedImageBox.top,width:selectedImageBox.width,height:selectedImageBox.height}}>
+                {['nw','ne','sw','se'].map(direction => {
+                  const pos = direction === 'nw' ? 'left-[-5px] top-[-5px]' : direction === 'ne' ? 'right-[-5px] top-[-5px]' : direction === 'sw' ? 'left-[-5px] bottom-[-5px]' : 'right-[-5px] bottom-[-5px]';
+                  const cursor = direction === 'nw' || direction === 'se' ? 'cursor-nwse-resize' : 'cursor-nesw-resize';
+                  return <button key={direction} type="button" className={`pointer-events-auto absolute h-2.5 w-2.5 rounded-sm border border-blue-600 bg-white ${pos} ${cursor}`} onPointerDown={e => startResize(e, direction)} />;
+                })}
+              </div>
+            )}
+          </div>
+          <input ref={imageFileInput} type="file" accept=".jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={handleImageFileChange} />
         </div>
       </div>
       <div className="flex h-8 shrink-0 items-center justify-end border-t border-black/10 bg-white px-6 text-[11px] text-slate-500">{words} {words === 1 ? 'word' : 'words'}</div>
