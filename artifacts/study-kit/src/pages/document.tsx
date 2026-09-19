@@ -79,6 +79,7 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
   const [selectedImageBox, setSelectedImageBox] = useState<{left:number;top:number;width:number;height:number} | null>(null);
   const [fontSizeValue, setFontSizeValue] = useState('16');
   const resizeState = useRef<{direction:string;startX:number;startY:number;startWidth:number;startHeight:number} | null>(null);
+  const fontSizeTyping = useRef(false);
   const [document, setDocument] = useState<DocumentRow | null>(null);
   const [title, setTitle] = useState('Untitled Document');
   const [editingTitle, setEditingTitle] = useState(false);
@@ -415,17 +416,28 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
             list="document-size-options"
             aria-label="Font size"
             onFocus={() => { sizeSelection.current = quill.current?.getSelection() || null; }}
-            onChange={e => setFontSizeValue(e.target.value)}
+            onChange={e => {
+              setFontSizeValue(e.target.value);
+              if (!fontSizeTyping.current) applyFontSize(e.target.value);
+            }}
             onKeyDown={e => {
+              if (/^[0-9]$/.test(e.key) || e.key === 'Backspace' || e.key === 'Delete') {
+                fontSizeTyping.current = true;
+              }
               if (e.key === 'Enter') {
                 e.preventDefault();
+                fontSizeTyping.current = false;
                 applyFontSize(e.currentTarget.value);
                 e.currentTarget.blur();
               } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                fontSizeTyping.current = false;
                 window.setTimeout(() => applyFontSize(e.currentTarget.value), 0);
               }
             }}
-            onBlur={e => applyFontSize(e.currentTarget.value)}
+            onBlur={e => {
+              fontSizeTyping.current = false;
+              applyFontSize(e.currentTarget.value);
+            }}
           />
           <datalist id="document-size-options">
             <option value="5"/><option value="6"/><option value="7"/><option value="8"/><option value="9"/>
