@@ -229,7 +229,8 @@ export default function FilesPage() {
         api<FileRow[]>('/rest/v1/files?select=*&order=created_at.desc'),
         api<ShareRow[]>('/rest/v1/file_shares?select=*'),
       ]);
-      setFolders(fs);
+      const normalizedFolders = await ensureRoot(fs);
+      setFolders(normalizedFolders);
       setFiles(fl);
       setShares(sh);
       setKits(readLocalKits());
@@ -244,18 +245,32 @@ export default function FilesPage() {
     try { localStorage.setItem('flexus-file-pins', JSON.stringify(pinned)); } catch {}
   }, [pinned]);
 
-  const ensureRoot = async () => {
-    if (!me || folders.some(f => f.owner_id === me.id && f.parent_folder_id === null)) return;
+  const ensureRoot = async (loadedFolders: FolderRow[]) => {
+    if (!me) return loadedFolders;
+
+    const existing = loadedFolders.find(
+      (folder) =>
+        folder.owner_id === me.id &&
+        folder.parent_folder_id === null &&
+        folder.name === 'My Files',
+    );
+
+    if (existing) return loadedFolders;
+
     try {
       const created = await api<FolderRow[]>('/rest/v1/folders?select=*', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify({ name: 'My Files', owner_id: me.id, parent_folder_id: null }),
       });
-      if (created[0]) { setFolders(prev => [...prev, created[0]]); }
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create My Files.'); }
+      return created[0] ? [...loadedFolders, created[0]] : loadedFolders;
+    } catch {
+      const roots = await api<FolderRow[]>(
+        `/rest/v1/folders?select=*&owner_id=eq.${me.id}&parent_folder_id=is.null&name=eq.My%20Files&limit=1`,
+      );
+      return roots[0] ? [...loadedFolders, roots[0]] : loadedFolders;
+    }
   };
-  useEffect(() => { void ensureRoot(); }, [me?.id, folders.length]);
 
   const mine = useMemo(() => files.filter(f => f.owner_id === me?.id), [files, me?.id]);
   const directShared = useMemo(() => files.filter(f => shares.some(s => s.file_id === f.id && s.shared_with_user_id === me?.id)), [files, shares, me?.id]);
@@ -339,7 +354,7 @@ export default function FilesPage() {
 
   const upload = async (file: globalThis.File) => {
     if (!me) return;
-    const folderId = selected || studyKitsFolder?.id || root?.id;
+    const folderId = selected || root?.id;
     if (!folderId) { setError('Your My Files folder is still being created.'); return; }
     setBusy(true); setError('');
     const path = `${me.id}/${folderId}/${Date.now()}-${safeName(file.name)}`;
@@ -454,10 +469,24 @@ export default function FilesPage() {
 
   const fileCard = (file: FileRow) => {
     const Icon = iconFor(file.type, file.name);
-    return <div key={file.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
-      <button onClick={() => void openFile(file)} className="w-full text-left">
+    return (
+      <div
+        key={file.id}
+        className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40"
+      >
+        <button
+          type="button"
+          onClick={() => void openFile(file)}
+          className="w-full text-left"
+          aria-label={`Open ${file.name}`}
+        >
         <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60"><Icon size={34} className="text-primary" /></div>
-        <p className="mt-3 truncate text-sm font-medium">{file.name}</p>
+        <p
+          className="mt-3 truncate text-sm font-medium"
+          title={file.name}
+        >
+          {file.name.length > 15 ? file.name.slice(0, 15) + '…' : file.name}
+        </p>
         <p className="mt-1 text-[10px] text-muted-foreground">{formatBytes(Number(file.size))} · {formatDate(file.created_at)}</p>
       </button>
       <div className="mt-3 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
@@ -469,8 +498,19 @@ export default function FilesPage() {
             <button onClick={() => { setMenu(null); void deleteFile(file); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
           </div>}
         </div>}
+        </button>
+        <div className="mt-3 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <button onClick={() => void download(file)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground" title="Download" aria-label={`Download ${file.name}`}><Download size={14}/></button>
+          {file.owner_id === me?.id && <div className="relative">
+            <button onClick={() => setMenu(menu === file.id ? null : file.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground" title="More options" aria-label="More options"><MoreHorizontal size={14}/></button>
+            {menu === file.id && <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-border bg-card p-1 shadow-xl">
+              <button onClick={() => { setDialog({ kind:'share', fileId:file.id }); setDialogValue(''); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
+              <button onClick={() => { setMenu(null); void deleteFile(file); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
+            </div>}
+          </div>}
+        </div>
       </div>
-    </div>;
+    );
   };
 
   return <section className="px-5 py-8 sm:px-8">
