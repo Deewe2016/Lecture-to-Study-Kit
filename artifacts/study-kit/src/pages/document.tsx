@@ -289,7 +289,28 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
         setSelectedImageBox({ left:a.left-b.left, top:a.top-b.top, width:a.width, height:a.height });
       }
     };
-    const up = () => { resizeState.current = null; };
+    const up = () => {
+      const image = selectedImage.current;
+      const editor = quill.current;
+      if (image && editor) {
+        const blot = Quill.find(image);
+        if (blot) {
+          const index = blot.offset(editor);
+          const value = { url: image.getAttribute('src') || '', width: image.style.width || null, height: image.style.height || null };
+          editor.deleteText(index, 1, 'user');
+          editor.insertEmbed(index, 'image', value, 'user');
+          editor.setSelection(index + 1, 0, 'silent');
+          window.setTimeout(() => {
+            const images = editor.root.querySelectorAll('img');
+            const nextImage = images[index] as HTMLImageElement | undefined;
+            if (nextImage) {
+              selectedImage.current = nextImage;
+            }
+          }, 0);
+        }
+      }
+      resizeState.current = null;
+    };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
@@ -432,18 +453,17 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto bg-zinc-700 px-4 py-8 sm:px-8">
-        <div className="mx-auto h-[1056px] w-[816px] shrink-0 bg-white shadow-xl">
-          <div ref={editorHost} className="relative h-full w-full">
-            {selectedImageBox && (
-              <div className="pointer-events-none absolute z-20 border-2 border-blue-500" style={{left:selectedImageBox.left,top:selectedImageBox.top,width:selectedImageBox.width,height:selectedImageBox.height}}>
-                {['nw','ne','sw','se'].map(direction => {
-                  const pos = direction === 'nw' ? 'left-[-5px] top-[-5px]' : direction === 'ne' ? 'right-[-5px] top-[-5px]' : direction === 'sw' ? 'left-[-5px] bottom-[-5px]' : 'right-[-5px] bottom-[-5px]';
-                  const cursor = direction === 'nw' || direction === 'se' ? 'cursor-nwse-resize' : 'cursor-nesw-resize';
-                  return <button key={direction} type="button" className={`pointer-events-auto absolute h-2.5 w-2.5 rounded-sm border border-blue-600 bg-white ${pos} ${cursor}`} onPointerDown={e => startResize(e, direction)} />;
-                })}
-              </div>
-            )}
-          </div>
+        <div className="relative mx-auto h-[1056px] w-[816px] shrink-0 bg-white shadow-xl">
+          <div ref={editorHost} className="h-full w-full" />
+          {selectedImageBox && (
+            <div className="pointer-events-none absolute left-0 top-0 z-20 border-2 border-blue-500" style={{left:selectedImageBox.left,top:selectedImageBox.top,width:selectedImageBox.width,height:selectedImageBox.height}}>
+              {['nw','ne','sw','se'].map(direction => {
+                const pos = direction === 'nw' ? 'left-[-5px] top-[-5px]' : direction === 'ne' ? 'right-[-5px] top-[-5px]' : direction === 'sw' ? 'left-[-5px] bottom-[-5px]' : 'right-[-5px] bottom-[-5px]';
+                const cursor = direction === 'nw' || direction === 'se' ? 'cursor-nwse-resize' : 'cursor-nesw-resize';
+                return <button key={direction} type="button" className={`pointer-events-auto absolute h-2.5 w-2.5 rounded-sm border border-blue-600 bg-white ${pos} ${cursor}`} onPointerDown={e => startResize(e, direction)} />;
+              })}
+            </div>
+          )}
           <input ref={imageFileInput} type="file" accept=".jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={handleImageFileChange} />
         </div>
       </div>
