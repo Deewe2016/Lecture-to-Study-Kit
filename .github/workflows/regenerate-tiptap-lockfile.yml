@@ -1,0 +1,26 @@
+name: Regenerate lockfile
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  lockfile:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.5
+      - run: pnpm install --lockfile-only
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- pnpm-lock.yaml; then
+            echo "Lockfile already current."
+          else
+            git add pnpm-lock.yaml
+            git commit -m "Regenerate pnpm lockfile for TipTap"
+            git push
+          fi
