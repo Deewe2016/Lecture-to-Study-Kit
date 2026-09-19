@@ -11,6 +11,8 @@ import { getAccessToken, getStoredUser } from '@/lib/auth';
 type FolderRow = { id: string; name: string; parent_folder_id: string | null; owner_id: string; created_at: string };
 type FileRow = { id: string; name: string; folder_id: string | null; owner_id: string; storage_path: string; size: number; type: string; created_at: string };
 type ShareRow = { id: string; file_id: string | null; folder_id: string | null; shared_with_user_id: string; shared_by_user_id: string; created_at: string };
+type DocumentRow = { id: string; title: string; content: any; owner_id: string; folder_id: string | null; created_at: string; updated_at: string };
+type DocumentShareRow = { id: string; document_id: string; shared_with_user_id: string; shared_by_user_id: string; created_at: string };
 type UserRow = { id: string; email: string; display_name: string };
 
 const url = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
@@ -204,6 +206,8 @@ export default function FilesPage() {
   const [folders, setFolders] = useState<FolderRow[]>([]);
   const [files, setFiles] = useState<FileRow[]>([]);
   const [shares, setShares] = useState<ShareRow[]>([]);
+  const [documents, setDocuments] = useState<DocumentRow[]>([]);
+  const [documentShares, setDocumentShares] = useState<DocumentShareRow[]>([]);
   const [kits, setKits] = useState<LocalKit[]>(() => readLocalKits());
   const [selected, setSelected] = useState<string | null>(null);
   const [section, setSection] = useState<'mine' | 'shared'>('mine');
@@ -224,15 +228,19 @@ export default function FilesPage() {
     if (!me) return;
     setError('');
     try {
-      const [fs, fl, sh] = await Promise.all([
+      const [fs, fl, sh, docs, docShares] = await Promise.all([
         api<FolderRow[]>('/rest/v1/folders?select=*&order=name.asc'),
         api<FileRow[]>('/rest/v1/files?select=*&order=created_at.desc'),
         api<ShareRow[]>('/rest/v1/file_shares?select=*'),
+        api<DocumentRow[]>('/rest/v1/documents?select=*&order=updated_at.desc'),
+        api<DocumentShareRow[]>('/rest/v1/document_shares?select=*'),
       ]);
       const normalizedFolders = await ensureRoot(fs);
       setFolders(normalizedFolders);
       setFiles(fl);
       setShares(sh);
+      setDocuments(docs);
+      setDocumentShares(docShares);
       setKits(readLocalKits());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load your files.');
@@ -288,8 +296,11 @@ export default function FilesPage() {
     return ids;
   }, [folders, shares, me?.id]);
   const sharedFiles = useMemo(() => files.filter(f => directShared.includes(f) || (f.folder_id && sharedFolderIds.has(f.folder_id))), [files, directShared, sharedFolderIds]);
+  const mineDocuments = useMemo(() => documents.filter(d => d.owner_id === me?.id), [documents, me?.id]);
+  const sharedDocuments = useMemo(() => documents.filter(d => documentShares.some(s => s.document_id === d.id && s.shared_with_user_id === me?.id)), [documents, documentShares, me?.id]);
   const visibleFolders = section === 'mine' ? folders.filter(f => f.owner_id === me?.id) : folders.filter(f => sharedFolderIds.has(f.id));
   const visibleFiles = section === 'mine' ? mine : sharedFiles;
+  const visibleDocuments = section === 'mine' ? mineDocuments : sharedDocuments;
   const currentFiles = useMemo(() => {
     const q = search.trim().toLowerCase();
     return visibleFiles.filter(f => (!selected || f.folder_id === selected) && (!q || f.name.toLowerCase().includes(q)));
@@ -299,7 +310,8 @@ export default function FilesPage() {
   const root = folders.find(f => f.owner_id === me?.id && f.parent_folder_id === null);
   const studyKitsFolder = folders.find(f => isStudyKitsFolder(f, root?.id));
   const studyKits = studyKitsFolder ? kits : [];
-  const recentItems = [...mine.slice(0, 5).map(file => ({ kind: 'file' as const, date: file.created_at, file })),
+  const recentItems = [...mine.slice(0, 4).map(file => ({ kind: 'file' as const, date: file.created_at, file })),
+    ...mineDocuments.slice(0, 4).map(document => ({ kind: 'document' as const, date: document.updated_at, document })),
     ...studyKits.slice(0, 3).map(kit => ({ kind: 'kit' as const, date: kit.createdAt || '', kit }))]
     .sort((a, b) => +new Date(b.date || 0) - +new Date(a.date || 0))
     .slice(0, 8);
