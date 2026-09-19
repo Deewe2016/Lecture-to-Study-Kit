@@ -34,6 +34,7 @@ import {
   CircleHelp,
   Clock3,
   FileText,
+  Folder,
   GraduationCap,
   Home,
   Library,
@@ -60,6 +61,7 @@ import NotFound from '@/pages/not-found';
 import AuthPage from '@/pages/auth';
 import AiChatPage from '@/pages/ai-chat';
 import ChatPage from '@/pages/chat';
+import FilesPage from '@/pages/files';
 import {
   getCurrentUser,
   getStoredUser,
@@ -885,6 +887,7 @@ function Shell({
     { href: '/', label: 'My kits', icon: Library },
     { href: '/new', label: 'New study kit', icon: Plus },
     { href: '/calendar', label: 'Calendar', icon: CalendarDays },
+    { href: '/files', label: 'Files', icon: Folder },
     { href: '/chat', label: 'Chat', icon: MessageCircle },
     { href: '/ai-chat', label: 'AI Chat', icon: Sparkles },
   ];
@@ -4042,6 +4045,11 @@ function Router() {
           <Route
             path="/kit/:id"
             component={KitPage}
+          />
+
+          <Route
+            path="/files"
+            component={FilesPage}
           />
 
           <Route
