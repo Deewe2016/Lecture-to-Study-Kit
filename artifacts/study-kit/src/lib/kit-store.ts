@@ -146,7 +146,6 @@ export async function deleteKit(id: string) {
       // Tombstone + localStorage removal keep the kit deleted even when the
       // IndexedDB cleanup cannot complete.
     }
-  };
 }
 
 export async function saveProgress(progress: StoredProgress) {
