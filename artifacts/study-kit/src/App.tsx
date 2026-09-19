@@ -37,7 +37,6 @@ import {
   Folder,
   GraduationCap,
   Home,
-  Library,
   Menu,
   MessageCircle,
   MoreHorizontal,
@@ -884,10 +883,9 @@ function Shell({
   });
 
   const nav = [
-    { href: '/', label: 'My kits', icon: Library },
-    { href: '/new', label: 'New study kit', icon: Plus },
-    { href: '/calendar', label: 'Calendar', icon: CalendarDays },
     { href: '/files', label: 'Files', icon: Folder },
+    { href: '/new', label: 'New Study Kit', icon: Plus },
+    { href: '/calendar', label: 'Calendar', icon: CalendarDays },
     { href: '/chat', label: 'Chat', icon: MessageCircle },
     { href: '/ai-chat', label: 'AI Chat', icon: Sparkles },
   ];
@@ -987,7 +985,7 @@ function Shell({
           </div>
 
           <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-            Your kits and progress stay in this browser.
+            Your files, kits, and progress stay in this browser.
           </p>
         </div>
       </aside>
@@ -1021,10 +1019,10 @@ function Shell({
               /
             </span>
             <span>
-              {location === '/'
-                ? 'Library'
+              {location === '/files'
+                ? 'Files'
                 : location === '/new'
-                  ? 'New kit'
+                  ? 'New Study Kit'
                   : 'Study space'}
             </span>
           </div>
@@ -4029,7 +4027,7 @@ function Router() {
         <Switch>
           <Route
             path="/"
-            component={LibraryPage}
+            component={FilesPage}
           />
 
           <Route
@@ -4045,11 +4043,6 @@ function Router() {
           <Route
             path="/kit/:id"
             component={KitPage}
-          />
-
-          <Route
-            path="/files"
-            component={FilesPage}
           />
 
           <Route
