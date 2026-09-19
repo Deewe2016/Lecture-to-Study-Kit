@@ -217,7 +217,7 @@ export default function FilesPage() {
   const [error, setError] = useState('');
   const [menu, setMenu] = useState<string | null>(null);
   const [modal, setModal] = useState<{ file: FileRow; url?: string } | null>(null);
-  const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share'; id?: string; name?: string; fileId?: string } | null>(null);
+  const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share' | 'document-share'; id?: string; name?: string; fileId?: string } | null>(null);
   const [dialogValue, setDialogValue] = useState('');
   const [editingItem, setEditingItem] = useState<{ kind: 'file' | 'folder'; id: string } | null>(null);
   const [editingValue, setEditingValue] = useState('');
@@ -522,12 +522,19 @@ export default function FilesPage() {
         <button onClick={() => setSelected(folder.id)} className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-secondary ${selected === folder.id ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`} style={{ paddingLeft: 8 + depth * 14 }}>
           {children(folder.id).length ? <ChevronRight size={13} /> : <span className="w-[13px]" />}
           {selected === folder.id ? <FolderOpen size={15} className="text-primary" /> : <Folder size={15} className="text-primary" />}
-          <span className="truncate">{folder.name}</span>
+          {editingItem?.kind === 'folder' && editingItem.id === folder.id ? (
+            <input autoFocus value={editingValue} onChange={e=>setEditingValue(e.target.value)}
+              onKeyDown={e=>{if(e.key==='Enter') void saveInlineRename(); if(e.key==='Escape') setEditingItem(null);}}
+              onBlur={()=>void saveInlineRename()} onDoubleClick={e=>e.stopPropagation()}
+              className="min-w-0 flex-1 rounded border border-input bg-background px-1.5 py-0.5 text-xs outline-none" />
+          ) : (
+            <span onDoubleClick={(e)=>{e.stopPropagation(); setEditingItem({kind:'folder',id:folder.id}); setEditingValue(folder.name);}} className="truncate">{folder.name}</span>
+          )}
         </button>
         {folder.owner_id === me?.id && <button onClick={() => setMenu(menu === folder.id ? null : folder.id)} className="rounded p-1 opacity-0 group-hover:opacity-100 hover:bg-secondary"><MoreHorizontal size={14} /></button>}
       </div>
       {menu === folder.id && <div className="ml-auto mr-1 flex items-center gap-1 rounded-lg border border-border bg-card p-1 shadow-xl">
-        <button onClick={() => { setDialog({ kind:'rename', id:folder.id }); setDialogValue(folder.name); setMenu(null); }} className="rounded p-1.5 hover:bg-secondary" title="Rename"><Pencil size={13}/></button>
+        <button onClick={() => { setEditingItem({kind:'folder',id:folder.id}); setEditingValue(folder.name); setMenu(null); }} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-secondary" title="Rename"><Pencil size={13}/> Rename</button>
         <button onClick={() => { togglePin(folder.id); setMenu(null); }} className="rounded p-1.5 hover:bg-secondary" title="Pin"><Pin size={13}/></button>
         <button onClick={() => { setDialog({ kind:'share', id:folder.id }); setDialogValue(''); setMenu(null); }} className="rounded p-1.5 hover:bg-secondary" title="Share"><Share2 size={13}/></button>
         {folder.id !== root?.id && <button onClick={() => { void deleteFolder(folder.id); setMenu(null); }} className="rounded p-1.5 text-red-300 hover:bg-secondary" title="Delete"><Trash2 size={13}/></button>}
@@ -552,6 +559,26 @@ export default function FilesPage() {
     </button>
   );
 
+  const documentCard = (document: DocumentRow) => (
+    <div key={document.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
+      <button type="button" onClick={() => window.location.assign('/document/' + document.id)} className="w-full text-left">
+        <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60"><FileText size={34} className="text-primary" /></div>
+        <p className="mt-3 truncate text-sm font-medium" title={document.title}>{document.title.length > 15 ? document.title.slice(0, 15) + '…' : document.title}</p>
+        <p className="mt-1 text-[10px] text-muted-foreground">Document · {formatDate(document.updated_at)}</p>
+      </button>
+      {document.owner_id === me?.id && (
+        <div className="mt-3 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="relative">
+            <button type="button" onClick={() => setMenu(menu === 'doc:' + document.id ? null : 'doc:' + document.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
+            {menu === 'doc:' + document.id && <div className="absolute right-0 top-8 z-20 w-48 rounded-lg border border-border bg-card p-1 shadow-xl">
+              <button type="button" onClick={() => { setDialog({ kind:'document-share', id:document.id }); setDialogValue(''); setSharedUser([]); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share with Flexus user</button>
+            </div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   const fileCard = (file: FileRow) => {
     const Icon = iconFor(file.type, file.name);
     return (
@@ -565,9 +592,16 @@ export default function FilesPage() {
           <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60">
             <Icon size={34} className="text-primary" />
           </div>
-          <p className="mt-3 truncate text-sm font-medium" title={file.name}>
-            {file.name.length > 15 ? file.name.slice(0, 15) + '…' : file.name}
-          </p>
+          {editingItem?.kind === 'file' && editingItem.id === file.id ? (
+            <input autoFocus value={editingValue} onChange={e=>setEditingValue(e.target.value)}
+              onKeyDown={e=>{if(e.key==='Enter') void saveInlineRename(); if(e.key==='Escape') setEditingItem(null);}}
+              onBlur={()=>void saveInlineRename()} onDoubleClick={e=>e.stopPropagation()}
+              className="mt-3 h-7 w-full rounded border border-input bg-background px-1.5 text-sm outline-none" />
+          ) : (
+            <p onDoubleClick={(e)=>{e.stopPropagation(); setEditingItem({kind:'file',id:file.id}); setEditingValue(file.name);}} className="mt-3 truncate text-sm font-medium" title={file.name}>
+              {file.name.length > 15 ? file.name.slice(0, 15) + '…' : file.name}
+            </p>
+          )}
           <p className="mt-1 text-[10px] text-muted-foreground">
             {formatBytes(Number(file.size))} · {formatDate(file.created_at)}
           </p>
@@ -594,7 +628,8 @@ export default function FilesPage() {
                 <MoreHorizontal size={14}/>
               </button>
               {menu === file.id && (
-                <div className="absolute right-0 top-8 z-20 w-36 rounded-lg border border-border bg-card p-1 shadow-xl">
+                <div className="absolute right-0 top-8 z-20 w-48 rounded-lg border border-border bg-card p-1 shadow-xl">
+                  <button type="button" onClick={() => { setEditingItem({kind:'file',id:file.id}); setEditingValue(file.name); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
                   <button
                     type="button"
                     onClick={() => {
@@ -633,6 +668,7 @@ export default function FilesPage() {
         <div className="flex gap-2">
           <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={15}/> Upload File<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label>
           <button onClick={() => { setDialog({kind:'folder'}); setDialogValue(''); }} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={15}/> New Folder</button>
+          <button onClick={() => void createDocument()} disabled={busy} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary disabled:opacity-50"><FilePlus2 size={15}/> New Document</button>
           <a href="/new" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-4 py-2.5 text-xs font-semibold text-primary hover:bg-primary/15"><Plus size={15}/> New Study Kit</a>
         </div>
       </div>
@@ -656,7 +692,7 @@ export default function FilesPage() {
         <div className="min-w-0">
           {!selected ? <div>
             <div className="flex items-center justify-between"><div><h2 className="font-serif text-2xl">Recent</h2><p className="mt-1 text-xs text-muted-foreground">Your latest files and study kits</p></div></div>
-            {!recentItems.length ? <div className="mt-5 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-12 text-center"><div className="mx-auto flex w-fit items-center gap-2 text-primary"><UploadCloud size={30}/><BookOpen size={30}/></div><h2 className="mt-4 font-serif text-2xl">Nothing here yet</h2><p className="mt-2 text-sm text-muted-foreground">Add a file or create a study kit to get started.</p><div className="mt-5 flex justify-center gap-2"><label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={14}/> Upload a file<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label><a href="/new" className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={14}/> Create a study kit</a></div></div> : <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{recentItems.map(item => item.kind === 'file' ? fileCard(item.file) : kitCard(item.kit))}</div>}
+            {!recentItems.length ? <div className="mt-5 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-12 text-center"><div className="mx-auto flex w-fit items-center gap-2 text-primary"><UploadCloud size={30}/><BookOpen size={30}/></div><h2 className="mt-4 font-serif text-2xl">Nothing here yet</h2><p className="mt-2 text-sm text-muted-foreground">Add a file or create a study kit to get started.</p><div className="mt-5 flex justify-center gap-2"><label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={14}/> Upload a file<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label><a href="/new" className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={14}/> Create a study kit</a></div></div> : <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{recentItems.map(item => item.kind === 'file' ? fileCard(item.file) : item.kind === 'document' ? documentCard(item.document) : kitCard(item.kit))}</div>}
             <div className="mt-10"><h2 className="font-serif text-2xl">Quick access</h2>{quick.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{quick.map(f=><button key={f.id} onClick={()=>{setSection('mine');setSelected(f.id)}} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left hover:border-primary/40"><Folder size={20} className="text-primary"/><span className="truncate text-sm font-medium">{f.name}</span></button>)}</div> : <p className="mt-3 text-xs text-muted-foreground">Pin folders from their menu to keep them here.</p>}</div>
           </div> : <div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search files by name" className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-xs outline-none"/></div><div className="flex rounded-lg border border-border p-1"><button onClick={()=>setView('grid')} className={`rounded-md p-1.5 ${view==='grid'?'bg-secondary':''}`}><Grid2X2 size={15}/></button><button onClick={()=>setView('list')} className={`rounded-md p-1.5 ${view==='list'?'bg-secondary':''}`}><List size={15}/></button></div></div>
@@ -670,7 +706,7 @@ export default function FilesPage() {
 
       {dialog && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 p-5"><div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="flex items-center justify-between"><h2 className="font-serif text-2xl">{dialog.kind==='folder'?'New Folder':dialog.kind==='rename'?'Rename Folder':'Share with Flexus user'}</h2><button onClick={()=>setDialog(null)}><X size={17}/></button></div>
-        {dialog.kind==='share' ? <><input autoFocus value={dialogValue} onChange={e=>void searchUsers(e.target.value)} placeholder="Search by name or email" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><div className="mt-3 space-y-1">{sharedUser.map(u=><button key={u.id} onClick={()=>void share(u)} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left hover:bg-secondary"><span><span className="block text-sm">{u.display_name}</span><span className="block text-[10px] text-muted-foreground">{u.email}</span></span><Share2 size={14}/></button>)}</div></> : <><input autoFocus value={dialogValue} onChange={e=>setDialogValue(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void (dialog.kind==='folder'?createFolder():renameFolder())}} placeholder="Folder name" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><button disabled={busy||!dialogValue.trim()} onClick={()=>void (dialog.kind==='folder'?createFolder():renameFolder())} className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{dialog.kind==='folder'?'Create folder':'Save changes'}</button></>}
+        {dialog.kind==='share' || dialog.kind==='document-share' ? <><input autoFocus value={dialogValue} onChange={e=>void searchUsers(e.target.value)} placeholder="Search by name or email" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><div className="mt-3 space-y-1">{sharedUser.map(u=><button key={u.id} onClick={()=>void (dialog.kind==='document-share' ? shareDocument(u) : share(u))} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left hover:bg-secondary"><span><span className="block text-sm">{u.display_name}</span><span className="block text-[10px] text-muted-foreground">{u.email}</span></span><Share2 size={14}/></button>)}</div></> : <><input autoFocus value={dialogValue} onChange={e=>setDialogValue(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void (dialog.kind==='folder'?createFolder():renameFolder())}} placeholder="Folder name" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><button disabled={busy||!dialogValue.trim()} onClick={()=>void (dialog.kind==='folder'?createFolder():renameFolder())} className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{dialog.kind==='folder'?'Create folder':'Save changes'}</button></>}
       </div></div>}
     </div>
   </section>;
