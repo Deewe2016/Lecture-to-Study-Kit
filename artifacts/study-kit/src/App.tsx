@@ -2390,6 +2390,62 @@ function GeneratingState({
   );
 }
 
+async function readAdditionalMaterial(file: File): Promise<Material> {
+  const lower = file.name.toLowerCase();
+  if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+    let uploadFile = file;
+    if (file.type.startsWith('video/') && file.size > 25 * 1024 * 1024) {
+      uploadFile = await compressVideoForTranscription(file, () => {});
+    }
+    const publicUrl = await uploadVideoToSupabase(uploadFile, () => {});
+    const response = await fetch('/api/transcribe-video-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: publicUrl,
+        fileName: uploadFile.name,
+        mimeType: uploadFile.type || 'video/webm',
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.text) {
+      throw new Error(payload?.error || 'Could not transcribe this video.');
+    }
+    return {
+      name: payload.title || file.name,
+      kind: 'transcript',
+      text: payload.text,
+      size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+    };
+  }
+
+  let text = file.type.startsWith('text/') || /\.(txt|md)$/i.test(lower)
+    ? await file.text()
+    : '';
+  if (file.type === 'application/pdf' || lower.endsWith('.pdf')) {
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pages: string[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const textItems = content.items
+        .filter((item) => 'str' in item)
+        .map((item) => ({ str: item.str, transform: Array.from(item.transform ?? []) }));
+      pages.push(pdfItemsToLines(textItems).join('\n'));
+    }
+    text = cleanPdfText(pages.join('\n\n'));
+  }
+  if (!text.trim()) {
+    throw new Error('This file type cannot be read yet. Please use a PDF, TXT, or Markdown file.');
+  }
+  return {
+    name: file.name,
+    kind: file.type.includes('pdf') ? 'slides' : 'notes',
+    text: text.trim(),
+    size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+  };
+}
+
 function KitPage() {
   const { id } =
     useParams<{ id: string }>();
@@ -2431,6 +2487,7 @@ function KitWorkspace({
 }: {
   kit: LocalKit;
 }) {
+  const [currentKit, setCurrentKit] = useState<LocalKit>(kit);
   const [tab, setTab] =
     useState<
       'overview' | 'plan' | 'flashcards' | 'exam'
@@ -2438,11 +2495,17 @@ function KitWorkspace({
 
   const [progress, setProgress] =
     useState<Progress>(() =>
-      readProgress(kit.id),
+      readProgress(currentKit.id),
     );
+  const [showAddMaterial, setShowAddMaterial] = useState(false);
+  const [addMaterialBusy, setAddMaterialBusy] = useState(false);
+  const [addMaterialError, setAddMaterialError] = useState('');
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [updateSummary, setUpdateSummary] = useState('');
+  const addMaterialInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    void loadProgress(kit.id).then(
+    void loadProgress(currentKit.id).then(
       (stored) => {
         if (stored) {
           const {
@@ -2454,7 +2517,7 @@ function KitWorkspace({
         }
       },
     );
-  }, [kit.id]);
+  }, [currentKit.id]);
 
   const update = (
     patch: Partial<Progress>,
@@ -2475,6 +2538,78 @@ function KitWorkspace({
 
   const completed =
     progress.completedTasks.length;
+
+  const updateKitWithMaterial = async (material: Material) => {
+    setAddMaterialBusy(true);
+    setAddMaterialError('');
+    setUpdateSummary('');
+    try {
+      const response = await fetch('/api/generate-kit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: currentKit.title,
+          planDays: currentKit.reviewPlan.length || 7,
+          existingKit: currentKit,
+          additionalMaterials: [{ name: material.name, kind: material.kind, text: material.text }],
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.kit) {
+        throw new Error(payload?.error || 'Could not update this study kit.');
+      }
+      const updated: LocalKit = {
+        ...payload.kit,
+        id: currentKit.id,
+        materials: [...currentKit.materials, material],
+        createdAt: currentKit.createdAt,
+      };
+      setCurrentKit(updated);
+      saveKits([updated, ...readKits().filter((item) => item.id !== updated.id)]);
+      const added = Number(payload.changes?.addedFlashcards || 0);
+      const chapters = Number(payload.changes?.updatedChapters || 0);
+      setUpdateSummary(`Added ${added} new flashcard${added === 1 ? '' : 's'}, updated ${chapters} chapter${chapters === 1 ? '' : 's'}.`);
+      setShowAddMaterial(false);
+      setYoutubeUrl('');
+    } catch (e) {
+      setAddMaterialError(e instanceof Error ? e.message : 'Could not update this study kit.');
+    } finally {
+      setAddMaterialBusy(false);
+    }
+  };
+
+  const handleAdditionalFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const material = await readAdditionalMaterial(file);
+      await updateKitWithMaterial(material);
+    } catch (e) {
+      setAddMaterialError(e instanceof Error ? e.message : 'Could not read this file.');
+    }
+  };
+
+  const handleYoutubeUpdate = async () => {
+    const value = youtubeUrl.trim();
+    if (!value) return;
+    setAddMaterialBusy(true);
+    setAddMaterialError('');
+    try {
+      const transcript = await transcribeVideo({
+        url: value,
+        fileName: null,
+        fileData: null,
+        mimeType: null,
+      });
+      await updateKitWithMaterial({
+        name: transcript.title || 'YouTube transcript',
+        kind: 'transcript',
+        text: transcript.text,
+      });
+    } catch (e) {
+      setAddMaterialError(e instanceof Error ? e.message : 'Could not read this YouTube video.');
+      setAddMaterialBusy(false);
+    }
+  };
 
   return (
     <section className="mx-auto max-w-6xl px-5 py-8 sm:px-9 sm:py-11">
@@ -2498,18 +2633,31 @@ function KitWorkspace({
           </h1>
 
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            {kit.overview}
+            {currentKit.overview}
           </p>
+          {updateSummary && (
+            <div className="mt-4 inline-flex items-center rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200">
+              {updateSummary}
+            </div>
+          )}
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <button
+            type="button"
+            onClick={() => { setShowAddMaterial(true); setAddMaterialError(''); }}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus size={14} />
+            Add more material
+          </button>
           <span className="rounded-full border border-border px-3 py-1.5">
-            {kit.chapters.length}{' '}
+            {currentKit.chapters.length}{' '}
             chapters
           </span>
 
           <span className="rounded-full border border-border px-3 py-1.5">
-            {kit.flashcards.length}{' '}
+            {currentKit.flashcards.length}{' '}
             cards
           </span>
         </div>
@@ -2551,14 +2699,14 @@ function KitWorkspace({
       <div className="mt-8">
         {tab === 'overview' && (
           <Overview
-            kit={kit}
+            kit={currentKit}
             onTab={setTab}
           />
         )}
 
         {tab === 'plan' && (
           <ReviewPlan
-            kit={kit}
+            kit={currentKit}
             progress={progress}
             update={update}
           />
@@ -2566,7 +2714,7 @@ function KitWorkspace({
 
         {tab === 'flashcards' && (
           <Flashcards
-            kit={kit}
+            kit={currentKit}
             progress={progress}
             update={update}
           />
@@ -2574,7 +2722,7 @@ function KitWorkspace({
 
         {tab === 'exam' && (
           <PracticeExam
-            kit={kit}
+            kit={currentKit}
             progress={progress}
             update={update}
           />
@@ -2590,6 +2738,54 @@ function KitWorkspace({
         this browser.
       </div>
     </section>
+      {showAddMaterial && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-5 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-[.18em] text-primary">Expand this kit</p>
+                <h2 className="mt-2 font-serif text-2xl">Add more material</h2>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">Flexus will read the new material and update the existing chapters, flashcards, and review plan.</p>
+              </div>
+              <button type="button" onClick={() => !addMaterialBusy && setShowAddMaterial(false)} className="rounded-lg p-2 hover:bg-secondary"><X size={17}/></button>
+            </div>
+
+            <label className="mt-6 flex min-h-28 cursor-pointer flex-col justify-center rounded-xl border border-dashed border-primary/50 bg-primary/[.04] p-5 hover:bg-primary/[.08]">
+              <input
+                ref={addMaterialInputRef}
+                type="file"
+                accept=".pdf,.txt,.md,video/mp4,video/quicktime,video/webm,video/mpeg,video/ogg,audio/*,.mp4,.mov,.webm"
+                className="sr-only"
+                disabled={addMaterialBusy}
+                onChange={(e) => { void handleAdditionalFile(e.target.files?.[0]); e.currentTarget.value = ''; }}
+              />
+              <span className="flex items-center gap-2 text-sm font-medium"><UploadCloud size={18} className="text-primary"/> Upload a video or file</span>
+              <span className="mt-1 text-xs text-muted-foreground">PDF, TXT, Markdown, MP4, MOV, or WebM</span>
+            </label>
+
+            <div className="my-5 flex items-center gap-3 text-[10px] uppercase tracking-[.15em] text-muted-foreground"><span className="h-px flex-1 bg-border"/><span>or</span><span className="h-px flex-1 bg-border"/></div>
+
+            <div className="rounded-xl border border-border bg-background p-4">
+              <label className="text-sm font-medium">YouTube URL</label>
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={youtubeUrl}
+                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                  placeholder="https://youtube.com/watch?v=..."
+                  disabled={addMaterialBusy}
+                  className="focus-ring min-w-0 flex-1 rounded-lg border border-input bg-card px-3 py-2.5 text-xs outline-none"
+                />
+                <button type="button" onClick={() => void handleYoutubeUpdate()} disabled={addMaterialBusy || !youtubeUrl.trim()} className="rounded-lg bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40">
+                  Update
+                </button>
+              </div>
+            </div>
+
+            {addMaterialBusy && <p className="mt-4 text-xs text-primary">Reading the new material and rebuilding your study kit…</p>}
+            {addMaterialError && <div className="mt-4 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-200">{addMaterialError}</div>}
+          </div>
+        </div>
+      )}
   );
 }
 
