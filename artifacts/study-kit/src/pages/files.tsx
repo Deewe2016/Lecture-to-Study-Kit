@@ -90,8 +90,6 @@ export default function FilesPage() {
       setFolders(fs);
       setFiles(fl);
       setShares(sh);
-      const root = fs.find(f => f.owner_id === me.id && f.parent_folder_id === null);
-      if (!selected && root) setSelected(root.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load your files.');
     }
