@@ -4,7 +4,7 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   ChevronRight, Download, File, FileArchive, FileAudio, FileImage, FileText,
   FileVideo, Folder, FolderOpen, Grid2X2, List, MoreHorizontal, Pencil, Pin,
-  Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen
+  Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen, FilePlus2
 } from 'lucide-react';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
 
