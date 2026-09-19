@@ -78,27 +78,35 @@ const Pagination=Extension.create({
     const key=new PluginKey('flexusPagination');
     return [new Plugin({
       key,
-      state:{init:()=>({breaks:[] as number[]}),apply:(tr,prev)=>tr.getMeta(key)?.breaks?{breaks:tr.getMeta(key).breaks}:prev},
+      state:{init:()=>({breaks:[] as {pos:number;gap:number}[]}),apply:(tr,prev)=>tr.getMeta(key)?.breaks?{breaks:tr.getMeta(key).breaks}:prev},
       props:{decorations(state){
         const breaks=key.getState(state)?.breaks||[];
-        return breaks.length?breaks.map((pos:number)=>Decoration.node(pos,pos+state.doc.nodeAt(pos)!.nodeSize,{style:'margin-top:'+PAGE_STEP+'px'})):null;
+        return breaks.map((item:{pos:number;gap:number})=>{
+          const node=state.doc.nodeAt(item.pos);
+          return node?Decoration.node(item.pos,item.pos+node.nodeSize,{style:'margin-top:'+item.gap+'px'}):null;
+        }).filter(Boolean) as any;
       }},
       view(view){
         let raf=0;
         const measure=()=>{
           cancelAnimationFrame(raf);
           raf=requestAnimationFrame(()=>{
-            const root=view.dom,rootRect=root.getBoundingClientRect(),next:number[]=[];
-            let pageEnd=PAGE_CONTENT_HEIGHT;
+            const root=view.dom,rootRect=root.getBoundingClientRect(),next:{pos:number;gap:number}[]=[];
+            let pageIndex=0,pageEnd=PAGE_CONTENT_HEIGHT;
             view.state.doc.forEach((node,pos)=>{
               const dom=view.nodeDOM(pos);
               if(!(dom instanceof HTMLElement))return;
               const rect=dom.getBoundingClientRect();
               const top=rect.top-rootRect.top,bottom=rect.bottom-rootRect.top;
-              if(bottom>pageEnd+0.5){next.push(pos);pageEnd+=PAGE_STEP;}
+              if(bottom>pageEnd+0.5){
+                const nextPageStart=(pageIndex+1)*PAGE_STEP;
+                next.push({pos,gap:Math.max(0,nextPageStart-top)});
+                pageIndex+=1;
+                pageEnd=pageIndex*PAGE_STEP+PAGE_CONTENT_HEIGHT;
+              }
             });
             const prev=key.getState(view.state)?.breaks||[];
-            if(next.length!==prev.length||next.some((p:number,i:number)=>p!==prev[i]))view.dispatch(view.state.tr.setMeta(key,{breaks:next}));
+            if(next.length!==prev.length||next.some((item,i)=>item.pos!==prev[i]?.pos||Math.abs(item.gap-(prev[i]?.gap||0))>0.5))view.dispatch(view.state.tr.setMeta(key,{breaks:next}));
           });
         };
         measure();
