@@ -218,8 +218,9 @@ export default function FilesPage() {
   const [menu, setMenu] = useState<string | null>(null);
   const [modal, setModal] = useState<{ file: FileRow; url?: string } | null>(null);
   const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share' | 'document-share'; id?: string; name?: string; fileId?: string } | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{ kind: 'file' | 'document' | 'kit'; id: string; name: string } | null>(null);
   const [dialogValue, setDialogValue] = useState('');
-  const [editingItem, setEditingItem] = useState<{ kind: 'file' | 'folder'; id: string } | null>(null);
+  const [editingItem, setEditingItem] = useState<{ kind: 'file' | 'folder' | 'document'; id: string } | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [sharedUser, setSharedUser] = useState<UserRow[]>([]);
   const [pinned, setPinned] = useState<string[]>(() => {
@@ -378,6 +379,13 @@ export default function FilesPage() {
     if (item.kind === 'file') {
       const file = files.find(f => f.id === item.id);
       if (file) await renameFile(file, name);
+    } else if (item.kind === 'document') {
+      setBusy(true);
+      try {
+        await api(`/rest/v1/documents?id=eq.${item.id}`, { method: 'PATCH', body: JSON.stringify({ title: name }) });
+        setDocuments(prev => prev.map(document => document.id === item.id ? { ...document, title: name } : document));
+      } catch (e) { setError(e instanceof Error ? e.message : 'Could not rename document.'); }
+      finally { setBusy(false); }
     } else {
       const folder = folders.find(f => f.id === item.id);
       if (folder && folder.name !== name) await renameFolderById(item.id, name);
@@ -453,7 +461,6 @@ export default function FilesPage() {
   };
 
   const deleteFile = async (file: FileRow) => {
-    if (!confirm(`Delete “${file.name}”?`)) return;
     setBusy(true);
     try {
       await fetch(`${url}/storage/v1/object/user-files/${file.storage_path.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE', headers: { apikey: anon, Authorization: `Bearer ${getAccessToken()}` } });
@@ -543,20 +550,54 @@ export default function FilesPage() {
     </div>
   ));
 
+  const renameStudyKit = async (kit: LocalKit) => {
+    const next = window.prompt('Rename study kit', kit.title)?.trim();
+    if (!next || next === kit.title) return;
+    try {
+      const raw = localStorage.getItem(KIT_STORAGE);
+      const stored = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(stored)) localStorage.setItem(KIT_STORAGE, JSON.stringify(stored.map((item: LocalKit) => item.id === kit.id ? { ...item, title: next } : item)));
+      setKits(prev => prev.map(item => item.id === kit.id ? { ...item, title: next } : item));
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not rename study kit.'); }
+  };
+
+  const shareStudyKit = async (kit: LocalKit) => {
+    const shareUrl = `${window.location.origin}/kit/${kit.id}`;
+    try {
+      if (navigator.share) await navigator.share({ title: kit.title, url: shareUrl });
+      else if (navigator.clipboard) { await navigator.clipboard.writeText(shareUrl); setError(''); }
+      else throw new Error('Sharing is not available in this browser.');
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      setError(e instanceof Error ? e.message : 'Could not share study kit.');
+    }
+  };
+
   const kitCard = (kit: LocalKit) => (
-    <button key={kit.id} onClick={() => window.location.assign(`/kit/${kit.id}`)} className="group rounded-xl border border-border bg-card p-5 text-left transition-transform hover:-translate-y-0.5 hover:border-primary/40">
+    <div key={kit.id} className="group rounded-xl border border-border bg-card p-5 hover:border-primary/40">
       <div className="flex items-start gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><BookOpen size={19}/></div>
-        <div className="min-w-0">
-          <p className="truncate text-[10px] uppercase tracking-[.16em] text-primary">{kit.courseLabel || 'Study kit'}</p>
-          <h3 className="mt-2 truncate font-serif text-xl tracking-[-.02em]">{kit.title}</h3>
+        <button type="button" onClick={() => window.location.assign(`/kit/${kit.id}`)} className="flex min-w-0 flex-1 items-start gap-3 text-left">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><BookOpen size={19}/></div>
+          <div className="min-w-0">
+            <p className="truncate text-[10px] uppercase tracking-[.16em] text-primary">{kit.courseLabel || 'Study kit'}</p>
+            <h3 className="mt-2 truncate font-serif text-xl tracking-[-.02em]">{kit.title}</h3>
+          </div>
+        </button>
+        <div className="relative shrink-0">
+          <button type="button" onClick={() => setMenu(menu === 'kit:' + kit.id ? null : 'kit:' + kit.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
+          {menu === 'kit:' + kit.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
+            <button type="button" onClick={() => { void renameStudyKit(kit); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
+            <button type="button" onClick={() => { void shareStudyKit(kit); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
+            <button type="button" onClick={() => { setDeleteDialog({ kind: 'kit', id: kit.id, name: kit.title }); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
+            <button type="button" onClick={() => { window.location.assign(`/kit/${kit.id}`); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><BookOpen size={13}/> Open</button>
+          </div>}
         </div>
       </div>
       <div className="mt-5 flex gap-4 text-xs text-muted-foreground">
         <span>{kit.flashcards?.length || 0} flashcards</span>
         <span>{kit.chapters?.length || 0} chapters</span>
       </div>
-    </button>
+    </div>
   );
 
   const documentCard = (document: DocumentRow) => (
@@ -570,8 +611,10 @@ export default function FilesPage() {
         <div className="mt-3 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
           <div className="relative">
             <button type="button" onClick={() => setMenu(menu === 'doc:' + document.id ? null : 'doc:' + document.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
-            {menu === 'doc:' + document.id && <div className="absolute right-0 top-8 z-20 w-48 rounded-lg border border-border bg-card p-1 shadow-xl">
-              <button type="button" onClick={() => { setDialog({ kind:'document-share', id:document.id }); setDialogValue(''); setSharedUser([]); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share with Flexus user</button>
+            {menu === 'doc:' + document.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
+              <button type="button" onClick={() => { setEditingItem({kind:'document' as any,id:document.id} as any); setEditingValue(document.title); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
+              <button type="button" onClick={() => { setDialog({ kind:'document-share', id:document.id }); setDialogValue(''); setSharedUser([]); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
+              <button type="button" onClick={() => { setDeleteDialog({ kind:'document', id:document.id, name:document.title }); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
             </div>}
           </div>
         </div>
@@ -647,7 +690,7 @@ export default function FilesPage() {
                     type="button"
                     onClick={() => {
                       setMenu(null);
-                      void deleteFile(file);
+                      setDeleteDialog({ kind: 'file', id: file.id, name: file.name });
                     }}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"
                   >
@@ -705,6 +748,17 @@ export default function FilesPage() {
       </div>
 
       {modal?.url && <FileViewer file={modal.file} src={modal.url} onClose={() => setModal(null)} />}
+
+      {deleteDialog && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-5">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
+          <h2 className="font-serif text-2xl">Delete {deleteDialog.kind === 'document' ? 'document' : deleteDialog.kind === 'kit' ? 'study kit' : 'file'}?</h2>
+          <p className="mt-3 text-sm text-muted-foreground">Are you sure you want to delete this document? This cannot be undone.</p>
+          <div className="mt-6 flex justify-end gap-2">
+            <button type="button" onClick={() => setDeleteDialog(null)} className="rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary">Cancel</button>
+            <button type="button" disabled={busy} onClick={() => void confirmDelete()} className="rounded-lg bg-red-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">Delete</button>
+          </div>
+        </div>
+      </div>}
 
       {dialog && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 p-5"><div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="flex items-center justify-between"><h2 className="font-serif text-2xl">{dialog.kind==='folder'?'New Folder':dialog.kind==='rename'?'Rename Folder':'Share with Flexus user'}</h2><button onClick={()=>setDialog(null)}><X size={17}/></button></div>
