@@ -83,7 +83,7 @@ const Pagination=Extension.create({
         const breaks=key.getState(state)?.breaks||[];
         return breaks.map((item:{pos:number;gap:number})=>{
           const node=state.doc.nodeAt(item.pos);
-          return node?Decoration.node(item.pos,item.pos+node.nodeSize,{style:'margin-top:'+item.gap+'px'}):null;
+          return node?Decoration.Node(item.pos,item.pos+node.nodeSize,{style:'margin-top:'+item.gap+'px'}):null;
         }).filter(Boolean) as any;
       }},
       view(view){
