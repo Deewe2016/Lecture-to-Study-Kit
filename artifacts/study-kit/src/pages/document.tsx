@@ -8,6 +8,7 @@ import Link from '@tiptap/extension-link';
 import { Color } from '@tiptap/extension-color';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { Highlight } from '@tiptap/extension-highlight';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Highlighter, Image as ImageIcon, Link as LinkIcon, List, ListIndentDecrease, ListIndentIncrease, ListOrdered, Redo, Strikethrough, Underline as UnderlineIcon, Undo } from 'lucide-react';
 import { getAccessToken } from '@/lib/auth';
 
 type DocumentRow = {
@@ -21,6 +22,12 @@ type DocumentRow = {
 const FONT_FAMILIES = ['Arial', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana'];
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 64, 72, 96];
 const FONT_SIZE_SET = new Set(FONT_SIZES);
+const PAGE_WIDTH = 816;
+const PAGE_HEIGHT = 1056;
+const PAGE_PADDING = 96;
+const PAGE_CONTENT_HEIGHT = PAGE_HEIGHT - PAGE_PADDING * 2;
+const PAGE_GAP = 32;
+const PAGE_STEP = PAGE_HEIGHT + PAGE_GAP;
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
@@ -182,6 +189,47 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
     onUpdate: () => setStatus('Unsaved changes'),
   });
 
+  const [pageCount, setPageCount] = useState(1);
+
+  useEffect(() => {
+    if (!editor) return;
+    let frame = 0;
+    const measurePages = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const root = editor.view.dom;
+        const blocks = Array.from(root.children).filter((node): node is HTMLElement => node instanceof HTMLElement);
+        blocks.forEach((node) => { node.style.marginTop = ''; });
+
+        let pageEnd = PAGE_CONTENT_HEIGHT;
+        let maxBottom = PAGE_CONTENT_HEIGHT;
+        for (const node of blocks) {
+          const rect = node.getBoundingClientRect();
+          const rootRect = root.getBoundingClientRect();
+          const top = rect.top - rootRect.top;
+          let bottom = rect.bottom - rootRect.top;
+          if (bottom > pageEnd + 0.5) {
+            const gap = pageEnd + PAGE_STEP - top;
+            if (gap > 0) node.style.marginTop = gap + 'px';
+            const moved = node.getBoundingClientRect();
+            bottom = moved.bottom - rootRect.top;
+            pageEnd += PAGE_STEP;
+          }
+          maxBottom = Math.max(maxBottom, bottom);
+        }
+        setPageCount(Math.max(1, Math.ceil(maxBottom / PAGE_STEP)));
+      });
+    };
+
+    measurePages();
+    const observer = new ResizeObserver(measurePages);
+    observer.observe(editor.view.dom);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [editor]);
+
   useEffect(() => {
     let cancelled = false;
     void fetchDocument(id)
@@ -232,7 +280,7 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
     const characters = text.length;
     const charactersNoSpaces = text.replace(/\s/g, '').length;
-    const pages = Math.max(1, Math.ceil(characters / 3000));
+    const pages = pageCount;
     setWordCount({ pages, words, characters, charactersNoSpaces });
   };
 
@@ -348,48 +396,58 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
 
         <ToolbarButton label="Bold" active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()}><strong>B</strong></ToolbarButton>
         <ToolbarButton label="Italic" active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()}><em>I</em></ToolbarButton>
-        <ToolbarButton label="Underline" active={editor.isActive('underline')} onClick={() => editor.chain().focus().toggleUnderline().run()}><u>U</u></ToolbarButton>
-        <ToolbarButton label="Strikethrough" active={editor.isActive('strike')} onClick={() => editor.chain().focus().toggleStrike().run()}><s>S</s></ToolbarButton>
+        <ToolbarButton label="Underline" active={editor.isActive('underline')} onClick={() => editor.chain().focus().toggleUnderline().run()}><UnderlineIcon size={17} strokeWidth={2.2} /></ToolbarButton>
+        <ToolbarButton label="Strikethrough" active={editor.isActive('strike')} onClick={() => editor.chain().focus().toggleStrike().run()}><Strikethrough size={17} /></ToolbarButton>
 
         <span className="document-editor-separator" />
 
-        <label className="document-editor-color-control" title="Text color">
-          <span>A</span>
+        <label className="document-editor-color-control" title="Text color" aria-label="Text color">
+          <span className="document-editor-text-color-icon">A</span>
           <input type="color" aria-label="Text color" defaultValue="#000000" onChange={(event) => editor.chain().focus().setColor(event.target.value).run()} />
         </label>
-        <label className="document-editor-color-control" title="Highlight color">
-          <span>H</span>
+        <label className="document-editor-color-control" title="Highlight color" aria-label="Highlight color">
+          <Highlighter size={17} />
           <input type="color" aria-label="Highlight color" defaultValue="#fff59d" onChange={(event) => editor.chain().focus().toggleHighlight({ color: event.target.value }).run()} />
         </label>
 
         <span className="document-editor-separator" />
 
-        <ToolbarButton label="Align left" active={editor.isActive({ textAlign: 'left' })} onClick={() => editor.chain().focus().setTextAlign('left').run()}>L</ToolbarButton>
-        <ToolbarButton label="Align center" active={editor.isActive({ textAlign: 'center' })} onClick={() => editor.chain().focus().setTextAlign('center').run()}>C</ToolbarButton>
-        <ToolbarButton label="Align right" active={editor.isActive({ textAlign: 'right' })} onClick={() => editor.chain().focus().setTextAlign('right').run()}>R</ToolbarButton>
-        <ToolbarButton label="Justify" active={editor.isActive({ textAlign: 'justify' })} onClick={() => editor.chain().focus().setTextAlign('justify').run()}>J</ToolbarButton>
+        <ToolbarButton label="Align left" active={editor.isActive({ textAlign: 'left' })} onClick={() => editor.chain().focus().setTextAlign('left').run()}><AlignLeft size={17} /></ToolbarButton>
+        <ToolbarButton label="Align center" active={editor.isActive({ textAlign: 'center' })} onClick={() => editor.chain().focus().setTextAlign('center').run()}><AlignCenter size={17} /></ToolbarButton>
+        <ToolbarButton label="Align right" active={editor.isActive({ textAlign: 'right' })} onClick={() => editor.chain().focus().setTextAlign('right').run()}><AlignRight size={17} /></ToolbarButton>
+        <ToolbarButton label="Align justify" active={editor.isActive({ textAlign: 'justify' })} onClick={() => editor.chain().focus().setTextAlign('justify').run()}><AlignJustify size={17} /></ToolbarButton>
 
         <span className="document-editor-separator" />
 
-        <ToolbarButton label="Bullet list" active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()}>•</ToolbarButton>
-        <ToolbarButton label="Numbered list" active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()}>1.</ToolbarButton>
-        <ToolbarButton label="Indent" onClick={() => changeIndent(1)}>→</ToolbarButton>
-        <ToolbarButton label="Outdent" onClick={() => changeIndent(-1)}>←</ToolbarButton>
+        <ToolbarButton label="Bullet list" active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()}><List size={17} /></ToolbarButton>
+        <ToolbarButton label="Numbered list" active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered size={17} /></ToolbarButton>
+        <ToolbarButton label="Indent" onClick={() => changeIndent(1)}><ListIndentIncrease size={17} /></ToolbarButton>
+        <ToolbarButton label="Outdent" onClick={() => changeIndent(-1)}><ListIndentDecrease size={17} /></ToolbarButton>
 
         <span className="document-editor-separator" />
 
-        <ToolbarButton label="Insert link" onClick={insertLink}>🔗</ToolbarButton>
-        <ToolbarButton label="Insert image" onClick={insertImage}>▧</ToolbarButton>
+        <ToolbarButton label="Insert link" onClick={insertLink}><LinkIcon size={17} /></ToolbarButton>
+        <ToolbarButton label="Insert image" onClick={insertImage}><ImageIcon size={17} /></ToolbarButton>
 
         <span className="document-editor-separator" />
 
-        <ToolbarButton label="Undo" onClick={() => editor.chain().focus().undo().run()}>↶</ToolbarButton>
-        <ToolbarButton label="Redo" onClick={() => editor.chain().focus().redo().run()}>↷</ToolbarButton>
+        <ToolbarButton label="Undo" onClick={() => editor.chain().focus().undo().run()}><Undo size={17} /></ToolbarButton>
+        <ToolbarButton label="Redo" onClick={() => editor.chain().focus().redo().run()}><Redo size={17} /></ToolbarButton>
       </div>
 
       <section className="document-editor-workspace">
-        <div className="document-editor-paper">
-          <EditorContent editor={editor} />
+        <div
+          className="document-editor-pages"
+          style={{ minHeight: Math.max(PAGE_HEIGHT, pageCount * PAGE_STEP - PAGE_GAP) }}
+        >
+          {Array.from({ length: pageCount }, (_, index) => (
+            <div key={index} className="document-editor-page-background">
+              <span className="document-editor-page-number">{index + 1}</span>
+            </div>
+          ))}
+          <div className="document-editor-layer">
+            <EditorContent editor={editor} />
+          </div>
         </div>
       </section>
 
