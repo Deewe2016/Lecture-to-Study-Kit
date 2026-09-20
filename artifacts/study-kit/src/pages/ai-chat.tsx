@@ -46,7 +46,7 @@ type Conversation = {
 
 const STORAGE_KEY = 'lecture-study-ai-conversations';
 const LEGACY_STORAGE_KEY = 'lecture-study-ai-chat';
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\\/$/, '');
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
