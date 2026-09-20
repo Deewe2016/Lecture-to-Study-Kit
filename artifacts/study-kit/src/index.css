@@ -363,3 +363,95 @@
 .document-editor-paper .ProseMirror .document-indent-6 { margin-left: 144px; }
 .document-editor-paper .ProseMirror .document-indent-7 { margin-left: 168px; }
 .document-editor-paper .ProseMirror .document-indent-8 { margin-left: 192px; }
+
+
+/* Exact paginated TipTap document surface */
+.document-editor-page,
+.document-editor-workspace {
+  background: #52525b;
+}
+
+.document-editor-pages {
+  position: relative;
+  width: 816px;
+  margin: 0 auto;
+}
+
+.document-editor-page-background {
+  position: relative;
+  width: 816px;
+  height: 1056px;
+  margin-bottom: 32px;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .28);
+  pointer-events: none;
+}
+
+.document-editor-page-number {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 20px;
+  text-align: center;
+  font: 11px/1 Arial, sans-serif;
+  color: #71717a;
+}
+
+.document-editor-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: 816px;
+  padding: 96px;
+  box-sizing: border-box;
+}
+
+.document-editor-layer .ProseMirror {
+  width: 624px;
+  min-height: 864px;
+  box-sizing: border-box;
+  padding: 0;
+  outline: none;
+  background: transparent;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.document-editor-layer .ProseMirror p {
+  margin: 0 0 12px;
+}
+
+.document-editor-text-color-icon {
+  color: #18181b;
+  font: 700 15px/1 Arial, sans-serif;
+  text-decoration-line: underline;
+  text-decoration-thickness: 3px;
+  text-decoration-color: #2563eb;
+  text-underline-offset: 3px;
+}
+
+.document-editor-toolbar-button svg,
+.document-editor-color-control svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.document-editor-toolbar-button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+@media (max-width: 880px) {
+  .document-editor-pages {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .document-editor-workspace {
+    overflow-x: auto;
+  }
+}
