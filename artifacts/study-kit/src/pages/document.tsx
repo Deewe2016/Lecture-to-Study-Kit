@@ -8,6 +8,8 @@ import Link from '@tiptap/extension-link';
 import { Color } from '@tiptap/extension-color';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { Highlight } from '@tiptap/extension-highlight';
+import FontFamily from '@tiptap/extension-font-family';
+import { Extension } from '@tiptap/core';
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Highlighter, Image as ImageIcon, Link as LinkIcon, List, ListIndentDecrease, ListIndentIncrease, ListOrdered, Redo, Strikethrough, Underline as UnderlineIcon, Undo } from 'lucide-react';
 import { getAccessToken } from '@/lib/auth';
 
@@ -30,36 +32,42 @@ const PAGE_STEP = PAGE_HEIGHT + PAGE_GAP;
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-const StyledText = TextStyle.extend({
-  addAttributes() {
+const FontSize = Extension.create({
+  name: 'fontSize',
+  addOptions() {
+    return { types: ['textStyle'] };
+  },
+  addGlobalAttributes() {
+    return [{
+      types: this.options.types,
+      attributes: {
+        fontSize: {
+          default: null,
+          parseHTML: (element: HTMLElement) => element.style.fontSize || null,
+          renderHTML: (attributes: { fontSize?: string | null }) =>
+            attributes.fontSize ? { style: `font-size: ${attributes.fontSize}` } : {},
+        },
+      },
+    }];
+  },
+  addCommands() {
     return {
-      ...this.parent?.(),
-      fontFamily: {
-        default: null,
-        parseHTML: (element: HTMLElement) => element.getAttribute('data-font-family'),
-        renderHTML: (attributes: { fontFamily?: string | null }) => {
-          const family = attributes.fontFamily;
-          return family && FONT_FAMILIES.includes(family)
-            ? { class: 'document-font-' + family.toLowerCase().replaceAll(' ', '-') }
-            : {};
-        },
-      },
-      fontSize: {
-        default: null,
-        parseHTML: (element: HTMLElement) => {
-          const value = Number(element.getAttribute('data-font-size'));
-          return FONT_SIZE_SET.has(value) ? value : null;
-        },
-        renderHTML: (attributes: { fontSize?: number | null }) => {
-          const size = attributes.fontSize;
-          return typeof size === 'number' && FONT_SIZE_SET.has(size)
-            ? { class: 'document-font-size-' + size, 'data-font-size': String(size) }
-            : {};
-        },
-      },
+      setFontSize: (size: string) => ({ chain }: { chain: () => any }) =>
+        chain().setMark('textStyle', { fontSize: size }).run(),
+      unsetFontSize: () => ({ chain }: { chain: () => any }) =>
+        chain().setMark('textStyle', { fontSize: null }).removeEmptyTextStyle().run(),
     };
   },
 });
+
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    fontSize: {
+      setFontSize: (size: string) => ReturnType;
+      unsetFontSize: () => ReturnType;
+    };
+  }
+}
 
 const Indent = TextStyle.extend({
   name: 'indent',
@@ -176,7 +184,9 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
     immediatelyRender: false,
     extensions: [
       StarterKit,
-      StyledText,
+      TextStyle,
+      FontFamily,
+      FontSize,
       Underline,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Image,
@@ -313,13 +323,13 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
 
   const changeFontFamily = (family: string) => {
     if (!FONT_FAMILIES.includes(family)) return;
-    editor?.chain().focus().setMark('textStyle', { fontFamily: family }).run();
+    editor?.chain().focus().setFontFamily(family).run();
   };
 
   const changeFontSize = (value: string) => {
     const size = Number(value);
     if (!FONT_SIZE_SET.has(size)) return;
-    editor?.chain().focus().setMark('textStyle', { fontSize: size }).run();
+    editor?.chain().focus().setFontSize(size + 'px').run();
   };
 
   const changeIndent = (delta: number) => {
