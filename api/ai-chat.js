@@ -20,7 +20,7 @@ async function describeImage(apiKey, image) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct",
+      model: process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b",
       temperature: 0.1,
       messages: [{
         role: "user",
@@ -84,7 +84,7 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: process.env.GROQ_MODEL || "llama-3.1-8b-instant",
+        model: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
         temperature: 0.2,
         stream: true,
         messages: [{ role: "system", content: system }, ...messages],
