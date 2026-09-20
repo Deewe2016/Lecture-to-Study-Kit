@@ -230,3 +230,136 @@
     padding: 24px 12px;
   }
 }
+
+/* Expanded TipTap document toolbar */
+.document-editor-toolbar {
+  flex-wrap: wrap;
+}
+.document-editor-select,
+.document-editor-font-size {
+  height: 32px;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #fff;
+  color: #18181b;
+  font: 13px Arial, sans-serif;
+  box-sizing: border-box;
+}
+.document-editor-select { width: 150px; padding: 0 7px; }
+.document-editor-font-size { width: 72px; padding: 0 7px; }
+.document-editor-separator {
+  width: 1px;
+  height: 24px;
+  background: #d4d4d8;
+  margin: 0 2px;
+}
+.document-editor-color-control {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #fff;
+  color: #18181b;
+  cursor: pointer;
+  box-sizing: border-box;
+  font: 700 14px Arial, sans-serif;
+}
+.document-editor-color-control input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.document-editor-toolbar-button:hover,
+.document-editor-button:hover,
+.document-editor-select:hover,
+.document-editor-font-size:hover,
+.document-editor-color-control:hover {
+  background: #f4f4f5;
+}
+.document-word-count-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, .28);
+}
+.document-word-count-modal {
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  border-radius: 10px;
+  background: #fff;
+  color: #18181b;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
+  padding: 24px;
+  box-sizing: border-box;
+}
+.document-word-count-modal h2 {
+  margin: 0 0 20px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.document-word-count-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 10px 0;
+  font-size: 14px;
+}
+.document-word-count-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
+.document-word-count-actions button {
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #fff;
+  color: #18181b;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.document-word-count-actions button:last-child {
+  background: #18181b;
+  color: #fff;
+  border-color: #18181b;
+}
+.document-editor-paper .ProseMirror .document-font-arial { font-family: Arial, sans-serif; }
+.document-editor-paper .ProseMirror .document-font-times-new-roman { font-family: "Times New Roman", serif; }
+.document-editor-paper .ProseMirror .document-font-courier-new { font-family: "Courier New", monospace; }
+.document-editor-paper .ProseMirror .document-font-georgia { font-family: Georgia, serif; }
+.document-editor-paper .ProseMirror .document-font-verdana { font-family: Verdana, sans-serif; }
+.document-editor-paper .ProseMirror .document-font-size-8 { font-size: 8px; }
+.document-editor-paper .ProseMirror .document-font-size-9 { font-size: 9px; }
+.document-editor-paper .ProseMirror .document-font-size-10 { font-size: 10px; }
+.document-editor-paper .ProseMirror .document-font-size-11 { font-size: 11px; }
+.document-editor-paper .ProseMirror .document-font-size-12 { font-size: 12px; }
+.document-editor-paper .ProseMirror .document-font-size-14 { font-size: 14px; }
+.document-editor-paper .ProseMirror .document-font-size-16 { font-size: 16px; }
+.document-editor-paper .ProseMirror .document-font-size-18 { font-size: 18px; }
+.document-editor-paper .ProseMirror .document-font-size-20 { font-size: 20px; }
+.document-editor-paper .ProseMirror .document-font-size-24 { font-size: 24px; }
+.document-editor-paper .ProseMirror .document-font-size-28 { font-size: 28px; }
+.document-editor-paper .ProseMirror .document-font-size-32 { font-size: 32px; }
+.document-editor-paper .ProseMirror .document-font-size-36 { font-size: 36px; }
+.document-editor-paper .ProseMirror .document-font-size-40 { font-size: 40px; }
+.document-editor-paper .ProseMirror .document-font-size-48 { font-size: 48px; }
+.document-editor-paper .ProseMirror .document-font-size-64 { font-size: 64px; }
+.document-editor-paper .ProseMirror .document-font-size-72 { font-size: 72px; }
+.document-editor-paper .ProseMirror .document-font-size-96 { font-size: 96px; }
+.document-editor-paper .ProseMirror .document-indent-1 { margin-left: 24px; }
+.document-editor-paper .ProseMirror .document-indent-2 { margin-left: 48px; }
+.document-editor-paper .ProseMirror .document-indent-3 { margin-left: 72px; }
+.document-editor-paper .ProseMirror .document-indent-4 { margin-left: 96px; }
+.document-editor-paper .ProseMirror .document-indent-5 { margin-left: 120px; }
+.document-editor-paper .ProseMirror .document-indent-6 { margin-left: 144px; }
+.document-editor-paper .ProseMirror .document-indent-7 { margin-left: 168px; }
+.document-editor-paper .ProseMirror .document-indent-8 { margin-left: 192px; }
