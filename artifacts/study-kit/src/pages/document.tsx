@@ -22,7 +22,6 @@ type DocumentRow = {
 const FONT_FAMILIES = ['Arial', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana'];
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 64, 72, 96];
 const FONT_SIZE_SET = new Set(FONT_SIZES);
-const PAGE_WIDTH = 816;
 const PAGE_HEIGHT = 1056;
 const PAGE_PADDING = 96;
 const PAGE_CONTENT_HEIGHT = PAGE_HEIGHT - PAGE_PADDING * 2;
@@ -152,6 +151,7 @@ function ToolbarButton({
       type="button"
       className="document-editor-toolbar-button"
       aria-label={label}
+      title={label}
       aria-pressed={active}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
@@ -224,11 +224,13 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
     measurePages();
     const observer = new ResizeObserver(measurePages);
     observer.observe(editor.view.dom);
+    editor.on('update', measurePages);
     return () => {
       cancelAnimationFrame(frame);
+      editor.off('update', measurePages);
       observer.disconnect();
     };
-  }, [editor]);
+  }, [editor, document]);
 
   useEffect(() => {
     let cancelled = false;
@@ -295,7 +297,7 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editor]);
+  }, [editor, pageCount]);
 
   const insertLink = () => {
     const url = window.prompt('Enter a URL');
