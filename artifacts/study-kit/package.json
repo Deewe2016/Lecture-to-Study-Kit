@@ -10,9 +10,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@tiptap/core": "^3.31.3",
-    "@tiptap/pm": "^3.31.3",
-    "@tiptap/extension-font-family": "^3.31.3"
+    "@tiptap/core": "^2.10.3",
+    "@tiptap/pm": "^2.10.3",
+    "@tiptap/extension-font-family": "^2.10.3"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
