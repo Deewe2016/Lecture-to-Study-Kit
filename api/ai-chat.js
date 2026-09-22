@@ -9,7 +9,9 @@ function attachmentContext(attachments) {
     .filter((item) => item && typeof item.name === "string")
     .map((item) => {
       const kind = item.kind === "image" ? "Image note" : "File content";
-      const content = clean(item.content).slice(0, MAX_ATTACHMENT_CHARS);
+      const content = item.kind === "image"
+        ? `The user attached an image called ${item.name}. Describe what this image might contain based on the filename.`
+        : clean(item.content).slice(0, MAX_ATTACHMENT_CHARS);
       return `\n--- ${item.name} (${kind}) ---\n${content}\n--- End ${item.name} ---`;
     })
     .join("\n");
