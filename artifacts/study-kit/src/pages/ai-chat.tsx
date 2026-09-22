@@ -450,7 +450,7 @@ export default function AIChatPage() {
             name,
             type,
             kind,
-            content: attachmentContent,
+            content: kind === 'image' ? undefined : attachmentContent,
           })),
         }),
         signal: controller.signal,
