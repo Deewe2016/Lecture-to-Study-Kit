@@ -2,70 +2,39 @@ function clean(value) {
   return String(value || "").trim();
 }
 
+const MAX_ATTACHMENT_CHARS = 3000;
+
 function attachmentContext(attachments) {
   return attachments
     .filter((item) => item && typeof item.name === "string")
     .map((item) => {
-      const kind = item.kind === "image" ? "Image description" : "File content";
-      return `\n--- ${item.name} (${kind}) ---\n${clean(item.content).slice(0, 50000)}\n--- End ${item.name} ---`;
+      const kind = item.kind === "image" ? "Image note" : "File content";
+      const content = clean(item.content).slice(0, MAX_ATTACHMENT_CHARS);
+      return `\n--- ${item.name} (${kind}) ---\n${content}\n--- End ${item.name} ---`;
     })
     .join("\n");
 }
 
-async function describeImage(apiKey, image) {
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b",
-      temperature: 0.1,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: "Describe this image accurately for a study assistant. Include visible text, diagrams, labels, charts, equations, objects, and important relationships. Do not guess details that are not visible.",
-          },
-          { type: "image_url", image_url: { url: image.content } },
-        ],
-      }],
-    }),
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Groq image description failed: ${body.slice(0, 300)}`);
-  }
-  const data = await response.json();
-  return data?.choices?.[0]?.message?.content?.trim() || "No useful description could be generated for this image.";
-}
-
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed." });
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed." });
+  }
 
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "GROQ_API_KEY is not configured in Vercel." });
+  if (!apiKey) {
+    return res.status(500).json({ error: "GROQ_API_KEY is not configured in Vercel." });
+  }
 
   const body = req.body || {};
   const messages = Array.isArray(body.messages) ? body.messages.slice(-20) : [];
-  const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+  const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 10) : [];
 
-  if (!messages.length) return res.status(400).json({ error: "Send a message first." });
+  if (!messages.length) {
+    return res.status(400).json({ error: "Send a message first." });
+  }
 
   try {
-    const processedAttachments = [];
-    for (const attachment of attachments.slice(0, 10)) {
-      if (attachment?.kind === "image" && typeof attachment.content === "string") {
-        const description = await describeImage(apiKey, attachment);
-        processedAttachments.push({ ...attachment, content: description });
-      } else {
-        processedAttachments.push(attachment);
-      }
-    }
-
-    const context = attachmentContext(processedAttachments).slice(0, 120000);
+    const context = attachmentContext(attachments);
     const system = [
       "You are a helpful study tutor and general-purpose AI assistant.",
       "Answer the user's question directly.",
@@ -73,7 +42,7 @@ export default async function handler(req, res) {
       "If an attached file does not contain the answer, use your general knowledge rather than refusing.",
       "If you use information that comes from general knowledge rather than the attached files, briefly make that clear.",
       context
-        ? "The user has attached the following file content: [file content]. Use this as context when answering.\n" + context
+        ? "The user has attached the following file content. Use it as context when answering. Each attachment is limited to 3000 characters.\n" + context
         : "",
     ].filter(Boolean).join("\n\n");
 
@@ -93,42 +62,99 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const bodyText = await response.text().catch(() => "");
-      return res.status(502).json({ error: `Groq HTTP ${response.status}: ${bodyText.slice(0, 300)}` });
+      const errorMessage = `Groq HTTP ${response.status}: ${bodyText.slice(0, 500) || "No error details returned."}`;
+      console.error("Groq API error:", errorMessage);
+      return res.status(502).json({ error: errorMessage });
     }
 
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
 
     const reader = response.body?.getReader();
-    if (!reader) return res.end();
+    if (!reader) {
+      const errorMessage = "Groq returned no readable response stream.";
+      console.error(errorMessage);
+      res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
+      return res.end();
+    }
+
     const decoder = new TextDecoder();
     let buffer = "";
 
+    const sendError = (message) => {
+      console.error("AI Chat stream error:", message);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    };
+
     while (true) {
       const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() || "";
+
+      for (const eventText of events) {
+        for (const line of eventText.split(/\r?\n/)) {
+          if (!line.startsWith("data:")) continue;
+
+          const data = line.slice(5).trim();
+          if (!data) continue;
+          if (data === "[DONE]") {
+            res.write("data: [DONE]\n\n");
+            continue;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed?.error) {
+              sendError(`Groq stream error: ${parsed.error?.message || JSON.stringify(parsed.error)}`);
+              continue;
+            }
+
+            const content = parsed?.choices?.[0]?.delta?.content;
+            if (typeof content === "string" && content) {
+              res.write(`data: ${JSON.stringify({ content })}\n\n`);
+            }
+          } catch (parseError) {
+            console.error("Could not parse Groq SSE event:", parseError);
+          }
+        }
+      }
+
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || "";
-      for (const line of lines) {
+    }
+
+    if (buffer.trim()) {
+      for (const line of buffer.split(/\r?\n/)) {
         if (!line.startsWith("data:")) continue;
         const data = line.slice(5).trim();
         if (!data || data === "[DONE]") continue;
         try {
           const parsed = JSON.parse(data);
           const content = parsed?.choices?.[0]?.delta?.content;
-          if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
-        } catch {
-          // Ignore incomplete SSE frames.
+          if (typeof content === "string" && content) {
+            res.write(`data: ${JSON.stringify({ content })}\n\n`);
+          }
+        } catch (parseError) {
+          console.error("Could not parse final Groq SSE event:", parseError);
         }
       }
     }
+
+    res.write("data: [DONE]\n\n");
     res.end();
   } catch (error) {
+    const message = error instanceof Error ? error.message : "AI Chat unavailable.";
     console.error("AI Chat request failed:", error);
-    if (!res.headersSent) return res.status(502).json({ error: error instanceof Error ? error.message : "AI Chat unavailable." });
+
+    if (!res.headersSent) {
+      return res.status(502).json({ error: message });
+    }
+
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
     res.end();
   }
 }
