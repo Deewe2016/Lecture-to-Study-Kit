@@ -12,7 +12,9 @@
   "dependencies": {
     "@tiptap/core": "^2.10.3",
     "@tiptap/pm": "^2.10.3",
-    "@tiptap/extension-font-family": "^2.10.3"
+    "@tiptap/extension-font-family": "^2.10.3",
+    "fast-equals": "^5.0.1",
+    "use-sync-external-store": "^1.2.0"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -81,14 +83,14 @@
     "zod": "catalog:",
     "marked": "^15.0.12",
     "dompurify": "^3.2.6",
-    "@tiptap/react": "^3.31.3",
-    "@tiptap/starter-kit": "^3.31.3",
-    "@tiptap/extension-underline": "^3.31.3",
-    "@tiptap/extension-text-align": "^3.31.3",
-    "@tiptap/extension-image": "^3.31.3",
-    "@tiptap/extension-link": "^3.31.3",
-    "@tiptap/extension-color": "^3.31.3",
-    "@tiptap/extension-text-style": "^3.31.3",
-    "@tiptap/extension-highlight": "^3.31.3"
+    "@tiptap/react": "^2.10.3",
+    "@tiptap/starter-kit": "^2.10.3",
+    "@tiptap/extension-underline": "^2.10.3",
+    "@tiptap/extension-text-align": "^2.10.3",
+    "@tiptap/extension-image": "^2.10.3",
+    "@tiptap/extension-link": "^2.10.3",
+    "@tiptap/extension-color": "^2.10.3",
+    "@tiptap/extension-text-style": "^2.10.3",
+    "@tiptap/extension-highlight": "^2.10.3"
   }
 }
