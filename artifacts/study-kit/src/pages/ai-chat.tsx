@@ -96,7 +96,8 @@ function readConversations(): Conversation[] {
         return [{ id: makeId(), messages, createdAt: Date.now() }];
       }
     }
-  } catch {
+  } catch (error) {
+    console.error("AI Chat local storage read error:", error);
     // Ignore malformed local storage and start clean.
   }
   return [];
@@ -441,23 +442,28 @@ export default function AIChatPage() {
     abortRef.current = controller;
 
     try {
+      const requestBody = {
+        messages: history.slice(-20).map(({ role, content: text }) => ({ role, content: text })),
+        attachments: attachments.map(({ name, type, kind, content: attachmentContent }) => ({
+          name,
+          type,
+          kind,
+          content: kind === 'image' ? undefined : attachmentContent,
+        })),
+      };
+      console.log("AI Chat sending request to /api/ai-chat:", requestBody);
       const response = await fetch('/api/ai-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: history.slice(-20).map(({ role, content: text }) => ({ role, content: text })),
-          attachments: attachments.map(({ name, type, kind, content: attachmentContent }) => ({
-            name,
-            type,
-            kind,
-            content: kind === 'image' ? undefined : attachmentContent,
-          })),
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
       if (!response.ok || !response.body) {
-        const details = await response.text().catch(() => '');
+        const details = await response.text().catch((error) => {
+          console.error("AI Chat error response read failed:", error);
+          return '';
+        });
         throw new Error(details || `AI Chat request failed (${response.status}).`);
       }
 
@@ -491,6 +497,7 @@ export default function AIChatPage() {
                 ));
               }
             } catch (parseError) {
+              console.error("AI Chat SSE parse error:", parseError);
               if (parseError instanceof Error && parseError.message !== 'Unexpected end of JSON input') {
                 throw parseError;
               }
@@ -499,6 +506,7 @@ export default function AIChatPage() {
         }
       }
     } catch (requestError) {
+      console.error("AI Chat frontend request error:", requestError);
       if (controller.signal.aborted) return;
       const message = requestError instanceof Error ? requestError.message : 'AI Chat is unavailable.';
       setError(message);
