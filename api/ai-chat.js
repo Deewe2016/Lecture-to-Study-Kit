@@ -18,6 +18,9 @@ function attachmentContext(attachments) {
 }
 
 export default async function handler(req, res) {
+  console.log("AI chat called with " + (Array.isArray(req.body?.messages) ? req.body.messages.length : 0) + " messages");
+  console.log("AI chat request body:", req.body);
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed." });
   }
@@ -61,6 +64,8 @@ export default async function handler(req, res) {
         messages: [{ role: "system", content: system }, ...messages],
       }),
     });
+
+    console.log("Groq API response status:", response.status);
 
     if (!response.ok) {
       const bodyText = await response.text().catch(() => "");
@@ -149,6 +154,7 @@ export default async function handler(req, res) {
     res.write("data: [DONE]\n\n");
     res.end();
   } catch (error) {
+    console.error("AI Chat request catch error:", error);
     const message = error instanceof Error ? error.message : "AI Chat unavailable.";
     console.error("AI Chat request failed:", error);
 
