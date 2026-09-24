@@ -154,6 +154,70 @@ function eventStyle(event: CalendarEvent) {
   };
 }
 
+type PositionedEvent = {
+  event: CalendarEvent;
+  column: number;
+  columnCount: number;
+  top: number;
+  height: number;
+};
+
+function layoutOverlappingEvents(events: CalendarEvent[], day: Date, rowHeight: number): PositionedEvent[] {
+  const dayStart = startOfDay(day).getTime();
+  const dayEnd = addDays(startOfDay(day), 1).getTime();
+  const visibleStart = dayStart + 7 * 60 * 60 * 1000;
+  const visibleEnd = dayStart + 22 * 60 * 60 * 1000;
+
+  const dayEvents = events
+    .filter((event) => eventOverlapsDay(event, day))
+    .map((event) => ({
+      event,
+      start: Math.max(new Date(event.start_at).getTime(), dayStart),
+      end: Math.min(new Date(event.end_at).getTime(), dayEnd),
+    }))
+    .filter(({ start, end }) => end > start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+
+  const groups: Array<typeof dayEvents> = [];
+
+  for (const item of dayEvents) {
+    const currentGroup = groups[groups.length - 1];
+    if (!currentGroup || item.start >= Math.max(...currentGroup.map((entry) => entry.end))) {
+      groups.push([item]);
+    } else {
+      currentGroup.push(item);
+    }
+  }
+
+  return groups.flatMap((group) => {
+    const columns: Array<number> = [];
+    const positioned = group.map((item) => {
+      let column = 0;
+      while (columns[column] !== undefined && columns[column] > item.start) column += 1;
+      columns[column] = item.end;
+
+      return { ...item, column };
+    });
+
+    const columnCount = Math.max(...positioned.map((item) => item.column)) + 1;
+
+    return positioned.map(({ event, start, end, column }) => {
+      const clippedStart = Math.max(start, visibleStart);
+      const clippedEnd = Math.min(end, visibleEnd);
+      const top = Math.max(0, ((clippedStart - visibleStart) / 3600000) * rowHeight);
+      const durationHours = Math.max(0.5, (clippedEnd - clippedStart) / 3600000);
+
+      return {
+        event,
+        column,
+        columnCount,
+        top,
+        height: Math.max(30, durationHours * rowHeight - 2),
+      };
+    }).filter((item) => item.top < 15 * rowHeight && item.height > 0);
+  });
+}
+
 function MiniCalendar({
   value,
   onChange,
@@ -300,20 +364,26 @@ function TimeGrid({
           {gridDays.map((day) => (
             <div key={day.toISOString()} className="relative border-l border-border">
               {hours.map((hour) => <div key={hour} className="border-b border-border" style={{ height: rowHeight }} />)}
-              {events.filter((event) => eventOverlapsDay(event, day)).map((event) => {
-                const start = new Date(event.start_at);
-                const end = new Date(event.end_at);
-                const top = Math.max(0, ((start.getHours() + start.getMinutes() / 60) - 7) * rowHeight);
-                const duration = Math.max(0.5, (end.getTime() - start.getTime()) / 3600000);
+              {layoutOverlappingEvents(events, day, rowHeight).map((item) => {
+                const gapCount = Math.max(0, item.columnCount - 1);
+                const width = `calc((100% - ${gapCount * 2}px) / ${item.columnCount})`;
+                const left = `calc(${item.column} * ((100% - ${gapCount * 2}px) / ${item.columnCount} + 2px))`;
+
                 return (
                   <button
-                    key={event.id}
-                    onClick={() => onEvent(event)}
-                    className="absolute left-1 right-1 overflow-hidden rounded-md px-2 py-1 text-left text-[10px] font-medium text-white shadow-sm hover:brightness-110"
-                    style={{ ...eventStyle(event), top, height: Math.max(30, duration * rowHeight - 2) }}
+                    key={item.event.id}
+                    onClick={() => onEvent(item.event)}
+                    className="absolute overflow-hidden rounded-md px-2 py-1 text-left text-[10px] font-medium text-white shadow-sm hover:brightness-110"
+                    style={{
+                      ...eventStyle(item.event),
+                      top: item.top,
+                      height: item.height,
+                      width,
+                      left,
+                    }}
                   >
-                    <div className="truncate">{event.title}</div>
-                    <div className="mt-0.5 opacity-80">{timeLabel(event.start_at)}</div>
+                    <div className="truncate">{item.event.title}</div>
+                    <div className="mt-0.5 opacity-80">{timeLabel(item.event.start_at)}</div>
                   </button>
                 );
               })}
