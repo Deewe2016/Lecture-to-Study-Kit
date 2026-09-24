@@ -121,9 +121,9 @@ function renderMarkdown(text: string) {
 }
 
 function kindForFile(name: string, type: string): Attachment['kind'] | null {
-  if (type.includes('pdf') || /\\.pdf$/i.test(name)) return 'pdf';
+  if (type.includes('pdf') || /\.pdf$/i.test(name)) return 'pdf';
   if (type.startsWith('image/')) return 'image';
-  if (type.includes('text') || /\\.(txt|md)$/i.test(name)) return 'txt';
+  if (type.includes('text') || /\.(txt|md)$/i.test(name)) return 'txt';
   return null;
 }
 
@@ -135,7 +135,7 @@ async function readPdfText(data: ArrayBuffer) {
     const text = await page.getTextContent();
     pages.push(text.items.map((item: any) => 'str' in item ? item.str : '').join(' '));
   }
-  return pages.join('\\n\\n').trim();
+  return pages.join('\n\n').trim();
 }
 
 function fileToDataUrl(file: Blob): Promise<string> {
@@ -435,7 +435,7 @@ export default function AIChatPage() {
     if ((!typedContent && !attachments.length) || thinking || processingAttachment) return;
 
     const content = typedContent || 'Attached file(s).';
-    const kitCommand = content.match(/^make\\s+(?:a\\s+)?(.+?)\\s+study\\s+kit$/i);
+    const kitCommand = content.match(/^make\s+(?:a\s+)?(.+?)\s+study\s+kit$/i);
 
     let conversationId = selectedId;
     if (!conversationId) {
@@ -518,11 +518,11 @@ export default function AIChatPage() {
         doneReading = result.done;
         if (result.value) buffer += decoder.decode(result.value, { stream: !result.done });
 
-        const events = buffer.split(/\\r?\\n\\r?\\n/);
+        const events = buffer.split(/\r?\n\r?\n/);
         buffer = events.pop() || '';
 
         for (const eventText of events) {
-          for (const line of eventText.split(/\\r?\\n/)) {
+          for (const line of eventText.split(/\r?\n/)) {
             if (!line.startsWith('data:')) continue;
             const data = line.slice(5).trim();
             if (!data || data === '[DONE]') continue;
