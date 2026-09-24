@@ -127,15 +127,77 @@ function kindForFile(name: string, type: string): Attachment['kind'] | null {
   return null;
 }
 
-async function readPdfText(data: ArrayBuffer) {
-  const pdf = await pdfjsLib.getDocument({ data }).promise;
-  const pages: string[] = [];
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const text = await page.getTextContent();
-    pages.push(text.items.map((item: any) => 'str' in item ? item.str : '').join(' '));
+const PDF_METADATA_HEADER =
+  /^\s*(Subject|Level|Target Use|Testing Tip)\s*:/i;
+
+function cleanPdfText(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !PDF_METADATA_HEADER.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function pdfItemsToLines(
+  items: Array<{ str?: string; transform?: number[] }>,
+) {
+  const lines = new Map<number, string[]>();
+
+  for (const item of items) {
+    if (!item.str?.trim()) continue;
+
+    const y = Math.round(item.transform?.[5] ?? 0);
+    const line = lines.get(y) ?? [];
+
+    line.push(item.str.trim());
+    lines.set(y, line);
   }
-  return pages.join('\n\n').trim();
+
+  return [...lines.entries()]
+    .sort(([a], [b]) => b - a)
+    .map(([, line]) => line.join(' '));
+}
+
+async function readPdfText(data: ArrayBuffer, fileName: string) {
+  console.log('AI Chat PDF extraction started:', fileName, 'bytes:', data.byteLength);
+
+  try {
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    console.log('AI Chat PDF loaded:', fileName, 'pages:', pdf.numPages);
+
+    const pages: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+
+      const textItems = content.items
+        .filter((item) => 'str' in item)
+        .map((item) => ({
+          str: item.str,
+          transform: Array.from(item.transform ?? []),
+        }));
+
+      const pageText = pdfItemsToLines(textItems).join('\n');
+      pages.push(pageText);
+      console.log('AI Chat PDF page extracted:', fileName, pageNumber, 'chars:', pageText.length);
+    }
+
+    const text = cleanPdfText(pages.join('\n\n'));
+    console.log('AI Chat PDF extraction complete:', fileName, 'chars:', text.length);
+
+    if (!text.trim()) {
+      console.warn('AI Chat PDF contains no selectable text:', fileName);
+      throw new Error('PDF contains no selectable text.');
+    }
+
+    return text;
+  } catch (error) {
+    console.error('AI Chat PDF extraction failed:', fileName, error);
+    throw error;
+  }
 }
 
 function fileToDataUrl(file: Blob): Promise<string> {
@@ -349,7 +411,7 @@ export default function AIChatPage() {
     if (kind === 'txt') {
       content = await file.text();
     } else if (kind === 'pdf') {
-      content = await readPdfText(await file.arrayBuffer());
+      content = await readPdfText(await file.arrayBuffer(), file.name);
     } else {
       content = `[User attached image: ${file.name} — describe what this image likely contains based on the filename]`;
     }
@@ -481,7 +543,7 @@ export default function AIChatPage() {
             if (!attachmentContent) {
               throw new Error(`No extracted content was available for ${attachment.name}.`);
             }
-            return `[File content: ${attachment.name}]\\n${attachmentContent.slice(0, 4000)}`;
+            return `[File content: ${attachment.name}]\\n${attachmentContent.slice(0, 6000)}`;
           }).join('\\n\\n');
 
           requestContent = `${content}\\n\\n${attachmentBlocks}`;
