@@ -637,10 +637,25 @@ export default function CalendarPage() {
     setLoading(true);
     setError('');
     try {
-      const rows = await api<CalendarEvent[]>(
-        `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,created_at,updated_at&or=(owner_id.eq.${me.id},id.in.(select%20event_id%20from%20calendar_event_invites%20where%20user_id.eq.${me.id}))&order=start_at.asc&limit=500`,
-      );
-      setEvents(rows);
+      const [owned, inviteRows] = await Promise.all([
+        api<CalendarEvent[]>(
+          `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,created_at,updated_at&owner_id=eq.${me.id}&order=start_at.asc&limit=500`,
+        ),
+        api<InviteRow[]>(
+          `/rest/v1/calendar_event_invites?select=id,event_id,user_id&user_id=eq.${me.id}&limit=500`,
+        ),
+      ]);
+
+      const invitedIds = [...new Set(inviteRows.map((row) => row.event_id))];
+      const invited = invitedIds.length
+        ? await api<CalendarEvent[]>(
+            `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,created_at,updated_at&id=in.(${invitedIds.join(',')})&order=start_at.asc&limit=500`,
+          )
+        : [];
+
+      const byId = new Map<string, CalendarEvent>();
+      [...owned, ...invited].forEach((event) => byId.set(event.id, event));
+      setEvents([...byId.values()].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load calendar.');
     } finally {
