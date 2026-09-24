@@ -62,6 +62,7 @@ import AiChatPage from '@/pages/ai-chat';
 import ChatPage from '@/pages/chat';
 import FilesPage from '@/pages/files';
 import DocumentPage from '@/pages/document';
+import SupabaseCalendarPage from '@/pages/calendar';
 import {
   getCurrentUser,
   getStoredUser,
@@ -4283,7 +4284,7 @@ function Router() {
 
           <Route
             path="/calendar"
-            component={CalendarPage}
+            component={SupabaseCalendarPage}
           />
 
           <Route
