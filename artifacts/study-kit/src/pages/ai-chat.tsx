@@ -351,7 +351,7 @@ export default function AIChatPage() {
     } else if (kind === 'pdf') {
       content = await readPdfText(await file.arrayBuffer());
     } else {
-      content = await fileToDataUrl(file);
+      content = `[User attached image: ${file.name} — describe what this image likely contains based on the filename]`;
     }
 
     if (!content.trim()) throw new Error(`${file.name} does not contain readable content.`);
@@ -473,23 +473,37 @@ export default function AIChatPage() {
     abortRef.current = controller;
 
     try {
-      let requestAttachments: Array<{ name: string; type: string; kind: Attachment['kind']; content?: string }> = [];
+      let requestContent = content;
       try {
-        requestAttachments = attachments.map(({ name, type, kind, content: attachmentContent }) => ({
-          name,
-          type,
-          kind,
-          content: kind === 'image' ? undefined : attachmentContent,
-        }));
+        if (attachments.length) {
+          const attachmentBlocks = attachments.map((attachment) => {
+            const attachmentContent = String(attachment.content || '').trim();
+            if (!attachmentContent) {
+              throw new Error(`No extracted content was available for ${attachment.name}.`);
+            }
+            return `[File content: ${attachment.name}]\\n${attachmentContent.slice(0, 4000)}`;
+          }).join('\\n\\n');
+
+          requestContent = `${content}\\n\\n${attachmentBlocks}`;
+        }
       } catch (attachmentError) {
-        console.error('AI Chat attachment payload error:', attachmentError);
-        requestAttachments = [];
+        console.error('AI Chat attachment content error:', attachmentError);
         setAttachmentWarning('Could not read file, sending message without attachment');
+        requestContent = content;
+      }
+
+      const requestMessages = history.slice(-20).map(({ role, content: text }) => ({ role, content: text }));
+      const lastUserIndex = requestMessages.length - 1;
+      if (lastUserIndex >= 0 && requestMessages[lastUserIndex].role === 'user') {
+        requestMessages[lastUserIndex] = {
+          role: 'user',
+          content: requestContent,
+        };
       }
 
       const requestBody = {
-        messages: history.slice(-20).map(({ role, content: text }) => ({ role, content: text })),
-        attachments: requestAttachments,
+        messages: requestMessages,
+        attachments: [],
       };
       console.log("AI Chat sending request to /api/ai-chat:", requestBody);
       const response = await fetch('/api/ai-chat', {
@@ -753,6 +767,13 @@ export default function AIChatPage() {
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {processingAttachment && (
+              <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground" role="status">
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                <span>Reading file…</span>
               </div>
             )}
 
