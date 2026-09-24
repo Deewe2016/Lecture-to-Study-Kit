@@ -209,6 +209,7 @@ export default function AIChatPage() {
     setInput('');
     setAttachments([]);
     setError('');
+    setAttachmentWarning('');
     setThinking(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
@@ -752,6 +753,12 @@ export default function AIChatPage() {
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {attachmentWarning && (
+              <div className="mb-2 text-xs text-muted-foreground" role="status">
+                {attachmentWarning}
               </div>
             )}
 
