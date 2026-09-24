@@ -215,24 +215,20 @@ async function readPdfText(data: ArrayBuffer, fileName: string) {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    timeoutId = setTimeout(() => {
-      console.warn('AI Chat PDF extraction timed out after 30 seconds:', fileName);
-      void loadingTask?.destroy().catch((error) => {
-        console.error('AI Chat PDF loading task cleanup failed:', fileName, error);
-      });
-      void pdf?.destroy().catch((error) => {
-        console.error('AI Chat PDF document cleanup failed:', fileName, error);
-      });
-    }, PDF_EXTRACTION_TIMEOUT_MS);
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        console.warn('AI Chat PDF extraction timed out after 30 seconds:', fileName);
+        void loadingTask?.destroy().catch((error) => {
+          console.error('AI Chat PDF loading task cleanup failed:', fileName, error);
+        });
+        void pdf?.destroy().catch((error) => {
+          console.error('AI Chat PDF document cleanup failed:', fileName, error);
+        });
+        reject(new Error('PDF extraction timed out after 30 seconds.'));
+      }, PDF_EXTRACTION_TIMEOUT_MS);
+    });
 
-    return await Promise.race([
-      extraction,
-      new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          reject(new Error('PDF extraction timed out after 30 seconds.'));
-        }, PDF_EXTRACTION_TIMEOUT_MS);
-      }),
-    ]);
+    return await Promise.race([extraction, timeout]);
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
