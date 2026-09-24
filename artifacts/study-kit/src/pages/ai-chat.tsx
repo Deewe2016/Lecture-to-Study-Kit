@@ -153,6 +153,7 @@ export default function AIChatPage() {
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState('');
+  const [attachmentWarning, setAttachmentWarning] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [filesModalOpen, setFilesModalOpen] = useState(false);
@@ -363,12 +364,29 @@ export default function AIChatPage() {
     setAttachmentMenuOpen(false);
     setProcessingAttachment(true);
     setError('');
-    try {
-      for (const file of picked) {
+    setAttachmentWarning('');
+    for (const file of picked) {
+      try {
         await prepareFile(file, 'upload');
+      } catch (e) {
+        console.error('AI Chat file processing error:', e);
+        const kind = kindForFile(file.name, file.type);
+        if (kind) {
+          setAttachments(current => [...current, {
+            id: makeId(),
+            name: file.name,
+            type: file.type,
+            kind,
+            content: '',
+          }]);
+        }
+        setAttachmentWarning('Could not read file, sending message without attachment');
       }
+    }
+    try {
+      // Keep the send path available even when one or more files could not be read.
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not attach that file.');
+      console.error('AI Chat attachment processing wrapper error:', e);
     } finally {
       setProcessingAttachment(false);
     }
@@ -382,6 +400,7 @@ export default function AIChatPage() {
     }
     setProcessingAttachment(true);
     setError('');
+    setAttachmentWarning('');
     try {
       const signedUrl = await getSignedFileUrl(file);
       const response = await fetch(signedUrl);
@@ -392,7 +411,18 @@ export default function AIChatPage() {
       setFilesModalOpen(false);
       setAttachmentMenuOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not attach that file.');
+      console.error('AI Chat existing-file processing error:', e);
+      setAttachmentWarning('Could not read file, sending message without attachment');
+      setAttachments(current => [...current, {
+        id: file.id || makeId(),
+        name: file.name,
+        type: file.type,
+        kind,
+        content: '',
+        storagePath: file.storage_path,
+      }]);
+      setFilesModalOpen(false);
+      setAttachmentMenuOpen(false);
     } finally {
       setProcessingAttachment(false);
     }
@@ -442,14 +472,23 @@ export default function AIChatPage() {
     abortRef.current = controller;
 
     try {
-      const requestBody = {
-        messages: history.slice(-20).map(({ role, content: text }) => ({ role, content: text })),
-        attachments: attachments.map(({ name, type, kind, content: attachmentContent }) => ({
+      let requestAttachments: Array<{ name: string; type: string; kind: Attachment['kind']; content?: string }> = [];
+      try {
+        requestAttachments = attachments.map(({ name, type, kind, content: attachmentContent }) => ({
           name,
           type,
           kind,
           content: kind === 'image' ? undefined : attachmentContent,
-        })),
+        }));
+      } catch (attachmentError) {
+        console.error('AI Chat attachment payload error:', attachmentError);
+        requestAttachments = [];
+        setAttachmentWarning('Could not read file, sending message without attachment');
+      }
+
+      const requestBody = {
+        messages: history.slice(-20).map(({ role, content: text }) => ({ role, content: text })),
+        attachments: requestAttachments,
       };
       console.log("AI Chat sending request to /api/ai-chat:", requestBody);
       const response = await fetch('/api/ai-chat', {
@@ -470,6 +509,7 @@ export default function AIChatPage() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let streamHadContent = false;
       let doneReading = false;
 
       while (!doneReading) {
@@ -490,6 +530,7 @@ export default function AIChatPage() {
               if (parsed.error) throw new Error(parsed.error);
               const delta = typeof parsed.content === 'string' ? parsed.content : '';
               if (delta) {
+                streamHadContent = true;
                 updateMessages(conversationId!, (current) => current.map((message) =>
                   message.id === assistantMessage.id
                     ? { ...message, content: message.content + delta }
@@ -504,6 +545,34 @@ export default function AIChatPage() {
             }
           }
         }
+      }
+
+      if (buffer.trim()) {
+        for (const line of buffer.split(/\r?\n/)) {
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) throw new Error(parsed.error);
+            const delta = typeof parsed.content === 'string' ? parsed.content : '';
+            if (delta) {
+              streamHadContent = true;
+              updateMessages(conversationId!, (current) => current.map((message) =>
+                message.id === assistantMessage.id
+                  ? { ...message, content: message.content + delta }
+                  : message,
+              ));
+            }
+          } catch (parseError) {
+            console.error('AI Chat final SSE parse error:', parseError);
+            throw parseError;
+          }
+        }
+      }
+
+      if (!streamHadContent) {
+        throw new Error('AI Chat returned an empty response.');
       }
     } catch (requestError) {
       console.error("AI Chat frontend request error:", requestError);
