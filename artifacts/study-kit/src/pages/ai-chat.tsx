@@ -160,43 +160,81 @@ function pdfItemsToLines(
     .map(([, line]) => line.join(' '));
 }
 
+const PDF_EXTRACTION_TIMEOUT_MS = 30_000;
+const PDF_FALLBACK_NOTE = 'Note: This PDF contains images — text extraction was limited';
+
+function pdfFallbackMessage(fileName: string) {
+  return 'The user attached a PDF called ' + fileName + '. This PDF appears to contain images or scanned content that cannot be extracted as text. Based on the filename, help the user with whatever they are asking about it.';
+}
+
 async function readPdfText(data: ArrayBuffer, fileName: string) {
   console.log('AI Chat PDF extraction started:', fileName, 'bytes:', data.byteLength);
 
+  let loadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null;
+  let pdf: Awaited<ReturnType<typeof pdfjsLib.getDocument>['promise']> | null = null;
+
+  const extraction = (async () => {
+    try {
+      loadingTask = pdfjsLib.getDocument({ data });
+      pdf = await loadingTask.promise;
+      console.log('AI Chat PDF loaded:', fileName, 'pages:', pdf.numPages);
+
+      const pages: string[] = [];
+
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        const page = await pdf.getPage(pageNumber);
+        const content = await page.getTextContent();
+
+        const textItems = content.items
+          .filter((item) => 'str' in item)
+          .map((item) => ({
+            str: item.str,
+            transform: Array.from(item.transform ?? []),
+          }));
+
+        const pageText = pdfItemsToLines(textItems).join('\\n');
+        pages.push(pageText);
+        console.log('AI Chat PDF page extracted:', fileName, pageNumber, 'chars:', pageText.length);
+      }
+
+      const text = cleanPdfText(pages.join('\\n\\n'));
+      console.log('AI Chat PDF extraction complete:', fileName, 'chars:', text.length);
+
+      if (text.length < 50) {
+        console.warn('AI Chat PDF text extraction was empty or too short:', fileName, 'chars:', text.length);
+        throw new Error('PDF text extraction returned only ' + text.length + ' characters.');
+      }
+
+      return text;
+    } catch (error) {
+      console.error('AI Chat PDF extraction failed:', fileName, error);
+      throw error;
+    }
+  })();
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
   try {
-    const pdf = await pdfjsLib.getDocument({ data }).promise;
-    console.log('AI Chat PDF loaded:', fileName, 'pages:', pdf.numPages);
+    timeoutId = setTimeout(() => {
+      console.warn('AI Chat PDF extraction timed out after 30 seconds:', fileName);
+      void loadingTask?.destroy().catch((error) => {
+        console.error('AI Chat PDF loading task cleanup failed:', fileName, error);
+      });
+      void pdf?.destroy().catch((error) => {
+        console.error('AI Chat PDF document cleanup failed:', fileName, error);
+      });
+    }, PDF_EXTRACTION_TIMEOUT_MS);
 
-    const pages: string[] = [];
-
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const content = await page.getTextContent();
-
-      const textItems = content.items
-        .filter((item) => 'str' in item)
-        .map((item) => ({
-          str: item.str,
-          transform: Array.from(item.transform ?? []),
-        }));
-
-      const pageText = pdfItemsToLines(textItems).join('\n');
-      pages.push(pageText);
-      console.log('AI Chat PDF page extracted:', fileName, pageNumber, 'chars:', pageText.length);
-    }
-
-    const text = cleanPdfText(pages.join('\n\n'));
-    console.log('AI Chat PDF extraction complete:', fileName, 'chars:', text.length);
-
-    if (!text.trim()) {
-      console.warn('AI Chat PDF contains no selectable text:', fileName);
-      throw new Error('PDF contains no selectable text.');
-    }
-
-    return text;
-  } catch (error) {
-    console.error('AI Chat PDF extraction failed:', fileName, error);
-    throw error;
+    return await Promise.race([
+      extraction,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('PDF extraction timed out after 30 seconds.'));
+        }, PDF_EXTRACTION_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
@@ -411,12 +449,25 @@ export default function AIChatPage() {
     if (kind === 'txt') {
       content = await file.text();
     } else if (kind === 'pdf') {
-      content = await readPdfText(await file.arrayBuffer(), file.name);
+      try {
+        content = await readPdfText(await file.arrayBuffer(), file.name);
+      } catch (pdfError) {
+        console.warn('AI Chat PDF fallback used:', file.name, pdfError);
+        content = pdfFallbackMessage(file.name);
+        setAttachmentWarning(PDF_FALLBACK_NOTE);
+      }
     } else {
       content = `[User attached image: ${file.name} — describe what this image likely contains based on the filename]`;
     }
 
-    if (!content.trim()) throw new Error(`${file.name} does not contain readable content.`);
+    if (!content.trim()) {
+      if (kind === 'pdf') {
+        content = pdfFallbackMessage(file.name);
+        setAttachmentWarning(PDF_FALLBACK_NOTE);
+      } else {
+        throw new Error(file.name + ' does not contain readable content.');
+      }
+    }
     setAttachments(current => [...current, { id, name: file.name, type: file.type, kind, content, storagePath }]);
   };
 
@@ -434,7 +485,16 @@ export default function AIChatPage() {
       } catch (e) {
         console.error('AI Chat file processing error:', e);
         const kind = kindForFile(file.name, file.type);
-        if (kind) {
+        if (kind === 'pdf') {
+          setAttachments(current => [...current, {
+            id: makeId(),
+            name: file.name,
+            type: file.type,
+            kind,
+            content: pdfFallbackMessage(file.name),
+          }]);
+          setAttachmentWarning(PDF_FALLBACK_NOTE);
+        } else if (kind) {
           setAttachments(current => [...current, {
             id: makeId(),
             name: file.name,
@@ -442,8 +502,8 @@ export default function AIChatPage() {
             kind,
             content: '',
           }]);
+          setAttachmentWarning('Could not process this file.');
         }
-        setAttachmentWarning('Could not read file, sending message without attachment');
       }
     }
     try {
@@ -475,15 +535,27 @@ export default function AIChatPage() {
       setAttachmentMenuOpen(false);
     } catch (e) {
       console.error('AI Chat existing-file processing error:', e);
-      setAttachmentWarning('Could not read file, sending message without attachment');
-      setAttachments(current => [...current, {
-        id: file.id || makeId(),
-        name: file.name,
-        type: file.type,
-        kind,
-        content: '',
-        storagePath: file.storage_path,
-      }]);
+      if (kind === 'pdf') {
+        setAttachmentWarning(PDF_FALLBACK_NOTE);
+        setAttachments(current => [...current, {
+          id: file.id || makeId(),
+          name: file.name,
+          type: file.type,
+          kind,
+          content: pdfFallbackMessage(file.name),
+          storagePath: file.storage_path,
+        }]);
+      } else {
+        setAttachmentWarning('Could not process this file.');
+        setAttachments(current => [...current, {
+          id: file.id || makeId(),
+          name: file.name,
+          type: file.type,
+          kind,
+          content: '',
+          storagePath: file.storage_path,
+        }]);
+      }
       setFilesModalOpen(false);
       setAttachmentMenuOpen(false);
     } finally {
@@ -550,8 +622,15 @@ export default function AIChatPage() {
         }
       } catch (attachmentError) {
         console.error('AI Chat attachment content error:', attachmentError);
-        setAttachmentWarning('Could not read file, sending message without attachment');
-        requestContent = content;
+        const pdfAttachment = attachments.find((attachment) => attachment.kind === 'pdf');
+        if (pdfAttachment) {
+          const fallback = pdfFallbackMessage(pdfAttachment.name);
+          requestContent = content + '\n\n[PDF fallback: ' + pdfAttachment.name + ']\n' + fallback;
+          setAttachmentWarning(PDF_FALLBACK_NOTE);
+        } else {
+          setAttachmentWarning('Could not process this file.');
+          requestContent = content;
+        }
       }
 
       const requestMessages = history.slice(-20).map(({ role, content: text }) => ({ role, content: text }));
