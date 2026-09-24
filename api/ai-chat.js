@@ -31,15 +31,34 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
-  const messages = Array.isArray(body.messages) ? body.messages.slice(-20) : [];
+  const rawMessages = Array.isArray(body.messages) ? body.messages.slice(-20) : [];
+  const messages = rawMessages
+    .filter((message) => message && (message.role === "user" || message.role === "assistant"))
+    .map((message) => ({
+      role: message.role,
+      content: typeof message.content === "string" ? message.content : String(message.content || ""),
+    }));
   const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 10) : [];
+
+  console.log("AI chat normalized request:", {
+    messageCount: messages.length,
+    attachmentCount: attachments.length,
+    hasUserMessage: messages.some((message) => message.role === "user"),
+  });
 
   if (!messages.length) {
     return res.status(400).json({ error: "Send a message first." });
   }
 
   try {
-    const context = attachmentContext(attachments);
+    let context = "";
+    try {
+      context = attachmentContext(attachments);
+    } catch (attachmentError) {
+      console.error("AI Chat attachment context error:", attachmentError);
+      context = "";
+    }
+
     const system = [
       "You are a helpful study tutor and general-purpose AI assistant.",
       "Answer the user's question directly.",
@@ -51,6 +70,9 @@ export default async function handler(req, res) {
         : "",
     ].filter(Boolean).join("\n\n");
 
+    const model = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
+    console.log("AI Chat calling Groq with model:", model);
+
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -58,7 +80,7 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+        model,
         temperature: 0.2,
         stream: true,
         messages: [{ role: "system", content: system }, ...messages],
@@ -96,6 +118,8 @@ export default async function handler(req, res) {
       res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
     };
 
+    let sentContent = false;
+
     while (true) {
       const { value, done } = await reader.read();
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
@@ -123,6 +147,7 @@ export default async function handler(req, res) {
 
             const content = parsed?.choices?.[0]?.delta?.content;
             if (typeof content === "string" && content) {
+              sentContent = true;
               res.write(`data: ${JSON.stringify({ content })}\n\n`);
             }
           } catch (parseError) {
@@ -149,6 +174,12 @@ export default async function handler(req, res) {
           console.error("Could not parse final Groq SSE event:", parseError);
         }
       }
+    }
+
+    if (!sentContent) {
+      const errorMessage = "Groq returned an empty response.";
+      console.error(errorMessage);
+      res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
     }
 
     res.write("data: [DONE]\n\n");
