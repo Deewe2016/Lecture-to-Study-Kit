@@ -163,8 +163,14 @@ function pdfItemsToLines(
 const PDF_EXTRACTION_TIMEOUT_MS = 30_000;
 const PDF_FALLBACK_NOTE = 'Note: This PDF contains images — text extraction was limited';
 
-function pdfFallbackMessage(fileName: string) {
-  return 'The user attached a PDF called ' + fileName + '. This PDF appears to contain images or scanned content that cannot be extracted as text. Based on the filename, help the user with whatever they are asking about it.';
+function pdfFallbackMessage(fileName: string, extractedText = '') {
+  return (
+    'The user uploaded a PDF called ' +
+    fileName +
+    '. Here are the questions from the PDF: ' +
+    extractedText +
+    '\n\nNote: Some problems may have diagrams not shown here.'
+  );
 }
 
 async function readPdfText(data: ArrayBuffer, fileName: string) {
@@ -192,18 +198,17 @@ async function readPdfText(data: ArrayBuffer, fileName: string) {
             transform: Array.from(item.transform ?? []),
           }));
 
-        const pageText = pdfItemsToLines(textItems).join('\\n');
-        pages.push(pageText);
-        console.log('AI Chat PDF page extracted:', fileName, pageNumber, 'chars:', pageText.length);
+        pages.push(
+          pdfItemsToLines(
+            textItems,
+          ).join('\n'),
+        );
       }
 
-      const text = cleanPdfText(pages.join('\\n\\n'));
+      const text = cleanPdfText(
+        pages.join('\n\n'),
+      );
       console.log('AI Chat PDF extraction complete:', fileName, 'chars:', text.length);
-
-      if (text.length < 50) {
-        console.warn('AI Chat PDF text extraction was empty or too short:', fileName, 'chars:', text.length);
-        throw new Error('PDF text extraction returned only ' + text.length + ' characters.');
-      }
 
       return text;
     } catch (error) {
@@ -447,9 +452,10 @@ export default function AIChatPage() {
     } else if (kind === 'pdf') {
       try {
         content = await readPdfText(await file.arrayBuffer(), file.name);
+        console.log('AI Chat extracted PDF text length:', file.name, content.length);
       } catch (pdfError) {
         console.warn('AI Chat PDF fallback used:', file.name, pdfError);
-        content = pdfFallbackMessage(file.name);
+        content = pdfFallbackMessage(file.name, '');
         setAttachmentWarning(PDF_FALLBACK_NOTE);
       }
     } else {
@@ -487,7 +493,7 @@ export default function AIChatPage() {
             name: file.name,
             type: file.type,
             kind,
-            content: pdfFallbackMessage(file.name),
+            content: pdfFallbackMessage(file.name, ''),
           }]);
           setAttachmentWarning(PDF_FALLBACK_NOTE);
         } else if (kind) {
@@ -538,7 +544,7 @@ export default function AIChatPage() {
           name: file.name,
           type: file.type,
           kind,
-          content: pdfFallbackMessage(file.name),
+          content: pdfFallbackMessage(file.name, ''),
           storagePath: file.storage_path,
         }]);
       } else {
@@ -611,7 +617,10 @@ export default function AIChatPage() {
             if (!attachmentContent) {
               throw new Error(`No extracted content was available for ${attachment.name}.`);
             }
-            return `[File content: ${attachment.name}]\\n${attachmentContent.slice(0, 6000)}`;
+            const diagramNote = attachment.kind === 'pdf'
+              ? '\\n\\nNote: Some problems may have diagrams not shown here.'
+              : '';
+            return `[File content: ${attachment.name}]\\n${attachmentContent.slice(0, 6000)}${diagramNote}`;
           }).join('\\n\\n');
 
           requestContent = `${content}\\n\\n${attachmentBlocks}`;
@@ -620,7 +629,7 @@ export default function AIChatPage() {
         console.error('AI Chat attachment content error:', attachmentError);
         const pdfAttachment = attachments.find((attachment) => attachment.kind === 'pdf');
         if (pdfAttachment) {
-          const fallback = pdfFallbackMessage(pdfAttachment.name);
+          const fallback = pdfFallbackMessage(pdfAttachment.name, String(pdfAttachment.content || '').trim());
           requestContent = content + '\n\n[PDF fallback: ' + pdfAttachment.name + ']\n' + fallback;
           setAttachmentWarning(PDF_FALLBACK_NOTE);
         } else {
