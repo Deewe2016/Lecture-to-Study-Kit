@@ -161,7 +161,7 @@ function pdfItemsToLines(
 }
 
 const PDF_EXTRACTION_TIMEOUT_MS = 30_000;
-const PDF_FALLBACK_NOTE = 'Note: This PDF contains images — text extraction was limited';
+const PDF_FALLBACK_NOTE = 'Note: Some problems may have diagrams not shown here.';
 
 function pdfFallbackMessage(fileName: string, extractedText = '') {
   return (
