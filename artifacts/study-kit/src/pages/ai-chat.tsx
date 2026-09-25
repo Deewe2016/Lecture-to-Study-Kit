@@ -453,6 +453,12 @@ export default function AIChatPage() {
       try {
         content = await readPdfText(await file.arrayBuffer(), file.name);
         console.log('AI Chat extracted PDF text length:', file.name, content.length);
+        if (content.length < 50) {
+          console.warn('AI Chat PDF text extraction was empty or too short:', file.name, 'chars:', content.length);
+          const extractedText = content;
+          content = pdfFallbackMessage(file.name, extractedText);
+          setAttachmentWarning(PDF_FALLBACK_NOTE);
+        }
       } catch (pdfError) {
         console.warn('AI Chat PDF fallback used:', file.name, pdfError);
         content = pdfFallbackMessage(file.name, '');
