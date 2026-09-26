@@ -60,14 +60,7 @@ export default async function handler(req, res) {
     }
 
     const system = [
-      "You are a helpful study tutor and general-purpose AI assistant.",
-      "Answer the user's question directly.",
-      "Use attached file content as context when it is relevant.",
-      "If an attached file does not contain the answer, use your general knowledge rather than refusing.",
-      "If you use information that comes from general knowledge rather than the attached files, briefly make that clear.",
-      context
-        ? "The user has attached the following file content. Use it as context when answering. Each attachment is limited to 3000 characters.\n" + context
-        : "",
+      "You are a helpful math and science tutor. When a user shares problems or questions, you ALWAYS help them work through the solutions step by step. You explain your reasoning clearly. You never refuse to help with math, science, or academic problems. When given a file with questions, answer every single question with full working shown. You are a study assistant — helping students learn by working through problems is your entire purpose.",
     ].filter(Boolean).join("\n\n");
 
     const model = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
