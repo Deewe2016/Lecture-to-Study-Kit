@@ -452,10 +452,11 @@ export default function AIChatPage() {
     } else if (kind === 'pdf') {
       try {
         content = await readPdfText(await file.arrayBuffer(), file.name);
-        console.log('AI Chat extracted PDF text length:', file.name, content.length);
-        if (content.length < 50) {
+        const extractedText = content;
+        console.log('PDF extraction result:', { textLength: extractedText.length, preview: extractedText.slice(0, 200) });
+        console.log('AI Chat extracted PDF text length:', file.name, extractedText.length);
+        if (extractedText.length < 50) {
           console.warn('AI Chat PDF text extraction was empty or too short:', file.name, 'chars:', content.length);
-          const extractedText = content;
           content = pdfFallbackMessage(file.name, extractedText);
           setAttachmentWarning(PDF_FALLBACK_NOTE);
         }
@@ -615,33 +616,22 @@ export default function AIChatPage() {
     abortRef.current = controller;
 
     try {
-      let requestContent = content;
-      try {
-        if (attachments.length) {
-          const attachmentBlocks = attachments.map((attachment) => {
-            const attachmentContent = String(attachment.content || '').trim();
-            if (!attachmentContent) {
-              throw new Error(`No extracted content was available for ${attachment.name}.`);
-            }
-            const diagramNote = attachment.kind === 'pdf'
-              ? '\\n\\nNote: Some problems may have diagrams not shown here.'
-              : '';
-            return `[File content: ${attachment.name}]\\n${attachmentContent.slice(0, 6000)}${diagramNote}`;
-          }).join('\\n\\n');
+      let messageWithFile = content;
+      if (attachments.length) {
+        const fileBlocks = attachments.map((attachment) => {
+          const extractedText = String(attachment.content || '').trim();
+          if (!extractedText) {
+            throw new Error(`No extracted content was available for ${attachment.name}.`);
+          }
 
-          requestContent = `${content}\\n\\n${attachmentBlocks}`;
-        }
-      } catch (attachmentError) {
-        console.error('AI Chat attachment content error:', attachmentError);
-        const pdfAttachment = attachments.find((attachment) => attachment.kind === 'pdf');
-        if (pdfAttachment) {
-          const fallback = pdfFallbackMessage(pdfAttachment.name, String(pdfAttachment.content || '').trim());
-          requestContent = content + '\n\n[PDF fallback: ' + pdfAttachment.name + ']\n' + fallback;
-          setAttachmentWarning(PDF_FALLBACK_NOTE);
-        } else {
-          setAttachmentWarning('Could not process this file.');
-          requestContent = content;
-        }
+          const diagramNote = attachment.kind === 'pdf'
+            ? '\\n\\nNote: Some problems may have diagrams not shown here.'
+            : '';
+
+          return `[Attached file: ${attachment.name}]\\n${extractedText.slice(0, 6000)}${diagramNote}`;
+        }).join('\\n\\n');
+
+        messageWithFile = `${content}\\n\\n${fileBlocks}`;
       }
 
       const requestMessages = history.slice(-20).map(({ role, content: text }) => ({ role, content: text }));
@@ -649,9 +639,11 @@ export default function AIChatPage() {
       if (lastUserIndex >= 0 && requestMessages[lastUserIndex].role === 'user') {
         requestMessages[lastUserIndex] = {
           role: 'user',
-          content: requestContent,
+          content: messageWithFile,
         };
       }
+
+      console.log('Messages sent to Groq:', JSON.stringify(requestMessages.slice(-3), null, 2));
 
       const requestBody = {
         messages: requestMessages,
