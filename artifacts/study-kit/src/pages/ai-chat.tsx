@@ -11,7 +11,7 @@ type Attachment = {
   name: string;
   type: string;
   kind: 'pdf' | 'txt' | 'image';
-  content?: string;
+  extractedText?: string;
   storagePath?: string;
 };
 
@@ -477,7 +477,7 @@ export default function AIChatPage() {
         throw new Error(file.name + ' does not contain readable content.');
       }
     }
-    setAttachments(current => [...current, { id, name: file.name, type: file.type, kind, content, storagePath }]);
+    setAttachments(current => [...current, { id, name: file.name, type: file.type, kind, extractedText: content, storagePath }]);
   };
 
   const handleFilePicker = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -500,7 +500,7 @@ export default function AIChatPage() {
             name: file.name,
             type: file.type,
             kind,
-            content: pdfFallbackMessage(file.name, ''),
+            extractedText: pdfFallbackMessage(file.name, ''),
           }]);
           setAttachmentWarning(PDF_FALLBACK_NOTE);
         } else if (kind) {
@@ -509,7 +509,7 @@ export default function AIChatPage() {
             name: file.name,
             type: file.type,
             kind,
-            content: '',
+            extractedText: '',
           }]);
           setAttachmentWarning('Could not process this file.');
         }
@@ -551,7 +551,7 @@ export default function AIChatPage() {
           name: file.name,
           type: file.type,
           kind,
-          content: pdfFallbackMessage(file.name, ''),
+          extractedText: pdfFallbackMessage(file.name, ''),
           storagePath: file.storage_path,
         }]);
       } else {
@@ -561,7 +561,7 @@ export default function AIChatPage() {
           name: file.name,
           type: file.type,
           kind,
-          content: '',
+          extractedText: '',
           storagePath: file.storage_path,
         }]);
       }
@@ -616,30 +616,23 @@ export default function AIChatPage() {
     abortRef.current = controller;
 
     try {
-      let messageWithFile = content;
-      if (attachments.length) {
-        const fileBlocks = attachments.map((attachment) => {
-          const extractedText = String(attachment.content || '').trim();
-          if (!extractedText) {
-            throw new Error(`No extracted content was available for ${attachment.name}.`);
+      let finalContent = content;
+      if (attachments && attachments.length > 0) {
+        for (const attachment of attachments) {
+          if (attachment.extractedText) {
+            finalContent += `\n\n[File: ${attachment.name}]\n${attachment.extractedText.slice(0, 6000)}`;
           }
-
-          const diagramNote = attachment.kind === 'pdf'
-            ? '\\n\\nNote: Some problems may have diagrams not shown here.'
-            : '';
-
-          return `[Attached file: ${attachment.name}]\\n${extractedText.slice(0, 6000)}${diagramNote}`;
-        }).join('\\n\\n');
-
-        messageWithFile = `${content}\\n\\n${fileBlocks}`;
+        }
       }
+
+      console.log('Final content length:', finalContent.length);
 
       const requestMessages = history.slice(-20).map(({ role, content: text }) => ({ role, content: text }));
       const lastUserIndex = requestMessages.length - 1;
       if (lastUserIndex >= 0 && requestMessages[lastUserIndex].role === 'user') {
         requestMessages[lastUserIndex] = {
           role: 'user',
-          content: messageWithFile,
+          content: finalContent,
         };
       }
 
