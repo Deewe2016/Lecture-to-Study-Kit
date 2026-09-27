@@ -590,12 +590,18 @@ export default function AIChatPage() {
 
     const currentConversation = conversations.find((conversation) => conversation.id === conversationId);
     const sentAttachments = attachments.map(({ id, name, type }) => ({ id, name, type }));
+    const pendingAttachments = attachments;
+    const fileTexts = (pendingAttachments ?? [])
+      .filter(a => a.extractedText)
+      .map(a => `[File: ${a.name}]\\n${a.extractedText!.slice(0, 6000)}`)
+      .join('\\n\\n');
+    const finalContent = fileTexts ? `${content}\\n\\n${fileTexts}` : content;
     const history = [
       ...(currentConversation?.messages || []),
       {
         id: makeId(),
         role: 'user' as const,
-        content,
+        content: finalContent,
         attachments: sentAttachments,
       },
     ];
@@ -616,15 +622,6 @@ export default function AIChatPage() {
     abortRef.current = controller;
 
     try {
-      let finalContent = content;
-      if (attachments && attachments.length > 0) {
-        for (const attachment of attachments) {
-          if (attachment.extractedText) {
-            finalContent += `\n\n[File: ${attachment.name}]\n${attachment.extractedText.slice(0, 6000)}`;
-          }
-        }
-      }
-
       console.log('Final content length:', finalContent.length);
 
       const requestMessages = history.slice(-20).map(({ role, content: text }) => ({ role, content: text }));
