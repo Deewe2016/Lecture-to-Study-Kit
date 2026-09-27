@@ -7,6 +7,7 @@ import {
   FileText,
   MapPin,
   Plus,
+  Repeat,
   Search,
   Users,
   X,
@@ -26,6 +27,27 @@ type CalendarEvent = {
   all_day: boolean;
   created_at: string;
   updated_at: string;
+  recurrence_rule: RecurrenceRule | null;
+  series_id?: string;
+  occurrence_key?: string;
+};
+
+
+type RecurrenceEnd = {
+  type: 'never' | 'date' | 'count';
+  date?: string;
+  count?: number;
+};
+
+type RecurrenceRule = {
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  interval: number;
+  byWeekday?: number[];
+  dayOfMonth?: number;
+  month?: number;
+  end?: RecurrenceEnd;
+  exceptions?: string[];
+  overrides?: Record<string, Partial<CalendarEvent>>;
 };
 
 type UserRow = { id: string; email: string; display_name: string };
@@ -138,6 +160,106 @@ function toIso(value: string) {
 
 function formatInputDate(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+
+function cloneDateWithLocalDay(date: Date, day: Date) {
+  const next = new Date(date);
+  next.setFullYear(day.getFullYear(), day.getMonth(), day.getDate());
+  return next;
+}
+
+function occurrenceMatches(rule: RecurrenceRule, anchor: Date, candidate: Date) {
+  if (candidate < startOfDay(anchor)) return false;
+  const interval = Math.max(1, rule.interval || 1);
+  const weekday = candidate.getDay();
+
+  if (rule.frequency === 'daily') {
+    const diff = Math.round((startOfDay(candidate).getTime() - startOfDay(anchor).getTime()) / 86400000);
+    return diff % interval === 0 && (!rule.byWeekday?.length || rule.byWeekday.includes(weekday));
+  }
+
+  if (rule.frequency === 'weekly') {
+    const anchorWeek = startOfWeek(anchor).getTime();
+    const candidateWeek = startOfWeek(candidate).getTime();
+    const weeks = Math.round((candidateWeek - anchorWeek) / (7 * 86400000));
+    return weeks >= 0 && weeks % interval === 0 && (rule.byWeekday?.length ? rule.byWeekday.includes(weekday) : weekday === anchor.getDay());
+  }
+
+  if (rule.frequency === 'monthly') {
+    const months = (candidate.getFullYear() - anchor.getFullYear()) * 12 + candidate.getMonth() - anchor.getMonth();
+    const day = rule.dayOfMonth || anchor.getDate();
+    return months >= 0 && months % interval === 0 && candidate.getDate() === day;
+  }
+
+  const years = candidate.getFullYear() - anchor.getFullYear();
+  const month = rule.month || anchor.getMonth() + 1;
+  const day = rule.dayOfMonth || anchor.getDate();
+  return years >= 0 && years % interval === 0 && candidate.getMonth() + 1 === month && candidate.getDate() === day;
+}
+
+function generateEventOccurrences(baseEvents: CalendarEvent[], rangeStart: Date, rangeEnd: Date) {
+  const output: CalendarEvent[] = [];
+
+  for (const event of baseEvents) {
+    if (!event.recurrence_rule) {
+      if (eventOverlapsRange(event, rangeStart, rangeEnd)) output.push(event);
+      continue;
+    }
+
+    const rule = event.recurrence_rule;
+    const anchor = new Date(event.start_at);
+    const duration = new Date(event.end_at).getTime() - anchor.getTime();
+    const exceptions = new Set(rule.exceptions || []);
+    const overrides = rule.overrides || {};
+    let occurrenceCount = 0;
+
+    for (let day = startOfDay(anchor); day < rangeEnd; day = addDays(day, 1)) {
+      if (!occurrenceMatches(rule, anchor, day)) continue;
+
+      const key = dateKey(day);
+      occurrenceCount += 1;
+
+      if (rule.end?.type === 'count' && occurrenceCount > Math.max(0, rule.end.count || 0)) break;
+      if (rule.end?.type === 'date' && rule.end.date && key > rule.end.date) break;
+      if (exceptions.has(key)) continue;
+
+      const start = cloneDateWithLocalDay(anchor, day);
+      const generated: CalendarEvent = {
+        ...event,
+        id: event.id + '::' + key,
+        series_id: event.id,
+        occurrence_key: key,
+        start_at: start.toISOString(),
+        end_at: new Date(start.getTime() + duration).toISOString(),
+      };
+
+      const override = overrides[key];
+      if (override) Object.assign(generated, override);
+      if (eventOverlapsRange(generated, rangeStart, rangeEnd)) output.push(generated);
+    }
+  }
+
+  return output.sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+}
+
+function eventOverlapsRange(event: CalendarEvent, rangeStart: Date, rangeEnd: Date) {
+  const start = new Date(event.start_at).getTime();
+  const end = new Date(event.end_at).getTime();
+  return start < rangeEnd.getTime() && end > rangeStart.getTime();
+}
+
+function calendarRange(date: Date, view: 'month' | 'week' | 'day') {
+  if (view === 'month') {
+    const start = startOfWeek(new Date(date.getFullYear(), date.getMonth(), 1));
+    return { start, end: addDays(start, 42) };
+  }
+  if (view === 'week') {
+    const start = startOfWeek(date);
+    return { start, end: addDays(start, 7) };
+  }
+  const start = startOfDay(date);
+  return { start, end: addDays(start, 1) };
 }
 
 function eventOverlapsDay(event: CalendarEvent, date: Date) {
@@ -273,6 +395,7 @@ function EventChip({ event, onClick, compact = false }: { event: CalendarEvent; 
       title={event.title}
     >
       {!event.all_day && <span className="mr-1 opacity-80">{timeLabel(event.start_at)}</span>}
+      {event.recurrence_rule && <Repeat size={10} className="mr-1 inline opacity-90" />}
       {event.title}
     </button>
   );
@@ -382,7 +505,7 @@ function TimeGrid({
                       left,
                     }}
                   >
-                    <div className="truncate">{item.event.title}</div>
+                    <div className="truncate">{item.event.recurrence_rule && <Repeat size={10} className="mr-1 inline opacity-90" />}{item.event.title}</div>
                     <div className="mt-0.5 opacity-80">{timeLabel(item.event.start_at)}</div>
                   </button>
                 );
@@ -405,8 +528,9 @@ function EventEditor({
   initialEvent: CalendarEvent | null;
   selectedDate: Date;
   onClose: () => void;
-  onSaved: (event: CalendarEvent) => void;
-  onDeleted: (id: string) => void;
+  editScope: 'series' | 'occurrence';
+  onSaved: () => void;
+  onRequestDelete: (event: CalendarEvent) => void;
 }) {
   const me = getStoredUser();
   const [title, setTitle] = useState(initialEvent?.title || '');
@@ -416,6 +540,23 @@ function EventEditor({
   const [location, setLocation] = useState(initialEvent?.location || '');
   const [description, setDescription] = useState(initialEvent?.description || '');
   const [allDay, setAllDay] = useState(initialEvent?.all_day || false);
+  const initialRule = initialEvent?.recurrence_rule || null;
+  const initialWeekday = new Date(initialEvent?.start_at || start).getDay();
+  const [repeatPreset, setRepeatPreset] = useState<'none' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'weekdays' | 'custom'>(() => {
+    if (!initialRule) return 'none';
+    if (initialRule.frequency === 'daily' && initialRule.interval === 1 && !initialRule.byWeekday?.length) return 'daily';
+    if (initialRule.frequency === 'weekly' && initialRule.interval === 1 && initialRule.byWeekday?.length === 1) return 'weekly';
+    if (initialRule.frequency === 'monthly' && initialRule.interval === 1) return 'monthly';
+    if (initialRule.frequency === 'yearly' && initialRule.interval === 1) return 'yearly';
+    if (initialRule.frequency === 'weekly' && initialRule.interval === 1 && JSON.stringify(initialRule.byWeekday) === JSON.stringify([1,2,3,4,5])) return 'weekdays';
+    return 'custom';
+  });
+  const [customFrequency, setCustomFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>(initialRule?.frequency || 'weekly');
+  const [customInterval, setCustomInterval] = useState(Math.max(1, initialRule?.interval || 1));
+  const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>(initialRule?.byWeekday?.length ? initialRule.byWeekday : [initialWeekday]);
+  const [customEndType, setCustomEndType] = useState<'never' | 'date' | 'count'>(initialRule?.end?.type || 'never');
+  const [customEndDate, setCustomEndDate] = useState(initialRule?.end?.date || '');
+  const [customOccurrences, setCustomOccurrences] = useState(initialRule?.end?.count || 10);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [invites, setInvites] = useState<UserRow[]>([]);
   const [inviteSearch, setInviteSearch] = useState('');
@@ -486,6 +627,38 @@ function EventEditor({
     setError('');
     try {
       let event = initialEvent;
+      const baseRule = event?.recurrence_rule || null;
+      let recurrenceRule: RecurrenceRule | null = null;
+      if (editScope === 'occurrence' && baseRule) {
+        recurrenceRule = {
+          ...baseRule,
+          exceptions: [...(baseRule.exceptions || [])],
+          overrides: { ...(baseRule.overrides || {}) },
+        };
+        recurrenceRule.overrides![initialEvent!.occurrence_key!] = {
+          title: title.trim(),
+          start_at: toIso(start),
+          end_at: toIso(end),
+          color,
+          location: location.trim() || null,
+          description: description.trim() || null,
+          all_day: allDay,
+        };
+      } else if (repeatPreset !== 'none') {
+        recurrenceRule = {
+          frequency: repeatPreset === 'weekdays' ? 'weekly' : repeatPreset === 'weekly' ? 'weekly' : repeatPreset,
+          interval: repeatPreset === 'weekdays' ? 1 : repeatPreset === 'custom' ? customInterval : 1,
+          byWeekday: repeatPreset === 'weekdays' ? [1,2,3,4,5] : repeatPreset === 'weekly' ? [new Date(start).getDay()] : repeatPreset === 'custom' && customFrequency === 'weekly' ? [...selectedWeekdays].sort() : undefined,
+          dayOfMonth: repeatPreset === 'monthly' || (repeatPreset === 'custom' && customFrequency === 'monthly') ? new Date(start).getDate() : undefined,
+          month: repeatPreset === 'yearly' || (repeatPreset === 'custom' && customFrequency === 'yearly') ? new Date(start).getMonth() + 1 : undefined,
+          end: repeatPreset === 'custom'
+            ? { type: customEndType, ...(customEndType === 'date' ? { date: customEndDate } : {}), ...(customEndType === 'count' ? { count: Math.max(1, customOccurrences) } : {}) }
+            : { type: 'never' },
+        };
+        if (repeatPreset === 'daily') recurrenceRule.byWeekday = undefined;
+        if (repeatPreset === 'custom') recurrenceRule.frequency = customFrequency;
+      }
+
       const payload = {
         owner_id: me.id,
         title: title.trim(),
@@ -496,10 +669,12 @@ function EventEditor({
         location: location.trim() || null,
         description: description.trim() || null,
         all_day: allDay,
+        recurrence_rule: recurrenceRule,
       };
 
-      if (event) {
-        event = await api<CalendarEvent[]>(`/rest/v1/calendar_events?id=eq.${event.id}`, {
+      const targetId = editScope === 'occurrence' ? initialEvent!.series_id! : event?.id;
+      if (targetId) {
+        event = await api<CalendarEvent[]>(`/rest/v1/calendar_events?id=eq.${targetId}`, {
           method: 'PATCH',
           headers: { Prefer: 'return=representation' },
           body: JSON.stringify(payload),
@@ -534,22 +709,9 @@ function EventEditor({
         });
       }
 
-      onSaved(event);
+      onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save event.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const remove = async () => {
-    if (!initialEvent) return;
-    setSaving(true);
-    try {
-      await api(`/rest/v1/calendar_events?id=eq.${initialEvent.id}`, { method: 'DELETE' });
-      onDeleted(initialEvent.id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not delete event.');
     } finally {
       setSaving(false);
     }
@@ -565,7 +727,7 @@ function EventEditor({
           <span className="text-xs font-medium text-muted-foreground">{initialEvent ? 'Edit event' : 'Create event'}</span>
         </div>
         <div className="flex items-center gap-2">
-          {initialEvent && <button onClick={remove} disabled={saving} className="rounded-lg px-4 py-2 text-xs font-semibold text-red-400 hover:bg-red-400/10 disabled:opacity-50">Delete</button>}
+          {initialEvent && <button onClick={() => onRequestDelete(initialEvent)} disabled={saving} className="rounded-lg px-4 py-2 text-xs font-semibold text-red-400 hover:bg-red-400/10 disabled:opacity-50">Delete</button>}
           <button onClick={onClose} disabled={saving} className="rounded-lg border border-border px-4 py-2 text-xs font-semibold hover:bg-secondary">Cancel</button>
           <button onClick={save} disabled={saving} className="rounded-lg bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
         </div>
@@ -697,8 +859,9 @@ export default function CalendarPage() {
   const me = getStoredUser();
   const [view, setView] = useState<'month' | 'week' | 'day'>('month');
   const [date, setDate] = useState(new Date());
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [editor, setEditor] = useState<{ event: CalendarEvent | null; date: Date } | null>(null);
+  const [baseEvents, setBaseEvents] = useState<CalendarEvent[]>([]);
+  const [editor, setEditor] = useState<{ event: CalendarEvent | null; date: Date; editScope: 'series' | 'occurrence' } | null>(null);
+  const [seriesDialog, setSeriesDialog] = useState<{ event: CalendarEvent; action: 'edit' | 'delete' } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -725,7 +888,7 @@ export default function CalendarPage() {
 
       const byId = new Map<string, CalendarEvent>();
       [...owned, ...invited].forEach((event) => byId.set(event.id, event));
-      setEvents([...byId.values()].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()));
+      setBaseEvents([...byId.values()].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load calendar.');
     } finally {
@@ -735,6 +898,8 @@ export default function CalendarPage() {
 
   useEffect(() => { void loadEvents(); }, [me?.id]);
 
+  const range = calendarRange(date, view);
+  const events = useMemo(() => generateEventOccurrences(baseEvents, range.start, range.end), [baseEvents, range.start.getTime(), range.end.getTime()]);
   const visibleTitle = view === 'month' ? monthLabel(date) : view === 'week' ? `Week of ${shortDate(startOfWeek(date))}` : fullDateLabel(date);
 
   const navigate = (direction: number) => {
@@ -743,8 +908,43 @@ export default function CalendarPage() {
     else setDate(addDays(date, direction));
   };
 
-  const openNew = () => setEditor({ event: null, date });
-  const openEvent = (event: CalendarEvent) => setEditor({ event, date: new Date(event.start_at) });
+  const openNew = () => setEditor({ event: null, date, editScope: 'series' });
+  const openEvent = (event: CalendarEvent) => {
+    if (event.recurrence_rule && event.series_id && event.occurrence_key) setSeriesDialog({ event, action: 'edit' });
+    else setEditor({ event, date: new Date(event.start_at), editScope: 'series' });
+  };
+
+  const deleteEvent = async (event: CalendarEvent, scope: 'series' | 'occurrence') => {
+    try {
+      if (scope === 'series') {
+        await api(`/rest/v1/calendar_events?id=eq.${event.series_id || event.id}`, { method: 'DELETE' });
+      } else {
+        const seriesId = event.series_id || event.id;
+        const rows = await api<CalendarEvent[]>(`/rest/v1/calendar_events?id=eq.${seriesId}`);
+        const series = rows[0];
+        if (!series?.recurrence_rule || !event.occurrence_key) return;
+        const rule = { ...series.recurrence_rule, exceptions: [...(series.recurrence_rule.exceptions || []), event.occurrence_key] };
+        await api(`/rest/v1/calendar_events?id=eq.${seriesId}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ recurrence_rule: rule }) });
+      }
+      setSeriesDialog(null);
+      setEditor(null);
+      await loadEvents();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete event.');
+    }
+  };
+
+  const requestDelete = (event: CalendarEvent) => {
+    if (event.recurrence_rule && event.series_id && event.occurrence_key) setSeriesDialog({ event, action: 'delete' });
+    else void deleteEvent(event, 'series');
+  };
+
+  const chooseEditScope = (scope: 'series' | 'occurrence') => {
+    if (!seriesDialog) return;
+    const event = seriesDialog.event;
+    setEditor({ event, date: new Date(event.start_at), editScope: scope });
+    setSeriesDialog(null);
+  };
 
   return (
     <main className="min-h-[calc(100dvh-64px)] bg-background">
@@ -789,13 +989,37 @@ export default function CalendarPage() {
         </div>
       </div>
 
+      {seriesDialog && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-xl">
+            <p className="font-serif text-xl">{seriesDialog.action === 'edit' ? 'Edit recurring event' : 'Delete recurring event'}</p>
+            <p className="mt-2 text-xs text-muted-foreground">{seriesDialog.action === 'edit' ? 'Would you like to edit this event or edit all events in the series?' : 'Would you like to delete this event or delete all events in the series?'}</p>
+            <div className="mt-5 grid gap-2">
+              {seriesDialog.action === 'edit' ? (
+                <>
+                  <button onClick={() => chooseEditScope('occurrence')} className="rounded-lg bg-primary px-4 py-3 text-xs font-semibold text-primary-foreground">Edit this event</button>
+                  <button onClick={() => chooseEditScope('series')} className="rounded-lg border border-border px-4 py-3 text-xs font-semibold hover:bg-secondary">Edit all events in series</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => void deleteEvent(seriesDialog.event, 'occurrence')} className="rounded-lg bg-primary px-4 py-3 text-xs font-semibold text-primary-foreground">Delete this event</button>
+                  <button onClick={() => void deleteEvent(seriesDialog.event, 'series')} className="rounded-lg border border-border px-4 py-3 text-xs font-semibold hover:bg-secondary">Delete all events in series</button>
+                </>
+              )}
+              <button onClick={() => setSeriesDialog(null)} className="rounded-lg px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editor && (
         <EventEditor
           initialEvent={editor.event}
           selectedDate={editor.date}
+          editScope={editor.editScope}
           onClose={() => setEditor(null)}
-          onSaved={(event) => { setEvents((current) => { const next = current.filter((item) => item.id !== event.id); return [...next, event].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()); }); setEditor(null); }}
-          onDeleted={(id) => { setEvents((current) => current.filter((event) => event.id !== id)); setEditor(null); }}
+          onSaved={() => { setEditor(null); void loadEvents(); }}
+          onRequestDelete={requestDelete}
         />
       )}
     </main>
