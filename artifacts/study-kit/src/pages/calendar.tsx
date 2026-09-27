@@ -756,6 +756,55 @@ function EventEditor({
                 All day
               </label>
 
+              <section className="space-y-3">
+                <label className="block text-xs">
+                  <span className="mb-2 block font-semibold">Repeat</span>
+                  <select value={repeatPreset} onChange={(e) => setRepeatPreset(e.target.value as typeof repeatPreset)} disabled={editScope === 'occurrence'} className="h-11 w-full rounded-lg border border-input bg-card px-3 text-sm disabled:opacity-60">
+                    <option value="none">Does not repeat</option>
+                    <option value="daily">Every day</option>
+                    <option value="weekly">Every week on {new Date(start).toLocaleDateString(undefined, { weekday: 'long' })}</option>
+                    <option value="monthly">Every month on the {new Date(start).getDate()}</option>
+                    <option value="yearly">Every year on {new Date(start).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</option>
+                    <option value="weekdays">Every weekday (Monday to Friday)</option>
+                    <option value="custom">Custom...</option>
+                  </select>
+                  {editScope === 'occurrence' && <p className="mt-1 text-[10px] text-muted-foreground">Edit all events in the series to change the repeat rule.</p>}
+                </label>
+                {repeatPreset === 'custom' && editScope !== 'occurrence' && (
+                  <div className="space-y-4 rounded-lg border border-border bg-card p-4">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span>Repeat every</span>
+                      <input type="number" min={1} value={customInterval} onChange={(e) => setCustomInterval(Math.max(1, Number(e.target.value) || 1))} className="h-9 w-20 rounded-md border border-input bg-background px-2" />
+                      <select value={customFrequency} onChange={(e) => setCustomFrequency(e.target.value as typeof customFrequency)} className="h-9 rounded-md border border-input bg-background px-2">
+                        <option value="daily">day(s)</option>
+                        <option value="weekly">week(s)</option>
+                        <option value="monthly">month(s)</option>
+                        <option value="yearly">year(s)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-xs font-semibold">Repeat on</p>
+                      <div className="grid grid-cols-7 gap-1">
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+                          <label key={day} className="flex cursor-pointer flex-col items-center gap-1 rounded-md border border-border px-1 py-2 text-[10px]">
+                            <input type="checkbox" checked={selectedWeekdays.includes(index)} onChange={(e) => setSelectedWeekdays((current) => e.target.checked ? [...new Set([...current, index])] : current.filter((item) => item !== index))} />
+                            {day}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-xs font-semibold">Ends</p>
+                      <div className="space-y-2 text-xs">
+                        <label className="flex items-center gap-2"><input type="radio" checked={customEndType === 'never'} onChange={() => setCustomEndType('never')} /> Never</label>
+                        <label className="flex items-center gap-2"><input type="radio" checked={customEndType === 'date'} onChange={() => setCustomEndType('date')} /> On <input type="date" value={customEndDate} onChange={(e) => setCustomEndDate(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2" /></label>
+                        <label className="flex items-center gap-2"><input type="radio" checked={customEndType === 'count'} onChange={() => setCustomEndType('count')} /> After <input type="number" min={1} value={customOccurrences} onChange={(e) => setCustomOccurrences(Math.max(1, Number(e.target.value) || 1))} className="h-9 w-20 rounded-md border border-input bg-background px-2" /> occurrences</label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+
               <div>
                 <p className="mb-2 text-xs font-semibold">Color</p>
                 <div className="flex flex-wrap gap-2">
