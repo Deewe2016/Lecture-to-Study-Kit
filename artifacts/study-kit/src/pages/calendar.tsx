@@ -921,7 +921,7 @@ export default function CalendarPage() {
     try {
       const [owned, inviteRows] = await Promise.all([
         api<CalendarEvent[]>(
-          `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,created_at,updated_at&owner_id=eq.${me.id}&order=start_at.asc&limit=500`,
+          `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,created_at,updated_at&owner_id=eq.${me.id}&order=start_at.asc&limit=500`,
         ),
         api<InviteRow[]>(
           `/rest/v1/calendar_event_invites?select=id,event_id,user_id&user_id=eq.${me.id}&limit=500`,
@@ -931,7 +931,7 @@ export default function CalendarPage() {
       const invitedIds = [...new Set(inviteRows.map((row) => row.event_id))];
       const invited = invitedIds.length
         ? await api<CalendarEvent[]>(
-            `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,created_at,updated_at&id=in.(${invitedIds.join(',')})&order=start_at.asc&limit=500`,
+            `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,created_at,updated_at&id=in.(${invitedIds.join(',')})&order=start_at.asc&limit=500`,
           )
         : [];
 
