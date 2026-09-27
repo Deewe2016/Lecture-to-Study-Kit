@@ -176,69 +176,52 @@ function pdfFallbackMessage(fileName: string, extractedText = '') {
 async function readPdfText(data: ArrayBuffer, fileName: string) {
   console.log('AI Chat PDF extraction started:', fileName, 'bytes:', data.byteLength);
 
-  let loadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null;
-  let pdf: Awaited<ReturnType<typeof pdfjsLib.getDocument>['promise']> | null = null;
+  const pdf =
+    await pdfjsLib.getDocument({
+      data,
+    }).promise;
 
-  const extraction = (async () => {
-    try {
-      loadingTask = pdfjsLib.getDocument({ data });
-      pdf = await loadingTask.promise;
-      console.log('AI Chat PDF loaded:', fileName, 'pages:', pdf.numPages);
+  console.log('AI Chat PDF loaded:', fileName, 'pages:', pdf.numPages);
 
-      const pages: string[] = [];
+  const pages: string[] = [];
 
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-        const page = await pdf.getPage(pageNumber);
-        const content = await page.getTextContent();
+  for (
+    let pageNumber = 1;
+    pageNumber <= pdf.numPages;
+    pageNumber += 1
+  ) {
+    const page =
+      await pdf.getPage(pageNumber);
 
-        const textItems = content.items
-          .filter((item) => 'str' in item)
-          .map((item) => ({
-            str: item.str,
-            transform: Array.from(item.transform ?? []),
-          }));
+    const content =
+      await page.getTextContent();
 
-        pages.push(
-          pdfItemsToLines(
-            textItems,
-          ).join('\n'),
-        );
-      }
+    const textItems = content.items
+      .filter((item) => 'str' in item)
+      .map((item) => ({
+        str: item.str,
+        transform: Array.from(
+          item.transform ?? [],
+        ),
+      }));
 
-      const text = cleanPdfText(
-        pages.join('\n\n'),
-      );
-      console.log('AI Chat PDF extraction complete:', fileName, 'chars:', text.length);
-
-      return text;
-    } catch (error) {
-      console.error('AI Chat PDF extraction failed:', fileName, error);
-      throw error;
-    }
-  })();
-
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-  try {
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        console.warn('AI Chat PDF extraction timed out after 30 seconds:', fileName);
-        void loadingTask?.destroy().catch((error) => {
-          console.error('AI Chat PDF loading task cleanup failed:', fileName, error);
-        });
-        void pdf?.destroy().catch((error) => {
-          console.error('AI Chat PDF document cleanup failed:', fileName, error);
-        });
-        reject(new Error('PDF extraction timed out after 30 seconds.'));
-      }, PDF_EXTRACTION_TIMEOUT_MS);
-    });
-
-    return await Promise.race([extraction, timeout]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
+    pages.push(
+      pdfItemsToLines(
+        textItems,
+      ).join('\\n'),
+    );
   }
-}
 
+  const text =
+    cleanPdfText(
+      pages.join('\\n\\n'),
+    ) ||
+    `${fileName} contained no selectable text`;
+
+  console.log('AI Chat PDF extraction complete:', fileName, 'chars:', text.length);
+
+  return text;
+}
 function fileToDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -851,7 +834,7 @@ export default function AIChatPage() {
                         </button>
                       )}
                     </div>
-                  ) : <div className="whitespace-pre-wrap">{message.content}</div>) : (thinking && message.role === 'assistant' ? (
+                  ) : <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>) : (thinking && message.role === 'assistant' ? (
                     <span className="inline-flex items-center gap-1.5 py-1" aria-label="AI is thinking">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
