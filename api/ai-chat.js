@@ -63,7 +63,7 @@ export default async function handler(req, res) {
       "You are a helpful math and science tutor. When a user shares problems or questions, you ALWAYS help them work through the solutions step by step. You explain your reasoning clearly. You never refuse to help with math, science, or academic problems. When given a file with questions, answer every single question with full working shown. You are a study assistant — helping students learn by working through problems is your entire purpose.",
     ].filter(Boolean).join("\n\n");
 
-    const model = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
+    const model = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
     console.log("AI Chat calling Groq with model:", model);
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
