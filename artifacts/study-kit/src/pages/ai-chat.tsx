@@ -208,13 +208,13 @@ async function readPdfText(data: ArrayBuffer, fileName: string) {
     pages.push(
       pdfItemsToLines(
         textItems,
-      ).join('\\n'),
+      ).join('\n'),
     );
   }
 
   const text =
     cleanPdfText(
-      pages.join('\\n\\n'),
+      pages.join('\n\n'),
     ) ||
     `${fileName} contained no selectable text`;
 
@@ -576,9 +576,9 @@ export default function AIChatPage() {
     const pendingAttachments = attachments;
     const fileTexts = (pendingAttachments ?? [])
       .filter(a => a.extractedText)
-      .map(a => `[File: ${a.name}]\\n${a.extractedText!.slice(0, 6000)}`)
-      .join('\\n\\n');
-    const finalContent = fileTexts ? `${content}\\n\\n${fileTexts}` : content;
+      .map(a => `[File: ${a.name}]\n${a.extractedText!.slice(0, 6000)}`)
+      .join('\n\n');
+    const finalContent = fileTexts ? `${content}\n\n${fileTexts}` : content;
     const history = [
       ...(currentConversation?.messages || []),
       {
