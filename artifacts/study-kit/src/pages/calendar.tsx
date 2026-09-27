@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays,
   ChevronLeft,
@@ -518,17 +518,67 @@ function TimeGrid({
   );
 }
 
+type CalendarErrorBoundaryProps = {
+  children: ReactNode;
+  onError?: (error: Error) => void;
+};
+
+type CalendarErrorBoundaryState = {
+  error: Error | null;
+};
+
+class CalendarErrorBoundary extends Component<CalendarErrorBoundaryProps, CalendarErrorBoundaryState> {
+  state: CalendarErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): CalendarErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, _info: ErrorInfo) {
+    this.props.onError?.(error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center bg-background p-6">
+          <div className="w-full max-w-lg rounded-xl border border-red-400/30 bg-card p-6 shadow-xl">
+            <p className="font-serif text-2xl">Calendar editor error</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              The event editor could not be opened. The calendar is still available.
+            </p>
+            <div className="mt-4 rounded-lg border border-red-400/20 bg-red-400/10 p-3 font-mono text-xs text-red-300">
+              {this.state.error.message || 'Unknown calendar editor error'}
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => this.setState({ error: null })}
+                className="rounded-lg border border-border px-4 py-2 text-xs font-semibold hover:bg-secondary"
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 function EventEditor({
   initialEvent,
   selectedDate,
+  editScope,
   onClose,
   onSaved,
-  onDeleted,
+  onRequestDelete,
 }: {
   initialEvent: CalendarEvent | null;
   selectedDate: Date;
-  onClose: () => void;
   editScope: 'series' | 'occurrence';
+  onClose: () => void;
   onSaved: () => void;
   onRequestDelete: (event: CalendarEvent) => void;
 }) {
@@ -619,7 +669,10 @@ function EventEditor({
   };
 
   const save = async () => {
-    if (!me?.id) return;
+    if (!me?.id) {
+      setError('You are not signed in. Please sign in again before creating a calendar event.');
+      return;
+    }
     if (!title.trim()) { setError('Add an event title.'); return; }
     if (!start || !end || new Date(end) <= new Date(start)) { setError('End time must be after the start time.'); return; }
 
@@ -1062,14 +1115,19 @@ export default function CalendarPage() {
       )}
 
       {editor && (
-        <EventEditor
-          initialEvent={editor.event}
-          selectedDate={editor.date}
-          editScope={editor.editScope}
-          onClose={() => setEditor(null)}
-          onSaved={() => { setEditor(null); void loadEvents(); }}
-          onRequestDelete={requestDelete}
-        />
+        <CalendarErrorBoundary
+          key={editor.event?.id || editor.date.getTime()}
+          onError={(error) => setError(`Calendar editor error: ${error.message}`)}
+        >
+          <EventEditor
+            initialEvent={editor.event}
+            selectedDate={editor.date}
+            editScope={editor.editScope}
+            onClose={() => setEditor(null)}
+            onSaved={() => { setEditor(null); void loadEvents(); }}
+            onRequestDelete={requestDelete}
+          />
+        </CalendarErrorBoundary>
       )}
     </main>
   );
