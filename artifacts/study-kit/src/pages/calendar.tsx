@@ -1098,7 +1098,7 @@ export default function CalendarPage() {
       const invitedIds = [...new Set(inviteRows.map((row) => row.event_id))];
       const invited = invitedIds.length
         ? await api<CalendarEvent[]>(
-            `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,created_at,updated_at&id=in.(${invitedIds.join(',')})&order=start_at.asc&limit=500`,
+            `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,reminders,notify_invites,created_at,updated_at&id=in.(${invitedIds.join(',')})&order=start_at.asc&limit=500`,
           )
         : [];
 
