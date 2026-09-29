@@ -14,6 +14,11 @@ import {
 } from 'lucide-react';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
 
+type EmailReminder = {
+  id: string;
+  minutes_before: number;
+};
+
 type CalendarEvent = {
   id: string;
   owner_id: string;
@@ -28,6 +33,8 @@ type CalendarEvent = {
   created_at: string;
   updated_at: string;
   recurrence_rule: RecurrenceRule | null;
+  reminders: EmailReminder[];
+  notify_invites: boolean;
   series_id?: string;
   occurrence_key?: string;
 };
@@ -607,6 +614,15 @@ function EventEditor({
   const [customEndType, setCustomEndType] = useState<'never' | 'date' | 'count'>(initialRule?.end?.type || 'never');
   const [customEndDate, setCustomEndDate] = useState(initialRule?.end?.date || '');
   const [customOccurrences, setCustomOccurrences] = useState(initialRule?.end?.count || 10);
+  const [reminders, setReminders] = useState<EmailReminder[]>(() => (
+    Array.isArray(initialEvent?.reminders)
+      ? initialEvent!.reminders.map((reminder) => ({
+          id: reminder.id || `reminder-${Date.now()}-${Math.random()}`,
+          minutes_before: Math.max(0, Number(reminder.minutes_before) || 0),
+        }))
+      : []
+  ));
+  const [notifyInvites, setNotifyInvites] = useState(Boolean(initialEvent?.notify_invites));
   const [users, setUsers] = useState<UserRow[]>([]);
   const [invites, setInvites] = useState<UserRow[]>([]);
   const [inviteSearch, setInviteSearch] = useState('');
@@ -723,6 +739,11 @@ function EventEditor({
         description: description.trim() || null,
         all_day: allDay,
         recurrence_rule: recurrenceRule,
+        reminders: reminders.map((reminder) => ({
+          id: reminder.id,
+          minutes_before: Math.max(0, Number(reminder.minutes_before) || 0),
+        })),
+        notify_invites: notifyInvites && invites.length > 0,
       };
 
       const targetId = editScope === 'occurrence' ? initialEvent!.series_id! : event?.id;
@@ -877,6 +898,99 @@ function EventEditor({
                 <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Add notes" rows={6} className="w-full resize-y rounded-lg border border-input bg-card p-3 text-sm outline-none focus:border-primary" />
               </label>
 
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold">Email reminder</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">Send one or more reminder emails before this event.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReminders((current) => [...current, { id: `reminder-${Date.now()}-${Math.random()}`, minutes_before: 10 }])}
+                    className="rounded-lg border border-border px-3 py-2 text-[10px] font-semibold hover:bg-secondary"
+                  >
+                    + Add reminder
+                  </button>
+                </div>
+
+                {reminders.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border p-4 text-[10px] text-muted-foreground">
+                    No email reminders set.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {reminders.map((reminder) => {
+                      const preset = [0, 10, 30, 60, 1440, 10080].includes(reminder.minutes_before)
+                        ? String(reminder.minutes_before)
+                        : 'custom';
+                      return (
+                        <div key={reminder.id} className="rounded-lg border border-border bg-card p-3">
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={preset}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setReminders((current) => current.map((item) => item.id === reminder.id
+                                  ? { ...item, minutes_before: value === 'custom' ? Math.max(1, item.minutes_before || 15) : Number(value) }
+                                  : item
+                                ));
+                              }}
+                              className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs"
+                            >
+                              <option value="0">At time of event</option>
+                              <option value="10">10 minutes before</option>
+                              <option value="30">30 minutes before</option>
+                              <option value="60">1 hour before</option>
+                              <option value="1440">1 day before</option>
+                              <option value="10080">1 week before</option>
+                              <option value="custom">Custom time</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => setReminders((current) => current.filter((item) => item.id !== reminder.id))}
+                              className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                              aria-label="Remove reminder"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                          {preset === 'custom' && (
+                            <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
+                              <span>Send</span>
+                              <input
+                                type="number"
+                                min={1}
+                                value={Math.max(1, Math.round(reminder.minutes_before))}
+                                onChange={(e) => setReminders((current) => current.map((item) => item.id === reminder.id
+                                  ? { ...item, minutes_before: Math.max(1, Number(e.target.value) || 1) }
+                                  : item
+                                ))}
+                                className="h-9 w-24 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                              />
+                              <span>minutes before the event.</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-xs">
+                  <span>
+                    <span className="block font-semibold">Email invited users</span>
+                    <span className="mt-1 block text-[10px] text-muted-foreground">Also send these reminders to everyone invited to this event.</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={notifyInvites}
+                    onChange={(e) => setNotifyInvites(e.target.checked)}
+                    disabled={invites.length === 0}
+                    className="h-4 w-4 shrink-0"
+                  />
+                </label>
+              </section>
+
               <section>
                 <div className="mb-3 flex items-center gap-2 text-xs font-semibold"><Users size={15} /> Invite Flexus users</div>
                 <div className="relative">
@@ -974,7 +1088,7 @@ export default function CalendarPage() {
     try {
       const [owned, inviteRows] = await Promise.all([
         api<CalendarEvent[]>(
-          `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,created_at,updated_at&owner_id=eq.${me.id}&order=start_at.asc&limit=500`,
+          `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,reminders,notify_invites,created_at,updated_at&owner_id=eq.${me.id}&order=start_at.asc&limit=500`,
         ),
         api<InviteRow[]>(
           `/rest/v1/calendar_event_invites?select=id,event_id,user_id&user_id=eq.${me.id}&limit=500`,
