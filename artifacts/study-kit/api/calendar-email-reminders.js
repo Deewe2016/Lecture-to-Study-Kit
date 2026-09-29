@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const FLEXUS_CALENDAR_URL = "https://flexus-workspace.vercel.app/calendar";
 
 function escapeHtml(value) {
@@ -269,6 +271,9 @@ async function sendResendEmail(to, event, occurrenceStart, occurrenceEnd, remind
 export default async function handler(req, res) {
   console.log("[calendar-email-reminders] Function called", {
     method: req.method,
+    cronSecretSha256: process.env.CRON_SECRET
+      ? createHash("sha256").update(process.env.CRON_SECRET).digest("hex")
+      : null,
     hasAuthorizationHeader: Boolean(req.headers.authorization),
     hasCRON_SECRET: Boolean(process.env.CRON_SECRET),
     hasRESEND_API_KEY: Boolean(process.env.RESEND_API_KEY),
