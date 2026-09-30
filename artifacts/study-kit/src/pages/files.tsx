@@ -210,6 +210,7 @@ export default function FilesPage() {
   const [documentShares, setDocumentShares] = useState<DocumentShareRow[]>([]);
   const [kits, setKits] = useState<LocalKit[]>(() => readLocalKits());
   const [selected, setSelected] = useState<string | null>(null);
+  const [folderDrawerOpen, setFolderDrawerOpen] = useState(false);
   const [section, setSection] = useState<'mine' | 'shared'>('mine');
   const [search, setSearch] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
@@ -715,8 +716,8 @@ export default function FilesPage() {
       </div>
 
       <div className="mt-8 grid gap-8 xl:grid-cols-[280px_1fr]">
-        <aside className="rounded-xl border border-border bg-card p-4">
-          <button onClick={() => { setSection('mine'); setSelected(null); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium hover:bg-secondary">
+        <aside className={folderDrawerOpen ? "rounded-xl border border-border bg-card p-4 max-xl:fixed max-xl:inset-y-0 max-xl:left-0 max-xl:z-[90] max-xl:w-[300px] max-xl:overflow-y-auto max-xl:rounded-none max-xl:shadow-2xl xl:static" : "rounded-xl border border-border bg-card p-4 max-xl:fixed max-xl:inset-y-0 max-xl:left-0 max-xl:z-[90] max-xl:w-[300px] max-xl:overflow-y-auto max-xl:rounded-none max-xl:shadow-2xl max-xl:-translate-x-full xl:static"}>
+          <div className="mb-3 flex items-center justify-between xl:hidden"><span className="text-sm font-semibold">Browse folders</span><button type="button" onClick={() => setFolderDrawerOpen(false)} className="flex h-11 w-11 items-center justify-center rounded-lg hover:bg-secondary" aria-label="Close folders"><X size={18}/></button></div><button onClick={() => { setSection('mine'); setSelected(null); setFolderDrawerOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium hover:bg-secondary">
             <FolderOpen size={15} className="text-primary" /> My Files
           </button>
           <button onClick={() => { setSection('shared'); setSelected(null); }} className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium hover:bg-secondary">
@@ -725,8 +726,9 @@ export default function FilesPage() {
           <div className="mt-4 border-t border-border pt-3">{folderTree(null)}</div>
           {quick.length > 0 && <div className="mt-6 border-t border-border pt-4"><p className="px-2 text-[10px] uppercase tracking-[.16em] text-muted-foreground">Quick Access</p>{quick.map(f=><button key={f.id} onClick={()=>{setSection('mine');setSelected(f.id)}} className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-secondary"><Pin size={13} className="text-primary"/>{f.name}</button>)}</div>}
         </aside>
+        {folderDrawerOpen && <button type="button" onClick={() => setFolderDrawerOpen(false)} className="fixed inset-0 z-[80] bg-black/50 xl:hidden" aria-label="Close folders" />}
 
-        <div className="min-w-0">
+        <div className="min-w-0"><button type="button" onClick={() => setFolderDrawerOpen(true)} className="mb-4 flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-4 text-xs font-semibold xl:hidden"><FolderOpen size={15} className="text-primary"/> Browse folders</button>
           {!selected ? <div>
             <div className="flex items-center justify-between"><div><h2 className="font-serif text-2xl">Recent</h2><p className="mt-1 text-xs text-muted-foreground">Your latest files and study kits</p></div></div>
             {!recentItems.length ? <div className="mt-5 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-12 text-center"><div className="mx-auto flex w-fit items-center gap-2 text-primary"><UploadCloud size={30}/><BookOpen size={30}/></div><h2 className="mt-4 font-serif text-2xl">Nothing here yet</h2><p className="mt-2 text-sm text-muted-foreground">Add a file or create a study kit to get started.</p><div className="mt-5 flex justify-center gap-2"><label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={14}/> Upload a file<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label><a href="/new" className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={14}/> Create a study kit</a></div></div> : <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{recentItems.map(item => item.kind === 'file' ? fileCard(item.file) : item.kind === 'document' ? documentCard(item.document) : kitCard(item.kit))}</div>}
