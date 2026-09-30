@@ -632,7 +632,6 @@ function EventEditor({
   const [attachmentType, setAttachmentType] = useState<'study_kit' | 'file'>('study_kit');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [miniCalendarOpen, setMiniCalendarOpen] = useState(false);
 
   useEffect(() => {
     void Promise.all([
@@ -1075,6 +1074,7 @@ function EventEditor({
 export default function CalendarPage() {
   const me = getStoredUser();
   const [view, setView] = useState<'month' | 'week' | 'day'>('day');
+  const [miniCalendarOpen, setMiniCalendarOpen] = useState(false);
   const [date, setDate] = useState(new Date());
   const [baseEvents, setBaseEvents] = useState<CalendarEvent[]>([]);
   const [editor, setEditor] = useState<{ event: CalendarEvent | null; date: Date; editScope: 'series' | 'occurrence' } | null>(null);
