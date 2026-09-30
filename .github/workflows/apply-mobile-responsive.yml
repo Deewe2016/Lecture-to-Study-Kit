@@ -1,0 +1,116 @@
+name: Apply mobile responsive UI fixes
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  responsive:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Patch frontend responsive behavior
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path("artifacts/study-kit/src")
+
+          css = root / "index.css"
+          c = css.read_text()
+          marker = "/* Flexus mobile responsive pass */"
+          if marker not in c:
+              c += '''
+/* Flexus mobile responsive pass */
+html, body, #root { max-width: 100%; overflow-x: hidden; }
+body { min-width: 0; }
+img, video, canvas, svg { max-width: 100%; }
+@media (max-width: 767px) {
+  button, [role="button"], a { min-height: 44px; }
+  main { min-width: 0 !important; max-width: 100vw !important; overflow-x: hidden; }
+  main > section { min-width: 0; max-width: 100%; }
+  h1, h2, h3, h4, p, span, label { overflow-wrap: anywhere; }
+  main > header { min-width: 0; padding-left: 12px !important; padding-right: 12px !important; }
+  main > header button { min-width: 44px; min-height: 44px; }
+  input, select, textarea { max-width: 100%; }
+  [class*="grid-cols-2"], [class*="grid-cols-3"], [class*="grid-cols-4"] { grid-template-columns: minmax(0, 1fr) !important; }
+  textarea { font-size: 16px !important; }
+  .document-editor-header { min-height: 56px; padding: 8px 10px; gap: 8px; }
+  .document-editor-header .document-editor-button { min-height: 44px; padding: 8px 10px; white-space: nowrap; }
+  .document-editor-title { height: 40px; font-size: 16px; }
+  .document-editor-status { display: none; }
+  .document-editor-toolbar { min-height: 52px; padding: 6px 8px; gap: 5px; overflow: hidden; }
+  .document-editor-toolbar > .document-editor-select,
+  .document-editor-toolbar > .document-editor-font-size,
+  .document-editor-toolbar > .document-editor-color-control,
+  .document-editor-toolbar > .document-editor-separator { display: none; }
+  .document-editor-toolbar-button { width: 44px; height: 44px; min-width: 44px; flex: 0 0 44px; }
+  .document-editor-workspace { padding: 12px 0 32px; overflow: hidden !important; }
+  .document-editor-pages { width: 816px; transform: scale(calc((100vw - 16px) / 816)); transform-origin: top center; margin-left: calc((100vw - 816px) / 2); margin-right: calc((100vw - 816px) / 2); }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  html, body, #root { overflow-x: hidden; }
+  main { min-width: 0; }
+}
+'''
+              css.write_text(c)
+
+          p = root / "pages/files.tsx"
+          s = p.read_text()
+          if "folderDrawerOpen" not in s:
+              s = s.replace("const [selected, setSelected] = useState<string | null>(null);", "const [selected, setSelected] = useState<string | null>(null);\n  const [folderDrawerOpen, setFolderDrawerOpen] = useState(false);", 1)
+              s = s.replace('<aside className="rounded-xl border border-border bg-card p-4">', '<aside className={folderDrawerOpen ? "rounded-xl border border-border bg-card p-4 max-xl:fixed max-xl:inset-y-0 max-xl:left-0 max-xl:z-[90] max-xl:w-[300px] max-xl:overflow-y-auto max-xl:rounded-none max-xl:shadow-2xl xl:static" : "rounded-xl border border-border bg-card p-4 max-xl:fixed max-xl:inset-y-0 max-xl:left-0 max-xl:z-[90] max-xl:w-[300px] max-xl:overflow-y-auto max-xl:rounded-none max-xl:shadow-2xl max-xl:-translate-x-full xl:static"}>', 1)
+              s = s.replace('<button onClick={() => { setSection(\'mine\'); setSelected(null); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium hover:bg-secondary">', '<div className="mb-3 flex items-center justify-between xl:hidden"><span className="text-sm font-semibold">Browse folders</span><button type="button" onClick={() => setFolderDrawerOpen(false)} className="flex h-11 w-11 items-center justify-center rounded-lg hover:bg-secondary" aria-label="Close folders"><X size={18}/></button></div><button onClick={() => { setSection(\'mine\'); setSelected(null); setFolderDrawerOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium hover:bg-secondary">', 1)
+              s = s.replace('<div className="min-w-0">\n          {!selected ?', '<div className="min-w-0"><button type="button" onClick={() => setFolderDrawerOpen(true)} className="mb-4 flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-4 text-xs font-semibold xl:hidden"><FolderOpen size={15} className="text-primary"/> Browse folders</button>\n          {!selected ?', 1)
+              s = s.replace('</aside>\n\n        <div className="min-w-0">', '</aside>\n        {folderDrawerOpen && <button type="button" onClick={() => setFolderDrawerOpen(false)} className="fixed inset-0 z-[80] bg-black/50 xl:hidden" aria-label="Close folders" />}\n\n        <div className="min-w-0">', 1)
+              p.write_text(s)
+
+          p = root / "pages/calendar.tsx"
+          s = p.read_text()
+          s = s.replace("const [view, setView] = useState<'month' | 'week' | 'day'>('month');", "const [view, setView] = useState<'month' | 'week' | 'day'>('day');", 1)
+          if "miniCalendarOpen" not in s:
+              s = s.replace("const [error, setError] = useState('');", "const [error, setError] = useState('');\n  const [miniCalendarOpen, setMiniCalendarOpen] = useState(false);", 1)
+              s = s.replace('<aside className="hidden w-64 shrink-0 border-r border-border p-4 lg:block">', '<aside className={miniCalendarOpen ? "w-64 shrink-0 border-r border-border p-4 max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-[100] max-lg:bg-background max-lg:shadow-2xl max-lg:overflow-y-auto lg:block" : "hidden w-64 shrink-0 border-r border-border p-4 lg:block"}>', 1)
+              s = s.replace('<button onClick={openNew} className="mb-5 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-xs font-semibold text-primary-foreground shadow-sm">', '<div className="mb-3 flex items-center justify-between lg:hidden"><span className="text-sm font-semibold">Calendar</span><button type="button" onClick={() => setMiniCalendarOpen(false)} className="flex h-11 w-11 items-center justify-center rounded-lg hover:bg-secondary" aria-label="Close mini calendar"><X size={18}/></button></div><button onClick={() => { openNew(); setMiniCalendarOpen(false); }} className="mb-5 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-xs font-semibold text-primary-foreground shadow-sm">', 1)
+              s = s.replace('<div className="flex items-center gap-2">\n              <button onClick={() => setDate(new Date())}', '<div className="flex items-center gap-2 min-w-0"><button type="button" onClick={() => setMiniCalendarOpen(true)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border lg:hidden" aria-label="Open mini calendar"><CalendarDays size={17}/></button>\n              <button onClick={() => setDate(new Date())}', 1)
+              s = s.replace('</aside>\n\n        <div className="min-w-0 flex-1">', '</aside>\n        {miniCalendarOpen && <button type="button" onClick={() => setMiniCalendarOpen(false)} className="fixed inset-0 z-[90] bg-black/50 lg:hidden" aria-label="Close mini calendar" />}\n\n        <div className="min-w-0 flex-1">', 1)
+          p.write_text(s)
+
+          p = root / "pages/chat.tsx"
+          s = p.read_text()
+          if "mobileListOpen" not in s:
+              s = s.replace("const[selectedId,setSelectedId]=useState<string|null>(null);", "const[selectedId,setSelectedId]=useState<string|null>(null);const[mobileListOpen,setMobileListOpen]=useState(true);", 1)
+              s = s.replace("setSelectedId(id);setUsers", "setSelectedId(id);setMobileListOpen(false);setUsers", 1)
+              s = s.replace('<aside className="hidden w-[310px] shrink-0 border-r border-border/70 bg-sidebar/30 p-4 md:block">', '<aside className={mobileListOpen ? "flex w-full shrink-0 border-r border-border/70 bg-background p-4 max-md:fixed max-md:inset-0 max-md:z-[100] max-md:overflow-y-auto md:block md:w-[310px] md:bg-sidebar/30" : "hidden w-[310px] shrink-0 border-r border-border/70 bg-sidebar/30 p-4 md:block"}>', 1)
+              s = s.replace('<section className="flex min-w-0 flex-1 flex-col">', '<section className={mobileListOpen ? "hidden min-w-0 flex-1 flex-col md:flex" : "flex min-w-0 flex-1 flex-col"}>', 1)
+              s = s.replace('<header className="flex h-16 items-center border-b border-border/70 px-5 sm:px-8">', '<header className="flex h-16 items-center border-b border-border/70 px-4 sm:px-8"><button type="button" onClick={() => setMobileListOpen(true)} className="mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border md:hidden" aria-label="Back to conversations"><ChevronRight className="rotate-180" size={18}/></button>', 1)
+          p.write_text(s)
+
+          p = root / "pages/ai-chat.tsx"
+          s = p.read_text()
+          if "mobileListOpen" not in s:
+              s = s.replace("const [selectedId, setSelectedId] = useState<string | null>(() => readConversations()[0]?.id || null);", "const [selectedId, setSelectedId] = useState<string | null>(() => readConversations()[0]?.id || null);\n  const [mobileListOpen, setMobileListOpen] = useState(false);", 1)
+              s = s.replace("setSelectedId(conversation.id);\n    setInput", "setSelectedId(conversation.id);\n    setMobileListOpen(false);\n    setInput", 1)
+              s = s.replace("setSelectedId(id);\n    setInput", "setSelectedId(id);\n    setMobileListOpen(false);\n    setInput", 1)
+              s = s.replace('<aside className="hidden w-[270px] shrink-0 flex-col', '<aside className={mobileListOpen ? "flex w-full shrink-0 flex-col max-md:fixed max-md:inset-0 max-md:z-[100] max-md:bg-background" : "hidden w-[270px] shrink-0 flex-col"} lg:flex>', 1)
+              s = s.replace('<div className="flex min-w-0 flex-1 flex-col">', '<div className={mobileListOpen ? "hidden min-w-0 flex-1 flex-col md:flex" : "flex min-w-0 flex-1 flex-col"}>', 1)
+              s = s.replace('<div className="flex items-center justify-between px-5 py-4 sm:px-8">', '<div className="flex items-center justify-between gap-2 px-4 py-4 sm:px-8"><button type="button" onClick={() => setMobileListOpen(true)} className="flex h-11 items-center gap-2 rounded-lg border border-border bg-secondary px-3 text-sm md:hidden" aria-label="Open conversations"><MessageSquare size={16}/> Conversations</button>', 1)
+          p.write_text(s)
+
+          wf = Path(".github/workflows/apply-mobile-responsive.yml")
+          if wf.exists(): wf.unlink()
+
+      - name: Commit responsive UI changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts/study-kit/src/index.css artifacts/study-kit/src/pages/files.tsx artifacts/study-kit/src/pages/calendar.tsx artifacts/study-kit/src/pages/chat.tsx artifacts/study-kit/src/pages/ai-chat.tsx
+          git add -u .github/workflows/apply-mobile-responsive.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "Make Flexus frontend responsive on mobile"
+          git push
