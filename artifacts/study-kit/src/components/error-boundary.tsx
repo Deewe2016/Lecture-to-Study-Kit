@@ -75,11 +75,14 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo): void {
-    console.error(
-      'ErrorBoundary caught an error:',
-      toError(error),
-      info.componentStack,
-    );
+    const normalizedError = toError(error);
+    console.error('[Flexus ErrorBoundary]', {
+      name: normalizedError.name,
+      message: normalizedError.message,
+      stack: normalizedError.stack,
+      componentStack: info.componentStack,
+      pathname: window.location.pathname,
+    });
   }
 
   componentDidUpdate(prevProps: ErrorBoundaryProps): void {
