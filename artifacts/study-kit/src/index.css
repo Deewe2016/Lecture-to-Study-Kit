@@ -496,3 +496,22 @@ img, video, canvas, svg { max-width: 100%; }
   html, body, #root { overflow-x: hidden; }
   main { min-width: 0; }
 }
+
+
+/* Flexus mobile calendar/editor refinement */
+@media (max-width: 767px) {
+  /* Keep calendar content inside the phone viewport; event taps still open the event editor. */
+  main .min-w-[760px] { min-width: 0 !important; width: 100% !important; }
+  main .min-w-[720px] { min-width: 0 !important; width: 100% !important; }
+  main .min-w-[720px] > * { min-width: 0 !important; }
+  main button .truncate { max-width: 100%; }
+
+  /* Simplified document toolbar: bold, italic, underline, left align, lists, link, undo/redo. */
+  .document-editor-toolbar > button:nth-of-type(4),
+  .document-editor-toolbar > button:nth-of-type(6),
+  .document-editor-toolbar > button:nth-of-type(7),
+  .document-editor-toolbar > button:nth-of-type(8),
+  .document-editor-toolbar > button:nth-of-type(11),
+  .document-editor-toolbar > button:nth-of-type(12),
+  .document-editor-toolbar > button:nth-of-type(14) { display: none; }
+}
