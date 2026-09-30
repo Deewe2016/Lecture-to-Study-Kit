@@ -730,7 +730,7 @@ export default function AIChatPage() {
 
   return (
     <div className="relative flex h-[calc(100dvh-72px)] min-h-0">
-      <aside className={mobileListOpen ? "flex w-full shrink-0 flex-col max-md:fixed max-md:inset-0 max-md:z-[100] max-md:bg-background lg:flex" : "hidden w-[270px] shrink-0 flex-col lg:flex"}> border-r border-border/70 bg-sidebar/40 lg:flex">
+      <aside className={`border-r border-border/70 bg-sidebar/40 ${mobileListOpen ? "flex w-full shrink-0 flex-col max-md:fixed max-md:inset-0 max-md:z-[100] max-md:bg-background" : "hidden w-[270px] shrink-0 flex-col"} lg:flex`}>
         <div className="flex items-center justify-between border-b border-border/70 px-4 py-4">
           <span className="text-sm font-medium text-foreground">AI conversations</span>
           <button
