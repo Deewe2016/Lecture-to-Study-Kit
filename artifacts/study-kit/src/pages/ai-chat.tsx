@@ -234,6 +234,7 @@ function fileToDataUrl(file: Blob): Promise<string> {
 export default function AIChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>(readConversations);
   const [selectedId, setSelectedId] = useState<string | null>(() => readConversations()[0]?.id || null);
+  const [mobileListOpen, setMobileListOpen] = useState(false);
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState('');
@@ -290,6 +291,7 @@ export default function AIChatPage() {
     const conversation: Conversation = { id: makeId(), messages: [], createdAt: Date.now() };
     setConversations((current) => [conversation, ...current]);
     setSelectedId(conversation.id);
+    setMobileListOpen(false);
     setInput('');
     setAttachments([]);
     setError('');
@@ -315,6 +317,7 @@ export default function AIChatPage() {
     if (id === selectedId) return;
     abortRef.current?.abort();
     setSelectedId(id);
+    setMobileListOpen(false);
     setInput('');
     setAttachments([]);
     setError('');
@@ -727,7 +730,7 @@ export default function AIChatPage() {
 
   return (
     <div className="relative flex h-[calc(100dvh-72px)] min-h-0">
-      <aside className="hidden w-[270px] shrink-0 flex-col border-r border-border/70 bg-sidebar/40 lg:flex">
+      <aside className={mobileListOpen ? "flex w-full shrink-0 flex-col max-md:fixed max-md:inset-0 max-md:z-[100] max-md:bg-background" : "hidden w-[270px] shrink-0 flex-col"} lg:flex> border-r border-border/70 bg-sidebar/40 lg:flex">
         <div className="flex items-center justify-between border-b border-border/70 px-4 py-4">
           <span className="text-sm font-medium text-foreground">AI conversations</span>
           <button
@@ -767,8 +770,8 @@ export default function AIChatPage() {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between px-5 py-4 sm:px-8">
+      <div className={mobileListOpen ? "hidden min-w-0 flex-1 flex-col md:flex" : "flex min-w-0 flex-1 flex-col"}>
+        <div className="flex items-center justify-between gap-2 px-4 py-4 sm:px-8"><button type="button" onClick={() => setMobileListOpen(true)} className="flex h-11 items-center gap-2 rounded-lg border border-border bg-secondary px-3 text-sm md:hidden" aria-label="Open conversations"><MessageSquare size={16}/> Conversations</button>
           <button
             onClick={newConversation}
             className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground transition-colors hover:border-primary/50 hover:bg-secondary/80"
