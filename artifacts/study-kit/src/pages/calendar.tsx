@@ -632,6 +632,7 @@ function EventEditor({
   const [attachmentType, setAttachmentType] = useState<'study_kit' | 'file'>('study_kit');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [miniCalendarOpen, setMiniCalendarOpen] = useState(false);
 
   useEffect(() => {
     void Promise.all([
@@ -1073,7 +1074,7 @@ function EventEditor({
 
 export default function CalendarPage() {
   const me = getStoredUser();
-  const [view, setView] = useState<'month' | 'week' | 'day'>('month');
+  const [view, setView] = useState<'month' | 'week' | 'day'>('day');
   const [date, setDate] = useState(new Date());
   const [baseEvents, setBaseEvents] = useState<CalendarEvent[]>([]);
   const [editor, setEditor] = useState<{ event: CalendarEvent | null; date: Date; editScope: 'series' | 'occurrence' } | null>(null);
@@ -1165,18 +1166,19 @@ export default function CalendarPage() {
   return (
     <main className="min-h-[calc(100dvh-64px)] bg-background">
       <div className="flex min-h-[calc(100dvh-64px)]">
-        <aside className="hidden w-64 shrink-0 border-r border-border p-4 lg:block">
-          <button onClick={openNew} className="mb-5 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-xs font-semibold text-primary-foreground shadow-sm"><Plus size={15} /> Create</button>
+        <aside className={miniCalendarOpen ? "w-64 shrink-0 border-r border-border p-4 max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-[100] max-lg:bg-background max-lg:shadow-2xl max-lg:overflow-y-auto lg:block" : "hidden w-64 shrink-0 border-r border-border p-4 lg:block"}>
+          <div className="mb-3 flex items-center justify-between lg:hidden"><span className="text-sm font-semibold">Calendar</span><button type="button" onClick={() => setMiniCalendarOpen(false)} className="flex h-11 w-11 items-center justify-center rounded-lg hover:bg-secondary" aria-label="Close mini calendar"><X size={18}/></button></div><button onClick={() => { openNew(); setMiniCalendarOpen(false); }} className="mb-5 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-xs font-semibold text-primary-foreground shadow-sm"><Plus size={15} /> Create</button>
           <MiniCalendar value={date} onChange={(next) => { setDate(next); setView('day'); }} events={events} />
           <div className="mt-5 rounded-xl border border-border bg-card p-4">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calendar</p>
             <div className="mt-3 flex items-center gap-2 text-xs"><span className="h-3 w-3 rounded-full bg-primary" /> Flexus Calendar</div>
           </div>
         </aside>
+        {miniCalendarOpen && <button type="button" onClick={() => setMiniCalendarOpen(false)} className="fixed inset-0 z-[90] bg-black/50 lg:hidden" aria-label="Close mini calendar" />}
 
         <div className="min-w-0 flex-1">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-6">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0"><button type="button" onClick={() => setMiniCalendarOpen(true)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border lg:hidden" aria-label="Open mini calendar"><CalendarDays size={17}/></button>
               <button onClick={() => setDate(new Date())} className="rounded-lg border border-border px-3 py-2 text-xs font-semibold hover:bg-secondary">Today</button>
               <button onClick={() => navigate(-1)} className="rounded-lg p-2 hover:bg-secondary" aria-label="Previous"><ChevronLeft size={18} /></button>
               <button onClick={() => navigate(1)} className="rounded-lg p-2 hover:bg-secondary" aria-label="Next"><ChevronRight size={18} /></button>
