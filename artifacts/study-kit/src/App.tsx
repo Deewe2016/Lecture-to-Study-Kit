@@ -4258,11 +4258,26 @@ function PracticeExam({
   );
 }
 
+function AuthRedirect() {
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    setLocation('/files');
+  }, [setLocation]);
+
+  return null;
+}
+
 function Router() {
   return (
     <ErrorBoundary>
       <Shell>
         <Switch>
+          <Route
+            path="/auth"
+            component={AuthRedirect}
+          />
+
           <Route
             path="/"
             component={FilesPage}
@@ -4352,7 +4367,10 @@ function App() {
     if (location === '/auth') {
       return (
         <AuthPage
-          onAuthenticated={setUser}
+          onAuthenticated={(authenticatedUser) => {
+            setUser(authenticatedUser);
+            setLocation('/files');
+          }}
         />
       );
     }
