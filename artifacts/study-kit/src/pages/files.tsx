@@ -18,6 +18,9 @@ type UserRow = { id: string; email: string; display_name: string };
 const url = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const KIT_STORAGE = 'lecture-study-kits';
+const AUTH_RETRY_DELAY_MS = 1000;
+const AUTH_RETRY_ATTEMPTS = 3;
+const AUTH_RETRY_MESSAGE = 'Having trouble connecting — your files are safe. Refreshing...';
 
 type LocalKit = {
   id: string;
@@ -44,25 +47,64 @@ function isStudyKitsFolder(folder: FolderRow, rootId?: string) {
   return folder.name === 'Study Kits' && folder.parent_folder_id === rootId;
 }
 
+function isJwtError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /jwt|token|issued at future|not valid yet|unauthori[sz]ed|401|clock skew/i.test(message);
+}
+
+async function waitForJwtClockSkew(token: string) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    if (typeof payload.iat !== 'number') return;
+    const futureBy = payload.iat * 1000 - Date.now();
+    if (futureBy > 0 && futureBy <= 60_000) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, Math.min(AUTH_RETRY_DELAY_MS, futureBy)));
+    }
+  } catch {}
+}
+
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = getAccessToken();
-  if (!token || !url || !anon) throw new Error('Files storage is not configured.');
-  const response = await fetch(`${url}${path}`, {
-    ...init,
-    headers: {
-      apikey: anon,
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-    },
-  });
-  const body = await response.text();
-  let data: unknown = null;
-  try { data = body ? JSON.parse(body) : null; } catch { data = body; }
-  if (!response.ok) throw new Error(
-    typeof data === 'object' && data ? String((data as any).message || (data as any).details || (data as any).hint || `Request failed (${response.status})`) : `Request failed (${response.status})`
-  );
-  return data as T;
+  if (!url || !anon) throw new Error('Files storage is not configured.');
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < AUTH_RETRY_ATTEMPTS; attempt += 1) {
+    const token = getAccessToken();
+    if (!token) throw new Error('You must be signed in to use Files.');
+
+    try {
+      await waitForJwtClockSkew(token);
+      const response = await fetch(`${url}${path}`, {
+        ...init,
+        headers: {
+          apikey: anon,
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...(init.headers || {}),
+        },
+      });
+      const body = await response.text();
+      let data: unknown = null;
+      try { data = body ? JSON.parse(body) : null; } catch { data = body; }
+
+      if (!response.ok) {
+        const message = typeof data === 'object' && data
+          ? String((data as any).message || (data as any).details || (data as any).hint || `Request failed (${response.status})`)
+          : `Request failed (${response.status})`;
+        const error = new Error(message);
+        if (!isJwtError(error) || attempt === AUTH_RETRY_ATTEMPTS - 1) throw error;
+        lastError = error;
+      } else {
+        return data as T;
+      }
+    } catch (error) {
+      if (!isJwtError(error) || attempt === AUTH_RETRY_ATTEMPTS - 1) throw error;
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+
+    await new Promise<void>((resolve) => window.setTimeout(resolve, AUTH_RETRY_DELAY_MS));
+  }
+
+  throw lastError || new Error('Supabase request failed.');
 }
 
 function formatBytes(bytes: number) {
@@ -216,6 +258,7 @@ export default function FilesPage() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [authRetrying, setAuthRetrying] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const [modal, setModal] = useState<{ file: FileRow; url?: string } | null>(null);
   const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share' | 'document-share'; id?: string; name?: string; fileId?: string } | null>(null);
@@ -231,6 +274,7 @@ export default function FilesPage() {
   const load = async () => {
     if (!me) return;
     setError('');
+    setAuthRetrying(false);
     try {
       const [fs, fl, sh, docs, docShares] = await Promise.all([
         api<FolderRow[]>('/rest/v1/folders?select=*&order=name.asc'),
@@ -247,7 +291,13 @@ export default function FilesPage() {
       setDocumentShares(docShares);
       setKits(readLocalKits());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load your files.');
+      if (isJwtError(e)) {
+        setAuthRetrying(true);
+        setError(AUTH_RETRY_MESSAGE);
+        window.setTimeout(() => window.location.reload(), AUTH_RETRY_DELAY_MS * 2);
+      } else {
+        setError(e instanceof Error ? e.message : 'Could not load your files.');
+      }
     }
   };
 
