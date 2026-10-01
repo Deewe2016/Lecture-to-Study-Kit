@@ -538,6 +538,7 @@ export default function FilesPage() {
         error: e,
       });
       setError(e instanceof Error ? e.message : 'Could not delete file.');
+      throw e;
     } finally {
       setBusy(false);
     }
