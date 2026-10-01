@@ -258,7 +258,6 @@ export default function FilesPage() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [authRetrying, setAuthRetrying] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const [modal, setModal] = useState<{ file: FileRow; url?: string } | null>(null);
   const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share' | 'document-share'; id?: string; name?: string; fileId?: string } | null>(null);
@@ -274,7 +273,6 @@ export default function FilesPage() {
   const load = async () => {
     if (!me) return;
     setError('');
-    setAuthRetrying(false);
     try {
       const [fs, fl, sh, docs, docShares] = await Promise.all([
         api<FolderRow[]>('/rest/v1/folders?select=*&order=name.asc'),
@@ -292,7 +290,6 @@ export default function FilesPage() {
       setKits(readLocalKits());
     } catch (e) {
       if (isJwtError(e)) {
-        setAuthRetrying(true);
         setError(AUTH_RETRY_MESSAGE);
         window.setTimeout(() => window.location.reload(), AUTH_RETRY_DELAY_MS * 2);
       } else {
