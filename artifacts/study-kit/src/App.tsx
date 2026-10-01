@@ -58,6 +58,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import AuthPage from '@/pages/auth';
+import LandingPage from '@/pages/landing';
 import AiChatPage from '@/pages/ai-chat';
 import ChatPage from '@/pages/chat';
 import FilesPage from '@/pages/files';
@@ -4320,6 +4321,8 @@ function App() {
   const [checking, setChecking] =
     useState(true);
 
+  const [location, setLocation] = useLocation();
+
   useEffect(() => {
     void getCurrentUser()
       .then(setUser)
@@ -4331,6 +4334,12 @@ function App() {
       );
   }, []);
 
+  useEffect(() => {
+    if (!checking && user && location === '/') {
+      setLocation('/files');
+    }
+  }, [checking, user, location, setLocation]);
+
   if (checking) {
     return (
       <main className="flex min-h-[100dvh] items-center justify-center bg-background text-sm text-muted-foreground">
@@ -4340,11 +4349,15 @@ function App() {
   }
 
   if (!user) {
-    return (
-      <AuthPage
-        onAuthenticated={setUser}
-      />
-    );
+    if (location === '/auth') {
+      return (
+        <AuthPage
+          onAuthenticated={setUser}
+        />
+      );
+    }
+
+    return <LandingPage />;
   }
 
   return (
