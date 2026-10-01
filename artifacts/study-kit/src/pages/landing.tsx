@@ -83,10 +83,15 @@ function Logo() {
       aria-label="Flexus home"
     >
       <span
-        className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-primary/20 bg-[#0B101A] bg-contain bg-center bg-no-repeat shadow-[0_0_20px_hsl(195_100%_62%_/_0.12)]"
-        style={{ backgroundImage: "url('/flexus-logo.svg')" }}
+        className="flex h-10 w-10 shrink-0 items-center justify-center overflow-visible rounded-[10px] border border-primary/20 bg-[#0B101A] shadow-[0_0_20px_hsl(195_100%_62%_/_0.12)]"
         aria-hidden="true"
-      />
+      >
+        <img
+          src="/flexus-logo.svg"
+          alt=""
+          className="block h-10 w-10 shrink-0 object-contain"
+        />
+      </span>
       <span className="font-semibold tracking-[-.02em] text-foreground">
         Flexus
       </span>
