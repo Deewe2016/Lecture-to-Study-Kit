@@ -46,8 +46,28 @@ function readSession(): AuthSession | null {
   }
 }
 
+function getJwtIssuedAt(token: string) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.iat === 'number' ? payload.iat * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForClockSkew(token?: string) {
+  if (!token) return;
+  const issuedAt = getJwtIssuedAt(token);
+  if (issuedAt === null) return;
+  const futureBy = issuedAt - Date.now();
+  if (futureBy > 0 && futureBy <= 60_000) {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, Math.min(1000, futureBy)));
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}, accessToken?: string): Promise<T> {
   ensureConfigured();
+  await waitForClockSkew(accessToken);
   const response = await fetch(`${SUPABASE_URL}${path}`, {
     ...init,
     headers: {
