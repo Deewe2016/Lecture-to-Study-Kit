@@ -510,12 +510,99 @@ export default function FilesPage() {
 
   const deleteFile = async (file: FileRow) => {
     setBusy(true);
+    setError('');
     try {
-      await fetch(`${url}/storage/v1/object/user-files/${file.storage_path.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE', headers: { apikey: anon, Authorization: `Bearer ${getAccessToken()}` } });
-      await api(`/rest/v1/files?id=eq.${file.id}`, { method: 'DELETE' });
+      await api(`/rest/v1/files?id=eq.${encodeURIComponent(file.id)}`, { method: 'DELETE' });
+
+      const storagePath = file.storage_path.split('/').map(encodeURIComponent).join('/');
+      const storageResponse = await fetch(`${url}/storage/v1/object/user-files/${storagePath}`, {
+        method: 'DELETE',
+        headers: {
+          apikey: anon,
+          Authorization: `Bearer ${getAccessToken()}`,
+        },
+      });
+
+      if (!storageResponse.ok && storageResponse.status !== 404) {
+        const storageMessage = (await storageResponse.text()).slice(0, 300);
+        throw new Error(storageMessage || `Storage deletion failed (${storageResponse.status}).`);
+      }
+
       setFiles(prev => prev.filter(f => f.id !== file.id));
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not delete file.'); }
-    finally { setBusy(false); }
+      setShares(prev => prev.filter(share => share.file_id !== file.id));
+      console.info('[Files] Deleted file', { fileId: file.id, storagePath: file.storage_path });
+    } catch (e) {
+      console.error('[Files] Failed to delete file', {
+        fileId: file.id,
+        storagePath: file.storage_path,
+        error: e,
+      });
+      setError(e instanceof Error ? e.message : 'Could not delete file.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    const pending = deleteDialog;
+    if (!pending) return;
+
+    setBusy(true);
+    setError('');
+
+    try {
+      if (pending.kind === 'file') {
+        const file = files.find(item => item.id === pending.id);
+        if (!file) throw new Error('This file is no longer available.');
+        await deleteFile(file);
+        setDeleteDialog(null);
+        return;
+      }
+
+      if (pending.kind === 'document') {
+        await api(`/rest/v1/documents?id=eq.${encodeURIComponent(pending.id)}`, { method: 'DELETE' });
+        setDocuments(prev => prev.filter(document => document.id !== pending.id));
+        setDocumentShares(prev => prev.filter(share => share.document_id !== pending.id));
+        setDeleteDialog(null);
+        console.info('[Files] Deleted document', { documentId: pending.id });
+        return;
+      }
+
+      const raw = localStorage.getItem(KIT_STORAGE);
+      const stored = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(stored)) throw new Error('Study kit storage is invalid.');
+
+      const nextKits = stored.filter((kit: LocalKit) => kit?.id !== pending.id);
+      if (nextKits.length === stored.length) {
+        throw new Error('This study kit is no longer available.');
+      }
+
+      localStorage.setItem(KIT_STORAGE, JSON.stringify(nextKits));
+      setKits(prev => prev.filter(kit => kit.id !== pending.id));
+
+      try {
+        await api(`/rest/v1/study_kits?id=eq.${encodeURIComponent(pending.id)}`, { method: 'DELETE' });
+      } catch (e) {
+        console.error('[Files] Study kit was removed locally but Supabase deletion failed', {
+          kitId: pending.id,
+          error: e,
+        });
+        setError('Study kit removed from this device, but its cloud copy could not be deleted.');
+      }
+
+      console.info('[Files] Deleted study kit', { kitId: pending.id });
+      setDeleteDialog(null);
+    } catch (e) {
+      console.error('[Files] Delete failed', {
+        kind: pending.kind,
+        id: pending.id,
+        name: pending.name,
+        error: e,
+      });
+      setError(e instanceof Error ? e.message : 'Could not delete item.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const searchUsers = async (q: string) => {
@@ -793,7 +880,7 @@ export default function FilesPage() {
       {deleteDialog && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-5">
         <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
           <h2 className="font-serif text-2xl">Delete {deleteDialog.kind === 'document' ? 'document' : deleteDialog.kind === 'kit' ? 'study kit' : 'file'}?</h2>
-          <p className="mt-3 text-sm text-muted-foreground">Are you sure you want to delete this document? This cannot be undone.</p>
+          <p className="mt-3 text-sm text-muted-foreground">Are you sure you want to delete {deleteDialog.name}? This cannot be undone.</p>
           <div className="mt-6 flex justify-end gap-2">
             <button type="button" onClick={() => setDeleteDialog(null)} className="rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary">Cancel</button>
             <button type="button" disabled={busy} onClick={() => void confirmDelete()} className="rounded-lg bg-red-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">Delete</button>
