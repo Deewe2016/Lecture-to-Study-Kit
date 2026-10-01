@@ -15,7 +15,7 @@ function ensureConfigured() { if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new
 
 export function isChatAuthError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || '');
-  return /jwt|token|auth|unauthori[sz]ed|401|issued at future|not valid yet/i.test(message);
+  return /jwt|token|auth|unauthori[sz]ed|401|issued at future|not valid yet|future|clock skew/i.test(message);
 }
 
 function getJwtIssuedAt(token: string) {
