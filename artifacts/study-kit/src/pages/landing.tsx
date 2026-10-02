@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   FileText,
   Folder,
+  GraduationCap,
   MessageCircle,
   Play,
   Sparkles,
@@ -75,26 +76,13 @@ const audiences = [
   },
 ];
 
-function Logo() {
+export function Brand() {
   return (
-    <Link
-      href="/"
-      className="flex shrink-0 items-center gap-2.5 focus-ring"
-      aria-label="Flexus home"
-    >
-      <span
-        className="flex shrink-0 items-center justify-center overflow-visible rounded-[10px] border border-primary/20 bg-[#0B101A] shadow-[0_0_20px_hsl(195_100%_62%_/_0.12)]"
-        aria-hidden="true"
-      >
-        <img
-          src="/flexus-logo.svg"
-          alt=""
-          className="block h-11 w-11 shrink-0 object-contain"
-        />
+    <Link href="/" className="flex items-center gap-3">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground flex-shrink-0">
+        <GraduationCap size={19} />
       </span>
-      <span className="font-semibold tracking-[-.02em] text-foreground">
-        Flexus
-      </span>
+      <span className="font-serif text-[17px] tracking-[-.02em] text-foreground">Flexus</span>
     </Link>
   );
 }
