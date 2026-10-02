@@ -4,7 +4,6 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  GraduationCap,
   Home,
   Library,
   Menu,
@@ -23,7 +22,7 @@ function ChatBrand({ collapsed }: { collapsed: boolean }) {
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
         <GraduationCap size={19} />
       </span>
-      {!collapsed && <span className="font-serif text-[17px] tracking-[-.02em] text-foreground">study kit</span>}
+      {!collapsed && <span className="font-serif text-[17px] tracking-[-.02em] text-foreground">Flexus</span>}
     </a>
   );
 }
