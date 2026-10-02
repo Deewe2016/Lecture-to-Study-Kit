@@ -35,7 +35,6 @@ import {
   Clock3,
   FileText,
   Folder,
-  GraduationCap,
   Home,
   Menu,
   MessageCircle,
@@ -825,12 +824,16 @@ function Brand() {
       className="focus-ring flex items-center gap-3"
       data-testid="link-brand"
     >
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-        <GraduationCap size={19} />
+      <span className="flex shrink-0 items-center justify-center overflow-visible rounded-xl bg-[#0B101A]">
+        <img
+          src="/flexus-logo.svg"
+          alt=""
+          className="block h-11 w-11 shrink-0 object-contain"
+        />
       </span>
 
       <span className="font-serif text-[17px] tracking-[-.02em] text-foreground">
-        study kit
+        Flexus
       </span>
     </Link>
   );
