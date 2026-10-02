@@ -57,7 +57,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import AuthPage from '@/pages/auth';
-import LandingPage from '@/pages/landing';
+import LandingPage, { Brand } from '@/pages/landing';
 import AiChatPage from '@/pages/ai-chat';
 import ChatPage from '@/pages/chat';
 import FilesPage from '@/pages/files';
@@ -815,28 +815,6 @@ async function uploadVideoToSupabase(
     .join('/');
 
   return `https://${projectRef}.supabase.co/storage/v1/object/public/video-uploads/${encodedPath}`;
-}
-
-function Brand() {
-  return (
-    <Link
-      href="/"
-      className="focus-ring flex items-center gap-3"
-      data-testid="link-brand"
-    >
-      <span className="flex shrink-0 items-center justify-center overflow-visible rounded-xl bg-[#0B101A]">
-        <img
-          src="/flexus-logo.svg"
-          alt=""
-          className="block h-11 w-11 shrink-0 object-contain"
-        />
-      </span>
-
-      <span className="font-serif text-[17px] tracking-[-.02em] text-foreground">
-        Flexus
-      </span>
-    </Link>
-  );
 }
 
 function Shell({
