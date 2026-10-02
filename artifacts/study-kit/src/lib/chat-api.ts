@@ -75,8 +75,24 @@ export async function searchUsers(query: string, currentUserId: string): Promise
 export async function getUsersByIds(ids: string[]): Promise<ChatUser[]> { if (!ids.length) return []; return rest<ChatUser[]>(`/rest/v1/users?select=id,email,display_name&id=in.${encodeURIComponent(`(${ids.join(',')})`)}`); }
 export async function getSpaces(currentUserId: string): Promise<ChatSpace[]> { return rest<ChatSpace[]>(`/rest/v1/spaces?select=id,name,members,created_by,created_at&members=cs.${encodeURIComponent(`{${currentUserId}}`)}&order=created_at.desc`); }
 export async function createSpace(name: string, members: string[], currentUserId: string): Promise<ChatSpace> {
-  const rows = await rest<ChatSpace[]>('/rest/v1/spaces', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ name: name.trim(), members: Array.from(new Set([currentUserId, ...members])), created_by: currentUserId }) });
-  if (!rows[0]) throw new Error('Supabase did not return the new space.'); return rows[0];
+  const allMembers = Array.from(
+    new Set(
+      [currentUserId, ...members].filter(
+        (id): id is string => Boolean(id),
+      ),
+    ),
+  );
+  const rows = await rest<ChatSpace[]>('/rest/v1/spaces', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      name: name.trim(),
+      members: allMembers,
+      created_by: currentUserId,
+    }),
+  });
+  if (!rows[0]) throw new Error('Supabase did not return the new space.');
+  return rows[0];
 }
 export async function updateSpace(spaceId: string, patch: Partial<Pick<ChatSpace, 'name' | 'members' | 'created_by'>>): Promise<ChatSpace> {
   const rows = await rest<ChatSpace[]>(`/rest/v1/spaces?id=eq.${encodeURIComponent(spaceId)}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(patch) });
@@ -119,9 +135,15 @@ export async function sendSpaceMessage(senderId: string, spaceId: string, text: 
   if (!rows[0]) throw new Error('Supabase did not return the new message.'); return rows[0];
 }
 
+type RealtimeChange = {
+  event: '*' | 'INSERT' | 'UPDATE' | 'DELETE';
+  schema: 'public';
+  table: string;
+};
+
 function createRealtimeSupabaseCompat() {
-  const channel = (name: string) => {
-    let handler: ((payload: any) => void) | undefined;
+  const channel = (name: string, changes: RealtimeChange[]) => {
+    const handlers: Array<(payload: any) => void> = [];
     let socket: WebSocket | undefined;
     let heartbeat: number | undefined;
     let stopped = false;
@@ -144,13 +166,23 @@ function createRealtimeSupabaseCompat() {
       const projectRef = SUPABASE_URL.replace(/^https?:\/\//, '').split('.')[0];
       socket = new WebSocket(`wss://${projectRef}.supabase.co/realtime/v1/websocket?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}&vsn=1.0.0`);
       socket.addEventListener('open', () => {
-        send('phx_join', { config: { broadcast: { ack: false, self: false }, presence: { enabled: false }, postgres_changes: [{ event: '*', schema: 'public', table: 'messages' }], private: false }, [tokenField]: token });
+        send('phx_join', {
+          config: {
+            broadcast: { ack: false, self: false },
+            presence: { enabled: false },
+            postgres_changes: changes,
+            private: false,
+          },
+          [tokenField]: token,
+        });
         heartbeat = window.setInterval(() => send('heartbeat', {}, 'phoenix'), 20000);
       });
       socket.addEventListener('message', (event) => {
         let payload: any;
         try { payload = JSON.parse(event.data); } catch { return; }
-        if (payload.event === 'postgres_changes') handler?.(payload);
+        if (payload.event === 'postgres_changes') {
+          handlers.forEach((handler) => handler(payload));
+        }
       });
       socket.addEventListener('error', () => {});
       socket.addEventListener('close', () => {
@@ -159,8 +191,8 @@ function createRealtimeSupabaseCompat() {
       });
     };
     return {
-      on(_event: string, _config: { event: '*'; schema: 'public'; table: 'messages' }, callback: (payload: any) => void) {
-        handler = callback;
+      on(_event: string, _config: RealtimeChange, callback: (payload: any) => void) {
+        handlers.push(callback);
         return this;
       },
       subscribe() {
@@ -182,12 +214,26 @@ export function subscribeToMessages(onMessage: (message: DbMessage) => void) {
   if (!getAccessToken()) return () => {};
   const supabase = createRealtimeSupabaseCompat();
   const channel = supabase
-    .channel('messages')
+    .channel('messages', [{ event: '*', schema: 'public', table: 'messages' }])
     .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
-      // Filter in JavaScript here, not in Supabase.
       const record = payload?.payload?.data?.record || payload?.payload?.record;
       if (!record?.id || !record?.sender_id || !record?.text) return;
       onMessage(record as DbMessage);
+    })
+    .subscribe();
+  return channel;
+}
+
+export function subscribeToSpaces(onSpace: (space: ChatSpace) => void) {
+  ensureConfigured();
+  if (!getAccessToken()) return () => {};
+  const supabase = createRealtimeSupabaseCompat();
+  const channel = supabase
+    .channel('spaces', [{ event: '*', schema: 'public', table: 'spaces' }])
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'spaces' }, (payload) => {
+      const record = payload?.payload?.data?.record || payload?.payload?.record;
+      if (!record?.id || !Array.isArray(record.members)) return;
+      onSpace(record as ChatSpace);
     })
     .subscribe();
   return channel;
