@@ -873,7 +873,6 @@ function Shell({
     { href: '/calendar', label: 'Calendar', icon: CalendarDays },
     { href: '/chat', label: 'Chat', icon: MessageCircle },
     { href: '/ai-chat', label: 'AI Chat', icon: Sparkles },
-    { href: '/whiteboard', label: 'Whiteboard', icon: PenLine },
   ];
 
   return (
