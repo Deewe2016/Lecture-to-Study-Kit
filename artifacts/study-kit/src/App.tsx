@@ -63,6 +63,7 @@ import ChatPage from '@/pages/chat';
 import FilesPage from '@/pages/files';
 import DocumentPage from '@/pages/document';
 import SupabaseCalendarPage from '@/pages/calendar';
+import WhiteboardPage from '@/pages/whiteboard';
 import {
   getCurrentUser,
   getStoredUser,
@@ -872,6 +873,7 @@ function Shell({
     { href: '/calendar', label: 'Calendar', icon: CalendarDays },
     { href: '/chat', label: 'Chat', icon: MessageCircle },
     { href: '/ai-chat', label: 'AI Chat', icon: Sparkles },
+    { href: '/whiteboard', label: 'Whiteboard', icon: PenLine },
   ];
 
   return (
@@ -4297,6 +4299,11 @@ function Router() {
           <Route
             path="/ai-chat"
             component={AiChatPage}
+          />
+
+          <Route
+            path="/whiteboard"
+            component={WhiteboardPage}
           />
 
           <Route
