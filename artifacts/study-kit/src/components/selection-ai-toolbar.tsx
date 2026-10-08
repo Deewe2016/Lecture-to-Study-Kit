@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, Send, Sparkles, X } from 'lucide-react';
+import { Brain, CircleHelp, Loader2, MessageCircle, Send, Sparkles, X } from 'lucide-react';
 import { saveKit } from '@/lib/kit-store';
 import { useToast } from '@/hooks/use-toast';
 
@@ -360,12 +360,12 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
       ) : (
         <div className="mt-1 w-[220px] rounded-lg border border-border bg-card p-1.5 text-foreground shadow-2xl">
           <button type="button" disabled={busy} onMouseDown={(e) => { e.preventDefault(); savedTextRef.current = selectionRef.current || window.getSelection()?.toString() || ''; }} onClick={() => void generateFlashcards()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">
-            {busyAction === 'flashcards' ? <Loader2 size={14} className="animate-spin" /> : '🧠'} Generate Flashcards
+            {busyAction === 'flashcards' ? <Loader2 size={14} className="animate-spin" /> : <Brain size={14} />} Generate Flashcards
           </button>
           <button type="button" disabled={busy} onMouseDown={(e) => { e.preventDefault(); savedTextRef.current = selectionRef.current || window.getSelection()?.toString() || ''; }} onClick={() => void generateQuiz()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">
-            {busyAction === 'quiz' ? <Loader2 size={14} className="animate-spin" /> : '❓'} Generate Quiz
+            {busyAction === 'quiz' ? <Loader2 size={14} className="animate-spin" /> : <CircleHelp size={14} />} Generate Quiz
           </button>
-          <button type="button" disabled={busy} onMouseDown={(e) => { e.preventDefault(); savedTextRef.current = selectionRef.current || window.getSelection()?.toString().trim() || ''; console.log('[Selection AI] Ask AI context saved on mousedown:', savedTextRef.current.length); }} onClick={() => { selectionRef.current = savedTextRef.current; setText(savedTextRef.current); console.log('[Selection AI] Ask AI clicked; context length:', savedTextRef.current.length); setOpen(false); setChatOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">💬 Ask AI</button>
+          <button type="button" disabled={busy} onMouseDown={(e) => { e.preventDefault(); savedTextRef.current = selectionRef.current || window.getSelection()?.toString().trim() || ''; console.log('[Selection AI] Ask AI context saved on mousedown:', savedTextRef.current.length); }} onClick={() => { selectionRef.current = savedTextRef.current; setText(savedTextRef.current); console.log('[Selection AI] Ask AI clicked; context length:', savedTextRef.current.length); setOpen(false); setChatOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60"><MessageCircle size={14} /> Ask AI</button>
         </div>
       )}
     </div>
