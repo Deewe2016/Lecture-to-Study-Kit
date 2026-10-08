@@ -3,7 +3,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   ChevronRight, Download, File, FileArchive, FileAudio, FileImage, FileText,
-  FileVideo, Folder, FolderOpen, Grid2X2, List, MoreHorizontal, Pencil, Pin,
+  FileVideo, Folder, FolderOpen, Grid2X2, List, MoreHorizontal, Pencil, Pin, Move,
   Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen, FilePlus2, ChevronDown
 } from 'lucide-react';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
@@ -266,7 +266,9 @@ export default function FilesPage() {
   const [error, setError] = useState('');
   const [menu, setMenu] = useState<string | null>(null);
   const [modal, setModal] = useState<{ file: FileRow; url?: string } | null>(null);
-  const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share' | 'document-share' | 'whiteboard-share'; id?: string; name?: string; fileId?: string } | null>(null);
+  const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share' | 'document-share' | 'whiteboard-share' | 'move'; id?: string; name?: string; fileId?: string } | null>(null);
+  const [moveItem, setMoveItem] = useState<{ kind: 'file' | 'folder' | 'document' | 'whiteboard'; id: string; name: string; currentFolderId: string | null } | null>(null);
+  const [moveTargetId, setMoveTargetId] = useState('');
   const [deleteDialog, setDeleteDialog] = useState<{ kind: 'file' | 'document' | 'kit' | 'whiteboard'; id: string; name: string } | null>(null);
   const [dialogValue, setDialogValue] = useState('');
   const [editingItem, setEditingItem] = useState<{ kind: 'file' | 'folder' | 'document' | 'whiteboard'; id: string } | null>(null);
@@ -425,6 +427,52 @@ export default function FilesPage() {
       setFolders(prev => [...prev, ...created]); setDialog(null); setDialogValue('');
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not create folder.'); }
     finally { setBusy(false); }
+  };
+
+  const folderDescendantIds = (folderId: string): Set<string> => {
+    const descendants = new Set<string>();
+    const visit = (parentId: string) => folders.filter(folder => folder.parent_folder_id === parentId).forEach(folder => {
+      if (descendants.has(folder.id)) return;
+      descendants.add(folder.id);
+      visit(folder.id);
+    });
+    visit(folderId);
+    return descendants;
+  };
+
+  const openMoveDialog = (item: { kind: 'file' | 'folder' | 'document' | 'whiteboard'; id: string; name: string; currentFolderId: string | null }) => {
+    setMoveItem(item);
+    setMoveTargetId(item.currentFolderId || root?.id || '');
+    setDialog({ kind: 'move', id: item.id, name: item.name });
+    setMenu(null);
+  };
+
+  const moveSelectedItem = async () => {
+    if (!moveItem || !moveTargetId) return;
+    if (moveItem.kind === 'folder') {
+      if (moveItem.id === root?.id) { setError('The My Files root folder cannot be moved.'); return; }
+      if (moveTargetId === moveItem.id || folderDescendantIds(moveItem.id).has(moveTargetId)) {
+        setError('A folder cannot be moved into itself or one of its subfolders.');
+        return;
+      }
+    }
+    setBusy(true);
+    setError('');
+    try {
+      if (moveItem.kind === 'folder') {
+        await api('/rest/v1/folders?id=eq.' + encodeURIComponent(moveItem.id), { method: 'PATCH', body: JSON.stringify({ parent_folder_id: moveTargetId }) });
+        setFolders(prev => prev.map(folder => folder.id === moveItem.id ? { ...folder, parent_folder_id: moveTargetId } : folder));
+      } else {
+        const table = moveItem.kind === 'file' ? 'files' : moveItem.kind === 'document' ? 'documents' : 'whiteboards';
+        await api('/rest/v1/' + table + '?id=eq.' + encodeURIComponent(moveItem.id), { method: 'PATCH', body: JSON.stringify({ folder_id: moveTargetId }) });
+        if (moveItem.kind === 'file') setFiles(prev => prev.map(item => item.id === moveItem.id ? { ...item, folder_id: moveTargetId } : item));
+        if (moveItem.kind === 'document') setDocuments(prev => prev.map(item => item.id === moveItem.id ? { ...item, folder_id: moveTargetId } : item));
+        if (moveItem.kind === 'whiteboard') setWhiteboards(prev => prev.map(item => item.id === moveItem.id ? { ...item, folder_id: moveTargetId } : item));
+      }
+      setDialog(null); setMoveItem(null); setMoveTargetId('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not move item.');
+    } finally { setBusy(false); }
   };
 
   const renameFile = async (file: FileRow, nextName: string) => {
@@ -811,6 +859,7 @@ export default function FilesPage() {
         <button onClick={() => { setEditingItem({kind:'folder',id:folder.id}); setEditingValue(folder.name); setMenu(null); }} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-secondary" title="Rename"><Pencil size={13}/> Rename</button>
         <button onClick={() => { togglePin(folder.id); setMenu(null); }} className="rounded p-1.5 hover:bg-secondary" title="Pin"><Pin size={13}/></button>
         <button onClick={() => { setDialog({ kind:'share', id:folder.id }); setDialogValue(''); setMenu(null); }} className="rounded p-1.5 hover:bg-secondary" title="Share"><Share2 size={13}/></button>
+        {folder.id !== root?.id && <button onClick={() => openMoveDialog({kind:'folder',id:folder.id,name:folder.name,currentFolderId:folder.parent_folder_id})} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-secondary" title="Move"><Move size={13}/> Move</button>}
         {folder.id !== root?.id && <button onClick={() => { void deleteFolder(folder.id); setMenu(null); }} className="rounded p-1.5 text-red-300 hover:bg-secondary" title="Delete"><Trash2 size={13}/></button>}
       </div>}
       {folderTree(folder.id, depth + 1)}
@@ -878,6 +927,7 @@ export default function FilesPage() {
         <div className="relative">
           <button type="button" onClick={() => setMenu(menu === 'wb:' + whiteboard.id ? null : 'wb:' + whiteboard.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
           {menu === 'wb:' + whiteboard.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
+            <button type="button" onClick={() => openMoveDialog({kind:'whiteboard',id:whiteboard.id,name:whiteboard.title,currentFolderId:whiteboard.folder_id})} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Move size={13}/> Move</button>
             <button type="button" onClick={() => { const next = window.prompt('Rename whiteboard', whiteboard.title)?.trim(); if (next && next !== whiteboard.title) void renameWhiteboard(whiteboard, next); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
             <button type="button" onClick={() => { setDialog({ kind:'whiteboard-share', id:whiteboard.id }); setDialogValue(''); setSharedUser([]); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
             <button type="button" onClick={() => { setDeleteDialog({ kind:'whiteboard', id:whiteboard.id, name:whiteboard.title }); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
@@ -899,6 +949,7 @@ export default function FilesPage() {
           <div className="relative">
             <button type="button" onClick={() => setMenu(menu === 'doc:' + document.id ? null : 'doc:' + document.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
             {menu === 'doc:' + document.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
+              <button type="button" onClick={() => openMoveDialog({kind:'document',id:document.id,name:document.title,currentFolderId:document.folder_id})} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Move size={13}/> Move</button>
               <button type="button" onClick={() => { const next = window.prompt('Rename document', document.title)?.trim(); if (next && next !== document.title) void (async () => { setBusy(true); try { await api(`/rest/v1/documents?id=eq.${document.id}`, { method: 'PATCH', body: JSON.stringify({ title: next }) }); setDocuments(prev => prev.map(item => item.id === document.id ? { ...item, title: next } : item)); } catch (e) { setError(e instanceof Error ? e.message : 'Could not rename document.'); } finally { setBusy(false); } })(); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
               <button type="button" onClick={() => { setDialog({ kind:'document-share', id:document.id }); setDialogValue(''); setSharedUser([]); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
               <button type="button" onClick={() => { setDeleteDialog({ kind:'document', id:document.id, name:document.title }); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
@@ -952,6 +1003,7 @@ export default function FilesPage() {
               </button>
               {menu === file.id && (
                 <div className="absolute right-0 top-8 z-20 w-48 rounded-lg border border-border bg-card p-1 shadow-xl">
+                  <button type="button" onClick={() => openMoveDialog({kind:'file',id:file.id,name:file.name,currentFolderId:file.folder_id})} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Move size={13}/> Move</button>
                   <button type="button" onClick={() => { void download(file); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Download size={13}/> Download</button>
                   <button type="button" onClick={() => { setEditingItem({kind:'file',id:file.id}); setEditingValue(file.name); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
                   <button
@@ -1044,6 +1096,7 @@ export default function FilesPage() {
         </div>
       </div>}
 
+      {dialog?.kind === 'move' && moveItem && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-background/70 p-5"><div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl"><div className="flex items-center justify-between"><h2 className="font-serif text-2xl">Move {moveItem.kind}</h2><button type="button" onClick={() => { setDialog(null); setMoveItem(null); }} aria-label="Close move dialog"><X size={17}/></button></div><p className="mt-3 text-sm text-muted-foreground">Choose a destination for <span className="font-medium text-foreground">{moveItem.name}</span>.</p><select value={moveTargetId} onChange={e=>setMoveTargetId(e.target.value)} className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none" disabled={busy}>{root && <option value={root.id}>My Files (root)</option>}{folders.filter(folder=>folder.owner_id===me?.id && folder.id!==root?.id && folder.id!==moveItem.id && !(moveItem.kind==='folder' && folderDescendantIds(moveItem.id).has(folder.id))).map(folder=><option key={folder.id} value={folder.id}>{folder.name}</option>)}</select><button type="button" disabled={busy||!moveTargetId||moveTargetId===moveItem.currentFolderId} onClick={()=>void moveSelectedItem()} className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{busy?'Moving…':'Move here'}</button></div></div>}
       {dialog && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 p-5"><div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="flex items-center justify-between"><h2 className="font-serif text-2xl">{dialog.kind==='folder'?'New Folder':dialog.kind==='rename'?'Rename Folder':'Share with Flexus user'}</h2><button onClick={()=>setDialog(null)}><X size={17}/></button></div>
         {dialog.kind==='share' || dialog.kind==='document-share' || dialog.kind==='whiteboard-share' ? <><input autoFocus value={dialogValue} onChange={e=>void searchUsers(e.target.value)} placeholder="Search by name or email" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><div className="mt-3 space-y-1">{sharedUser.map(u=><button key={u.id} onClick={()=>void (dialog.kind==='document-share' ? shareDocument(u) : dialog.kind==='whiteboard-share' ? shareWhiteboard(u) : share(u))} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left hover:bg-secondary"><span><span className="block text-sm">{u.display_name}</span><span className="block text-[10px] text-muted-foreground">{u.email}</span></span><Share2 size={14}/></button>)}</div></> : <><input autoFocus value={dialogValue} onChange={e=>setDialogValue(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void (dialog.kind==='folder'?createFolder():renameFolder())}} placeholder="Folder name" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><button disabled={busy||!dialogValue.trim()} onClick={()=>void (dialog.kind==='folder'?createFolder():renameFolder())} className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{dialog.kind==='folder'?'Create folder':'Save changes'}</button></>}
