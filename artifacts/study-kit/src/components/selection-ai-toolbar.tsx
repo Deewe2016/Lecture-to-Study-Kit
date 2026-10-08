@@ -197,7 +197,7 @@ export default function SelectionAIToolbar() {
     setBusy(true);
     setBusyAction('flashcards');
     try {
-      const selected = selectionRef.current;
+      const selected = savedTextRef.current || selectionRef.current;
       console.log('[Selection AI] Flashcard generation started; selected text length:', selected.length);
       const raw = await askGroq([{ role: 'user', content: `Generate 5 flashcards from this text as a JSON array ONLY, no other text: [{"front": string, "back": string}]
 
@@ -227,7 +227,7 @@ Text: ${selected}` }], FLASHCARD_SYSTEM_PROMPT);
     setBusy(true);
     setBusyAction('quiz');
     try {
-      const selected = selectionRef.current;
+      const selected = savedTextRef.current || selectionRef.current;
       console.log('[Selection AI] Quiz generation started; selected text length:', selected.length);
       const raw = await askGroq([{ role: 'user', content: `Generate 5 multiple-choice quiz questions from this text as a JSON array ONLY, no other text: [{"prompt": string, "options": string[], "answer": number, "explanation": string}]
 
