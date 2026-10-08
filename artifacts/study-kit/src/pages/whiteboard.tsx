@@ -5,7 +5,6 @@ import { ErrorBoundary, type ErrorFallbackProps } from "@/components/error-bound
 import type { AppState, BinaryFiles, ExcalidrawElement } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
 import { getAccessToken } from "@/lib/auth";
-import SelectionAIToolbar from "@/components/selection-ai-toolbar";
 
 const Excalidraw = lazy(async () => {
   console.info("[Whiteboard] Loading Excalidraw component");
@@ -283,7 +282,6 @@ export default function WhiteboardPage() {
           <div className="flex h-full w-full items-center justify-center bg-[#121212] text-sm text-white/60">Loading whiteboard…</div>
         )}
       </div>
-    <SelectionAIToolbar />
     </div>
   );
 }
