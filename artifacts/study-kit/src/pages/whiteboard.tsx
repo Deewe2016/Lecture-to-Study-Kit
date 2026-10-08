@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorBoundary, type ErrorFallbackProps } from "@/components/error-boundary";
 import type { AppState, BinaryFiles, ExcalidrawElement } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
@@ -126,6 +126,7 @@ export default function WhiteboardPage() {
   const [saving, setSaving] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const latestContent = useRef<WhiteboardRow["content"] | null>(null);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     if (!whiteboardId) {
@@ -152,6 +153,7 @@ export default function WhiteboardPage() {
           });
           setBoard(normalized);
           latestContent.current = normalized.content;
+          hasLoadedRef.current = true;
         }
       }
     }).catch((e) => {
@@ -165,12 +167,12 @@ export default function WhiteboardPage() {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
   }, []);
 
-  const handleChange = (
+  const handleChange = useCallback((
     elements: readonly ExcalidrawElement[],
     appState: AppState,
     files: BinaryFiles,
   ) => {
-    if (!whiteboardId) return;
+    if (!whiteboardId || !hasLoadedRef.current) return;
     console.debug("[Whiteboard] Canvas changed", { whiteboardId, elementCount: elements.length });
     const content: WhiteboardRow["content"] = {
       type: "excalidraw",
@@ -186,7 +188,6 @@ export default function WhiteboardPage() {
       files,
     };
     latestContent.current = content;
-    setBoard((current) => current ? { ...current, content } : current);
     setSaving(true);
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
@@ -204,8 +205,17 @@ export default function WhiteboardPage() {
         setSaving(false);
         setError(e instanceof Error ? e.message : "Could not save this whiteboard.");
       });
-    }, 700);
-  };
+    }, 1000);
+  }, [whiteboardId]);
+
+  const initialData = useMemo(() => board?.content || null, [board]);
+  const excalidrawUIOptions = useMemo(() => ({
+    canvasActions: {
+      export: false,
+      loadScene: false,
+      saveToActiveFile: false,
+    },
+  }), []);
 
   const exportJson = () => {
     if (!board) return;
@@ -262,15 +272,9 @@ export default function WhiteboardPage() {
             <Suspense fallback={<div className="flex h-full w-full items-center justify-center bg-[#121212] text-sm text-white/60">Loading whiteboard…</div>}>
               <Excalidraw
               theme="dark"
-              initialData={board.content}
+              initialData={initialData}
               onChange={handleChange}
-              UIOptions={{
-                canvasActions: {
-                  export: false,
-                  loadScene: false,
-                  saveToActiveFile: false,
-                },
-              }}
+              UIOptions={excalidrawUIOptions}
               />
             </Suspense>
           </ErrorBoundary>
