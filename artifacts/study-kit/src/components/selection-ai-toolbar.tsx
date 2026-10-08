@@ -7,10 +7,8 @@ type Flashcard = { front: string; back: string };
 type QuizQuestion = { prompt: string; options: string[]; answer: number; explanation: string };
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 
-const FLASHCARD_PROMPT =
-  'Generate ONLY flashcards from this text. Return a study kit JSON with only the flashcards array filled in. Leave chapters, questions, and reviewPlan as empty arrays.';
-const QUIZ_PROMPT =
-  'Generate ONLY multiple choice quiz questions from this text. Return a study kit JSON with only the questions array filled in. Leave chapters, flashcards, and reviewPlan as empty arrays.';
+const FLASHCARD_SYSTEM_PROMPT = 'You are a flashcard generator. Return ONLY a valid JSON array. No markdown, no explanation, just the raw JSON array.';
+const QUIZ_SYSTEM_PROMPT = 'You are a multiple-choice quiz generator. Return ONLY a valid JSON array. No markdown, no explanation, just the raw JSON array.';
 
 const clean = (s: string) => {
   const m = s.trim().match(/^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i);
@@ -59,12 +57,14 @@ async function readStream(response: Response) {
   return output.trim();
 }
 
-async function askGroq(messages: Array<{ role: string; content: string }>) {
+async function askGroq(messages: Array<{ role: 'user' | 'assistant'; content: string }>, systemPrompt: string) {
+  console.log('[Selection AI] Sending request to /api/ai-chat', { model: 'llama-3.1-8b-instant', messageCount: messages.length });
   const response = await fetch('/api/ai-chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, systemPrompt, model: 'llama-3.1-8b-instant' }),
   });
+  console.log('[Selection AI] API response received', { status: response.status, ok: response.ok });
   return readStream(response);
 }
 
@@ -109,10 +109,12 @@ function quizKit(questions: QuizQuestion[]) {
   };
 }
 
-function parseStudyKit(raw: string) {
+function parseJsonArray(raw: string) {
+  console.log('[Selection AI] Raw model response:', raw);
   const value = JSON.parse(clean(raw));
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('AI did not return a study kit JSON object.');
-  return value as Record<string, unknown>;
+  if (!Array.isArray(value)) throw new Error('AI did not return a JSON array.');
+  console.log('[Selection AI] Parsed JSON array length:', value.length);
+  return value;
 }
 
 export default function SelectionAIToolbar() {
@@ -144,7 +146,8 @@ export default function SelectionAIToolbar() {
   const detectSelection = useCallback(() => {
     const selection = window.getSelection();
     const value = selection?.toString().trim() || '';
-    if (!selection || selection.isCollapsed || !value || !selection.rangeCount) {
+    const editorElement = document.querySelector('.ProseMirror');
+    if (!selection || selection.isCollapsed || !value || !selection.rangeCount || !editorElement || !selection.anchorNode || !editorElement.contains(selection.anchorNode)) {
       hide();
       return;
     }
@@ -188,22 +191,25 @@ export default function SelectionAIToolbar() {
     setBusy(true);
     try {
       const selected = selectionRef.current;
-      const raw = await askGroq([
-        { role: 'system', content: 'You generate study kit JSON.' },
-        { role: 'user', content: `${FLASHCARD_PROMPT}\n\nSelected text:\n${selected}` },
-      ]);
-      const value = parseStudyKit(raw);
-      const cardsValue = value.flashcards;
+      console.log('[Selection AI] Flashcard generation started; selected text length:', selected.length);
+      const raw = await askGroq([{ role: 'user', content: `Generate 5 flashcards from this text as a JSON array ONLY, no other text: [{"front": string, "back": string}]
+
+Text: ${selected}` }], FLASHCARD_SYSTEM_PROMPT);
+      console.log('[Selection AI] Flashcard response received');
+      const cardsValue = parseJsonArray(raw);
       if (!Array.isArray(cardsValue) || cardsValue.length !== 5) throw new Error('AI did not return 5 flashcards.');
       const cards = cardsValue.map((x: any) => ({ front: String(x?.front || '').trim(), back: String(x?.back || '').trim() }));
       if (cards.some((x: Flashcard) => !x.front || !x.back)) throw new Error('AI returned an invalid flashcard.');
       const kit = flashcardKit(cards);
+      console.log('[Selection AI] Flashcards validated; saving kit');
       storeKit(kit);
       await saveKit(kit);
+      console.log('[Selection AI] Flashcard kit saved successfully');
       toast({ title: 'Flashcards saved to Files!' });
       hide();
     } catch (error) {
-      toast({ title: 'Could not generate flashcards', description: error instanceof Error ? error.message : 'Please try again.', variant: 'destructive' });
+      console.error('[Selection AI] Flashcard generation failed:', error);
+      toast({ title: 'Could not generate flashcards', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
       setBusy(false);
     }
   };
@@ -213,12 +219,12 @@ export default function SelectionAIToolbar() {
     setBusy(true);
     try {
       const selected = selectionRef.current;
-      const raw = await askGroq([
-        { role: 'system', content: 'You generate study kit JSON.' },
-        { role: 'user', content: `${QUIZ_PROMPT}\n\nSelected text:\n${selected}` },
-      ]);
-      const value = parseStudyKit(raw);
-      const questionsValue = value.questions;
+      console.log('[Selection AI] Quiz generation started; selected text length:', selected.length);
+      const raw = await askGroq([{ role: 'user', content: `Generate 5 multiple-choice quiz questions from this text as a JSON array ONLY, no other text: [{"prompt": string, "options": string[], "answer": number, "explanation": string}]
+
+Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
+      console.log('[Selection AI] Quiz response received');
+      const questionsValue = parseJsonArray(raw);
       if (!Array.isArray(questionsValue) || questionsValue.length !== 5) throw new Error('AI did not return 5 quiz questions.');
       const questions = questionsValue.map((x: any) => ({
         prompt: String(x?.prompt || '').trim(),
@@ -229,13 +235,16 @@ export default function SelectionAIToolbar() {
       if (questions.some((q: QuizQuestion) => !q.prompt || q.options.length < 2 || !Number.isInteger(q.answer) || q.answer < 0 || q.answer >= q.options.length || !q.explanation)) {
         throw new Error('AI returned an invalid quiz question.');
       }
+      console.log('[Selection AI] Quiz questions validated; saving kit');
       const kit = quizKit(questions);
       storeKit(kit);
       await saveKit(kit);
+      console.log('[Selection AI] Quiz kit saved successfully');
       toast({ title: 'Quiz saved to Files!' });
       hide();
     } catch (error) {
-      toast({ title: 'Could not generate quiz', description: error instanceof Error ? error.message : 'Please try again.', variant: 'destructive' });
+      console.error('[Selection AI] Quiz generation failed:', error);
+      toast({ title: 'Could not generate quiz', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
       setBusy(false);
     }
   };
@@ -251,10 +260,8 @@ export default function SelectionAIToolbar() {
     setChatBusy(true);
 
     try {
-      const answer = await askGroq([
-        { role: 'system', content: `The user has selected this text: ${selected}` },
-        ...history,
-      ]);
+      console.log('[Selection AI] Ask AI sending question; selected text length:', selected.length);
+      const answer = await askGroq(history, `The user has selected this text: ${selected}. Answer questions about it.`);
       setChatMessages(current => [...current, { role: 'assistant', content: answer }]);
     } catch (error) {
       setChatMessages(current => [...current, {
@@ -336,7 +343,7 @@ export default function SelectionAIToolbar() {
             <>
               <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void generateFlashcards()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary">🧠 Generate Flashcards</button>
               <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void generateQuiz()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary">❓ Generate Quiz</button>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { setOpen(false); setChatOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary">💬 Ask AI</button>
+              <button type="button" onMouseDown={() => { const selected = window.getSelection()?.toString().trim(); if (selected) { selectionRef.current = selected.slice(0, 12000); setText(selectionRef.current); } }} onClick={() => { console.log('[Selection AI] Ask AI clicked; context length:', selectionRef.current.length); setOpen(false); setChatOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary">💬 Ask AI</button>
             </>
           )}
         </div>
