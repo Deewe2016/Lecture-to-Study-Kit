@@ -126,6 +126,7 @@ export default function SelectionAIToolbar() {
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<'flashcards' | 'quiz' | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -137,6 +138,7 @@ export default function SelectionAIToolbar() {
     setPosition(null);
     setOpen(false);
     setBusy(false);
+    setBusyAction(null);
     setChatOpen(false);
     setChatInput('');
     setChatMessages([]);
@@ -189,6 +191,7 @@ export default function SelectionAIToolbar() {
   const generateFlashcards = async () => {
     if (!selectionRef.current || busy) return;
     setBusy(true);
+    setBusyAction('flashcards');
     try {
       const selected = selectionRef.current;
       console.log('[Selection AI] Flashcard generation started; selected text length:', selected.length);
@@ -211,12 +214,14 @@ Text: ${selected}` }], FLASHCARD_SYSTEM_PROMPT);
       console.error('[Selection AI] Flashcard generation failed:', error);
       toast({ title: 'Could not generate flashcards', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
       setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const generateQuiz = async () => {
     if (!selectionRef.current || busy) return;
     setBusy(true);
+    setBusyAction('quiz');
     try {
       const selected = selectionRef.current;
       console.log('[Selection AI] Quiz generation started; selected text length:', selected.length);
@@ -246,6 +251,7 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
       console.error('[Selection AI] Quiz generation failed:', error);
       toast({ title: 'Could not generate quiz', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
       setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -337,15 +343,13 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
         </div>
       ) : (
         <div className="mt-1 w-[220px] rounded-lg border border-border bg-card p-1.5 text-foreground shadow-2xl">
-          {busy ? (
-            <div className="flex items-center gap-2 px-3 py-2.5 text-xs text-muted-foreground"><Loader2 size={14} className="animate-spin" />Generating…</div>
-          ) : (
-            <>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void generateFlashcards()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary">🧠 Generate Flashcards</button>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void generateQuiz()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary">❓ Generate Quiz</button>
-              <button type="button" onMouseDown={() => { const selected = window.getSelection()?.toString().trim(); if (selected) { selectionRef.current = selected.slice(0, 12000); setText(selectionRef.current); } }} onClick={() => { console.log('[Selection AI] Ask AI clicked; context length:', selectionRef.current.length); setOpen(false); setChatOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary">💬 Ask AI</button>
-            </>
-          )}
+          <button type="button" disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void generateFlashcards()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">
+            {busyAction === 'flashcards' ? <Loader2 size={14} className="animate-spin" /> : '🧠'} Generate Flashcards
+          </button>
+          <button type="button" disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void generateQuiz()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">
+            {busyAction === 'quiz' ? <Loader2 size={14} className="animate-spin" /> : '❓'} Generate Quiz
+          </button>
+          <button type="button" disabled={busy} onMouseDown={() => { const selected = window.getSelection()?.toString().trim(); if (selected) { selectionRef.current = selected.slice(0, 12000); setText(selectionRef.current); } }} onClick={() => { console.log('[Selection AI] Ask AI clicked; context length:', selectionRef.current.length); setOpen(false); setChatOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">💬 Ask AI</button>
         </div>
       )}
     </div>
