@@ -12,6 +12,7 @@ import FontFamily from '@tiptap/extension-font-family';
 import { Extension } from '@tiptap/core';
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Highlighter, Image as ImageIcon, Link as LinkIcon, List, ListIndentDecrease, ListIndentIncrease, ListOrdered, Redo, Strikethrough, Underline as UnderlineIcon, Undo } from 'lucide-react';
 import { getAccessToken } from '@/lib/auth';
+import SelectionAIToolbar from '@/components/selection-ai-toolbar';
 
 type DocumentRow = {
   id: string;
@@ -478,6 +479,7 @@ export default function DocumentPage({ params }: { params: { id: string } }) {
           </div>
         </div>
       )}
+    <SelectionAIToolbar />
     </main>
   );
 }
