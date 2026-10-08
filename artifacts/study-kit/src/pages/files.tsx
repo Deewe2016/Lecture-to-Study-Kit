@@ -996,7 +996,7 @@ export default function FilesPage() {
             <button type="button" onClick={() => void createDocument()} disabled={busy} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary disabled:opacity-50"><FileText size={16} className="text-muted-foreground" /> New Document</button>
             <button type="button" onClick={() => void createWhiteboard()} disabled={busy} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary disabled:opacity-50"><Pencil size={16} className="text-muted-foreground" /> New Whiteboard</button>
             <button type="button" onClick={() => { setNewMenuOpen(false); window.location.assign('/new'); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary"><BookOpen size={16} className="text-muted-foreground" /> New Study Kit</button>
-            <label className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary"><span>⬆️</span> Upload File<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label>
+            <label className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary"><UploadCloud size={16} className="shrink-0" /> Upload File<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label>
           </div>}
         </div>
       </div>
