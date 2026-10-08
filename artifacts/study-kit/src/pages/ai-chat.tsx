@@ -298,20 +298,17 @@ export default function AIChatPage() {
 
       if (!context && !pendingMessages.length) return;
 
-      const contextMessage: Message = {
-        id: makeId(),
-        role: 'user',
-        content: pendingMessages.length
-          ? pendingMessages[0].content
-          : `Selected text context:\n${context}`,
-      };
       const conversationMessages: Message[] = pendingMessages.length
         ? pendingMessages.map((message: any) => ({
             id: makeId(),
             role: message.role,
             content: message.content,
           }))
-        : [contextMessage];
+        : [{
+            id: makeId(),
+            role: 'user',
+            content: `Selected text context:\n${context}`,
+          }];
 
       const conversation = {
         id: makeId(),
@@ -448,7 +445,8 @@ export default function AIChatPage() {
         },
       );
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.message || data?.details || 'Could not load your files.');      setUserFiles(Array.isArray(data) ? data : []);
+      if (!response.ok) throw new Error(data?.message || data?.details || 'Could not load your files.');
+      setUserFiles(Array.isArray(data) ? data : []);
       setFilesModalOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load your files.');
@@ -847,7 +845,8 @@ export default function AIChatPage() {
                 <h1 className="font-serif text-3xl tracking-[-.03em] text-foreground">AI Chat</h1>
                 <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                   Ask anything and get a response from your AI study assistant.
-                </p>              </div>
+                </p>
+              </div>
             )}
 
             {messages.map((message) => (
