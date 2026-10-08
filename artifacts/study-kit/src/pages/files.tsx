@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   ChevronRight, Download, File, FileArchive, FileAudio, FileImage, FileText,
   FileVideo, Folder, FolderOpen, Grid2X2, List, MoreHorizontal, Pencil, Pin,
-  Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen, FilePlus2
+  Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen, FilePlus2, ChevronDown
 } from 'lucide-react';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
 
@@ -13,6 +13,8 @@ type FileRow = { id: string; name: string; folder_id: string | null; owner_id: s
 type ShareRow = { id: string; file_id: string | null; folder_id: string | null; shared_with_user_id: string; shared_by_user_id: string; created_at: string };
 type DocumentRow = { id: string; title: string; content: any; owner_id: string; folder_id: string | null; created_at: string; updated_at: string };
 type DocumentShareRow = { id: string; document_id: string; shared_with_user_id: string; shared_by_user_id: string; created_at: string };
+type WhiteboardRow = { id: string; title: string; content: any; owner_id: string; folder_id: string | null; created_at: string; updated_at: string };
+type WhiteboardShareRow = { id: string; whiteboard_id: string; shared_with_user_id: string; shared_by_user_id: string; created_at: string };
 type UserRow = { id: string; email: string; display_name: string };
 
 const url = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
@@ -250,6 +252,10 @@ export default function FilesPage() {
   const [shares, setShares] = useState<ShareRow[]>([]);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [documentShares, setDocumentShares] = useState<DocumentShareRow[]>([]);
+  const [whiteboards, setWhiteboards] = useState<WhiteboardRow[]>([]);
+  const [whiteboardShares, setWhiteboardShares] = useState<WhiteboardShareRow[]>([]);
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const newMenuRef = useRef<HTMLDivElement>(null);
   const [kits, setKits] = useState<LocalKit[]>(() => readLocalKits());
   const [selected, setSelected] = useState<string | null>(null);
   const [folderDrawerOpen, setFolderDrawerOpen] = useState(false);
@@ -260,10 +266,10 @@ export default function FilesPage() {
   const [error, setError] = useState('');
   const [menu, setMenu] = useState<string | null>(null);
   const [modal, setModal] = useState<{ file: FileRow; url?: string } | null>(null);
-  const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share' | 'document-share'; id?: string; name?: string; fileId?: string } | null>(null);
-  const [deleteDialog, setDeleteDialog] = useState<{ kind: 'file' | 'document' | 'kit'; id: string; name: string } | null>(null);
+  const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share' | 'document-share' | 'whiteboard-share'; id?: string; name?: string; fileId?: string } | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{ kind: 'file' | 'document' | 'kit' | 'whiteboard'; id: string; name: string } | null>(null);
   const [dialogValue, setDialogValue] = useState('');
-  const [editingItem, setEditingItem] = useState<{ kind: 'file' | 'folder' | 'document'; id: string } | null>(null);
+  const [editingItem, setEditingItem] = useState<{ kind: 'file' | 'folder' | 'document' | 'whiteboard'; id: string } | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [sharedUser, setSharedUser] = useState<UserRow[]>([]);
   const [pinned, setPinned] = useState<string[]>(() => {
@@ -274,12 +280,14 @@ export default function FilesPage() {
     if (!me) return;
     setError('');
     try {
-      const [fs, fl, sh, docs, docShares] = await Promise.all([
+      const [fs, fl, sh, docs, docShares, wbs, wbShares] = await Promise.all([
         api<FolderRow[]>('/rest/v1/folders?select=*&order=name.asc'),
         api<FileRow[]>('/rest/v1/files?select=*&order=created_at.desc'),
         api<ShareRow[]>('/rest/v1/file_shares?select=*'),
         api<DocumentRow[]>('/rest/v1/documents?select=*&order=updated_at.desc'),
         api<DocumentShareRow[]>('/rest/v1/document_shares?select=*'),
+        api<WhiteboardRow[]>('/rest/v1/whiteboards?select=*&order=updated_at.desc'),
+        api<WhiteboardShareRow[]>('/rest/v1/whiteboard_shares?select=*'),
       ]);
       const normalizedFolders = await ensureRoot(fs);
       setFolders(normalizedFolders);
@@ -287,6 +295,8 @@ export default function FilesPage() {
       setShares(sh);
       setDocuments(docs);
       setDocumentShares(docShares);
+      setWhiteboards(wbs);
+      setWhiteboardShares(wbShares);
       setKits(readLocalKits());
     } catch (e) {
       if (isJwtError(e)) {
@@ -303,6 +313,15 @@ export default function FilesPage() {
   useEffect(() => {
     try { localStorage.setItem('flexus-file-pins', JSON.stringify(pinned)); } catch {}
   }, [pinned]);
+
+  useEffect(() => {
+    if (!newMenuOpen) return;
+    const close = (event: MouseEvent) => {
+      if (newMenuRef.current && !newMenuRef.current.contains(event.target as Node)) setNewMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [newMenuOpen]);
 
   const ensureRoot = async (loadedFolders: FolderRow[]) => {
     if (!me) return loadedFolders;
@@ -349,9 +368,17 @@ export default function FilesPage() {
   const sharedFiles = useMemo(() => files.filter(f => directShared.includes(f) || (f.folder_id && sharedFolderIds.has(f.folder_id))), [files, directShared, sharedFolderIds]);
   const mineDocuments = useMemo(() => documents.filter(d => d.owner_id === me?.id), [documents, me?.id]);
   const sharedDocuments = useMemo(() => documents.filter(d => documentShares.some(s => s.document_id === d.id && s.shared_with_user_id === me?.id)), [documents, documentShares, me?.id]);
+  const mineWhiteboards = useMemo(() => whiteboards.filter(w => w.owner_id === me?.id), [whiteboards, me?.id]);
+  const sharedWhiteboards = useMemo(() => whiteboards.filter(w => whiteboardShares.some(s => s.whiteboard_id === w.id && s.shared_with_user_id === me?.id)), [whiteboards, whiteboardShares, me?.id]);
   const visibleFolders = section === 'mine' ? folders.filter(f => f.owner_id === me?.id) : folders.filter(f => sharedFolderIds.has(f.id));
   const visibleFiles = section === 'mine' ? mine : sharedFiles;
   const visibleDocuments = section === 'mine' ? mineDocuments : sharedDocuments;
+  const visibleWhiteboards = section === 'mine' ? mineWhiteboards : sharedWhiteboards;
+  const currentWhiteboards = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return visibleWhiteboards.filter(w => (!selected || w.folder_id === selected) && (!q || w.title.toLowerCase().includes(q)));
+  }, [visibleWhiteboards, selected, search]);
+
   const currentFiles = useMemo(() => {
     const q = search.trim().toLowerCase();
     return visibleFiles.filter(f => (!selected || f.folder_id === selected) && (!q || f.name.toLowerCase().includes(q)));
@@ -361,9 +388,10 @@ export default function FilesPage() {
   const root = folders.find(f => f.owner_id === me?.id && f.parent_folder_id === null);
   const studyKitsFolder = folders.find(f => isStudyKitsFolder(f, root?.id));
   const studyKits = studyKitsFolder ? kits : [];
-  const recentItems = [...mine.slice(0, 4).map(file => ({ kind: 'file' as const, date: file.created_at, file })),
-    ...mineDocuments.slice(0, 4).map(document => ({ kind: 'document' as const, date: document.updated_at, document })),
-    ...studyKits.slice(0, 3).map(kit => ({ kind: 'kit' as const, date: kit.createdAt || '', kit }))]
+  const recentItems = [...(section === 'mine' ? mine : sharedFiles).slice(0, 4).map(file => ({ kind: 'file' as const, date: file.created_at, file })),
+    ...(section === 'mine' ? mineDocuments : sharedDocuments).slice(0, 4).map(document => ({ kind: 'document' as const, date: document.updated_at, document })),
+    ...(section === 'mine' ? mineWhiteboards : sharedWhiteboards).slice(0, 4).map(whiteboard => ({ kind: 'whiteboard' as const, date: whiteboard.updated_at, whiteboard })),
+    ...(section === 'mine' ? studyKits : []).slice(0, 3).map(kit => ({ kind: 'kit' as const, date: kit.createdAt || '', kit }))]
     .sort((a, b) => +new Date(b.date || 0) - +new Date(a.date || 0))
     .slice(0, 8);
 
@@ -427,6 +455,9 @@ export default function FilesPage() {
     if (item.kind === 'file') {
       const file = files.find(f => f.id === item.id);
       if (file) await renameFile(file, name);
+    } else if (item.kind === 'whiteboard') {
+      const whiteboard = whiteboards.find(candidate => candidate.id === item.id);
+      if (whiteboard) await renameWhiteboard(whiteboard, name);
     } else if (item.kind === 'document') {
       setBusy(true);
       try {
@@ -560,6 +591,14 @@ export default function FilesPage() {
         return;
       }
 
+      if (pending.kind === 'whiteboard') {
+        await api(`/rest/v1/whiteboards?id=eq.${encodeURIComponent(pending.id)}`, { method: 'DELETE' });
+        setWhiteboards(prev => prev.filter(whiteboard => whiteboard.id !== pending.id));
+        setWhiteboardShares(prev => prev.filter(share => share.whiteboard_id !== pending.id));
+        setDeleteDialog(null);
+        return;
+      }
+
       if (pending.kind === 'document') {
         await api(`/rest/v1/documents?id=eq.${encodeURIComponent(pending.id)}`, { method: 'DELETE' });
         setDocuments(prev => prev.filter(document => document.id !== pending.id));
@@ -625,6 +664,53 @@ export default function FilesPage() {
       await api('/rest/v1/file_shares', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(body) });
       setDialog(null); setSharedUser([]);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not share.'); }
+    finally { setBusy(false); }
+  };
+
+  const createWhiteboard = async () => {
+    if (!me) return;
+    const folderId = selected || root?.id || null;
+    setBusy(true); setError('');
+    try {
+      const created = await api<WhiteboardRow[]>('/rest/v1/whiteboards?select=*', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          title: 'Untitled Whiteboard',
+          content: { type: 'excalidraw', version: 2, elements: [], appState: {}, files: {} },
+          owner_id: me.id,
+          folder_id: folderId,
+        }),
+      });
+      if (created[0]) {
+        setWhiteboards(prev => [created[0], ...prev]);
+        setNewMenuOpen(false);
+        window.location.assign('/whiteboard?id=' + encodeURIComponent(created[0].id));
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create whiteboard.'); }
+    finally { setBusy(false); }
+  };
+
+  const shareWhiteboard = async (user: UserRow) => {
+    if (!dialog?.id || !me) return;
+    setBusy(true);
+    try {
+      await api('/rest/v1/whiteboard_shares', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ whiteboard_id: dialog.id, shared_with_user_id: user.id, shared_by_user_id: me.id }) });
+      setDialog(null); setSharedUser([]);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not share whiteboard.'); }
+    finally { setBusy(false); }
+  };
+
+  const renameWhiteboard = async (whiteboard: WhiteboardRow, nextName: string) => {
+    const title = nextName.trim();
+    if (!title || title === whiteboard.title) return;
+    setBusy(true);
+    try {
+      const updatedAt = new Date().toISOString();
+      await api('/rest/v1/whiteboards?id=eq.' + whiteboard.id, { method: 'PATCH', body: JSON.stringify({ title, updated_at: updatedAt }) });
+      setWhiteboards(prev => prev.map(item => item.id === whiteboard.id ? { ...item, title, updated_at: updatedAt } : item));
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not rename whiteboard.'); }
     finally { setBusy(false); }
   };
 
@@ -736,6 +822,26 @@ export default function FilesPage() {
     </div>
   );
 
+  const whiteboardCard = (whiteboard: WhiteboardRow) => (
+    <div key={whiteboard.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
+      <button type="button" onClick={() => window.location.assign('/whiteboard?id=' + encodeURIComponent(whiteboard.id))} className="w-full text-left">
+        <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60"><Pencil size={34} className="text-primary" /></div>
+        <p className="mt-3 truncate text-sm font-medium" title={whiteboard.title}>{whiteboard.title.length > 15 ? whiteboard.title.slice(0, 15) + '…' : whiteboard.title}</p>
+        <p className="mt-1 text-[10px] text-muted-foreground">Whiteboard · {formatDate(whiteboard.updated_at)}</p>
+      </button>
+      {whiteboard.owner_id === me?.id && <div className="mt-3 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="relative">
+          <button type="button" onClick={() => setMenu(menu === 'wb:' + whiteboard.id ? null : 'wb:' + whiteboard.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
+          {menu === 'wb:' + whiteboard.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
+            <button type="button" onClick={() => { const next = window.prompt('Rename whiteboard', whiteboard.title)?.trim(); if (next && next !== whiteboard.title) void renameWhiteboard(whiteboard, next); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
+            <button type="button" onClick={() => { setDialog({ kind:'whiteboard-share', id:whiteboard.id }); setDialogValue(''); setSharedUser([]); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
+            <button type="button" onClick={() => { setDeleteDialog({ kind:'whiteboard', id:whiteboard.id, name:whiteboard.title }); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
+          </div>}
+        </div>
+      </div>}
+    </div>
+  );
+
   const documentCard = (document: DocumentRow) => (
     <div key={document.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
       <button type="button" onClick={() => window.location.assign('/document/' + document.id)} className="w-full text-left">
@@ -838,12 +944,15 @@ export default function FilesPage() {
       {error && <div className="mb-4 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-200">{error}</div>}
       <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="font-mono text-[10px] uppercase tracking-[.2em] text-primary">Workspace</p><h1 className="mt-3 font-serif text-4xl tracking-[-.04em]">Your workspace</h1><p className="mt-2 text-sm text-muted-foreground">Files, study kits, and everything you need</p></div>
-        <div className="flex gap-2">
-          <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={15}/> Upload File<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label>
-          <button onClick={() => { setDialog({kind:'folder'}); setDialogValue(''); }} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={15}/> New Folder</button>
-          <button onClick={() => void createDocument()} disabled={busy} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary disabled:opacity-50"><FilePlus2 size={15}/> New Document</button>
-           <button onClick={() => { localStorage.removeItem('flexus-whiteboard'); window.location.href = '/whiteboard'; }} disabled={busy} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary disabled:opacity-50"><Pencil size={15}/> New Whiteboard</button>
-          <a href="/new" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-4 py-2.5 text-xs font-semibold text-primary hover:bg-primary/15"><Plus size={15}/> New Study Kit</a>
+        <div className="relative" ref={newMenuRef}>
+          <button type="button" onClick={() => setNewMenuOpen(open => !open)} disabled={busy} className="flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2.5 text-xs font-semibold text-slate-950 transition-opacity hover:opacity-90 disabled:opacity-50"><Plus size={15}/> New <ChevronDown size={14}/></button>
+          {newMenuOpen && <div className="absolute right-0 top-12 z-50 w-56 rounded-xl border border-border bg-card p-1.5 shadow-2xl">
+            <button type="button" onClick={() => { setDialog({kind:'folder'}); setDialogValue(''); setNewMenuOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary"><span>📁</span> New Folder</button>
+            <button type="button" onClick={() => void createDocument()} disabled={busy} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary disabled:opacity-50"><span>📄</span> New Document</button>
+            <button type="button" onClick={() => void createWhiteboard()} disabled={busy} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary disabled:opacity-50"><span>🎨</span> New Whiteboard</button>
+            <button type="button" onClick={() => { setNewMenuOpen(false); window.location.assign('/new'); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary"><span>🧠</span> New Study Kit</button>
+            <label className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary"><span>⬆️</span> Upload File<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label>
+          </div>}
         </div>
       </div>
 
@@ -867,12 +976,12 @@ export default function FilesPage() {
         <div className="min-w-0"><button type="button" onClick={() => setFolderDrawerOpen(true)} className="mb-4 flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-4 text-xs font-semibold xl:hidden"><FolderOpen size={15} className="text-primary"/> Browse folders</button>
           {!selected ? <div>
             <div className="flex items-center justify-between"><div><h2 className="font-serif text-2xl">Recent</h2><p className="mt-1 text-xs text-muted-foreground">Your latest files and study kits</p></div></div>
-            {!recentItems.length ? <div className="mt-5 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-12 text-center"><div className="mx-auto flex w-fit items-center gap-2 text-primary"><UploadCloud size={30}/><BookOpen size={30}/></div><h2 className="mt-4 font-serif text-2xl">Nothing here yet</h2><p className="mt-2 text-sm text-muted-foreground">Add a file or create a study kit to get started.</p><div className="mt-5 flex justify-center gap-2"><label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={14}/> Upload a file<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label><a href="/new" className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={14}/> Create a study kit</a></div></div> : <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{recentItems.map(item => item.kind === 'file' ? fileCard(item.file) : item.kind === 'document' ? documentCard(item.document) : kitCard(item.kit))}</div>}
+            {!recentItems.length ? <div className="mt-5 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-12 text-center"><div className="mx-auto flex w-fit items-center gap-2 text-primary"><UploadCloud size={30}/><BookOpen size={30}/></div><h2 className="mt-4 font-serif text-2xl">Nothing here yet</h2><p className="mt-2 text-sm text-muted-foreground">Add a file or create a study kit to get started.</p><div className="mt-5 flex justify-center gap-2"><label className="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"><UploadCloud size={14}/> Upload a file<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label><a href="/new" className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary"><Plus size={14}/> Create a study kit</a></div></div> : <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{recentItems.map(item => item.kind === 'file' ? fileCard(item.file) : item.kind === 'document' ? documentCard(item.document) : item.kind === 'whiteboard' ? whiteboardCard(item.whiteboard) : kitCard(item.kit))}</div>}
             <div className="mt-10"><h2 className="font-serif text-2xl">Quick access</h2>{quick.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{quick.map(f=><button key={f.id} onClick={()=>{setSection('mine');setSelected(f.id)}} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left hover:border-primary/40"><Folder size={20} className="text-primary"/><span className="truncate text-sm font-medium">{f.name}</span></button>)}</div> : <p className="mt-3 text-xs text-muted-foreground">Pin folders from their menu to keep them here.</p>}</div>
           </div> : <div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search files by name" className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-xs outline-none"/></div><div className="flex rounded-lg border border-border p-1"><button onClick={()=>setView('grid')} className={`rounded-md p-1.5 ${view==='grid'?'bg-secondary':''}`}><Grid2X2 size={15}/></button><button onClick={()=>setView('list')} className={`rounded-md p-1.5 ${view==='list'?'bg-secondary':''}`}><List size={15}/></button></div></div>
             <div className="mt-5 flex items-center justify-between"><h2 className="font-serif text-2xl">{section==='shared'?'Shared with Me':(folders.find(f=>f.id===selected)?.name || 'My Files')}</h2><span className="text-xs text-muted-foreground">{currentFiles.length} files</span></div>
-            {selected === studyKitsFolder?.id ? (studyKits.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{studyKits.filter(k => !search || k.title.toLowerCase().includes(search.toLowerCase())).map(kitCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No study kits yet.</div>) : currentFiles.length ? <div className={view==='grid'?'mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4':'mt-4 space-y-2'}>{currentFiles.map(fileCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No files in this folder.</div>}
+            {selected === studyKitsFolder?.id ? (studyKits.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{studyKits.filter(k => !search || k.title.toLowerCase().includes(search.toLowerCase())).map(kitCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No study kits yet.</div>) : (currentFiles.length || currentWhiteboards.length) ? <div className={view==='grid'?'mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4':'mt-4 space-y-2'}>{currentWhiteboards.map(whiteboardCard)}{currentFiles.map(fileCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No files in this folder.</div>}
           </div>}
         </div>
       </div>
@@ -881,7 +990,7 @@ export default function FilesPage() {
 
       {deleteDialog && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-5">
         <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
-          <h2 className="font-serif text-2xl">Delete {deleteDialog.kind === 'document' ? 'document' : deleteDialog.kind === 'kit' ? 'study kit' : 'file'}?</h2>
+          <h2 className="font-serif text-2xl">Delete {deleteDialog.kind === 'document' ? 'document' : deleteDialog.kind === 'kit' ? 'study kit' : deleteDialog.kind === 'whiteboard' ? 'whiteboard' : 'file'}?</h2>
           <p className="mt-3 text-sm text-muted-foreground">Are you sure you want to delete {deleteDialog.name}? This cannot be undone.</p>
           <div className="mt-6 flex justify-end gap-2">
             <button type="button" onClick={() => setDeleteDialog(null)} className="rounded-lg border border-border px-4 py-2.5 text-xs font-semibold hover:bg-secondary">Cancel</button>
@@ -892,7 +1001,7 @@ export default function FilesPage() {
 
       {dialog && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 p-5"><div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="flex items-center justify-between"><h2 className="font-serif text-2xl">{dialog.kind==='folder'?'New Folder':dialog.kind==='rename'?'Rename Folder':'Share with Flexus user'}</h2><button onClick={()=>setDialog(null)}><X size={17}/></button></div>
-        {dialog.kind==='share' || dialog.kind==='document-share' ? <><input autoFocus value={dialogValue} onChange={e=>void searchUsers(e.target.value)} placeholder="Search by name or email" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><div className="mt-3 space-y-1">{sharedUser.map(u=><button key={u.id} onClick={()=>void (dialog.kind==='document-share' ? shareDocument(u) : share(u))} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left hover:bg-secondary"><span><span className="block text-sm">{u.display_name}</span><span className="block text-[10px] text-muted-foreground">{u.email}</span></span><Share2 size={14}/></button>)}</div></> : <><input autoFocus value={dialogValue} onChange={e=>setDialogValue(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void (dialog.kind==='folder'?createFolder():renameFolder())}} placeholder="Folder name" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><button disabled={busy||!dialogValue.trim()} onClick={()=>void (dialog.kind==='folder'?createFolder():renameFolder())} className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{dialog.kind==='folder'?'Create folder':'Save changes'}</button></>}
+        {dialog.kind==='share' || dialog.kind==='document-share' || dialog.kind==='whiteboard-share' ? <><input autoFocus value={dialogValue} onChange={e=>void searchUsers(e.target.value)} placeholder="Search by name or email" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><div className="mt-3 space-y-1">{sharedUser.map(u=><button key={u.id} onClick={()=>void (dialog.kind==='document-share' ? shareDocument(u) : dialog.kind==='whiteboard-share' ? shareWhiteboard(u) : share(u))} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left hover:bg-secondary"><span><span className="block text-sm">{u.display_name}</span><span className="block text-[10px] text-muted-foreground">{u.email}</span></span><Share2 size={14}/></button>)}</div></> : <><input autoFocus value={dialogValue} onChange={e=>setDialogValue(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void (dialog.kind==='folder'?createFolder():renameFolder())}} placeholder="Folder name" className="mt-5 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none"/><button disabled={busy||!dialogValue.trim()} onClick={()=>void (dialog.kind==='folder'?createFolder():renameFolder())} className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{dialog.kind==='folder'?'Create folder':'Save changes'}</button></>}
       </div></div>}
     </div>
   </section>;
