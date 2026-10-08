@@ -110,8 +110,17 @@ function quizKit(questions: QuizQuestion[]) {
 }
 
 function parseJsonArray(raw: string) {
-  console.log('[Selection AI] Raw model response:', raw);
-  const value = JSON.parse(clean(raw));
+  console.log('[Selection AI] Raw model response length:', raw.length, raw);
+  let cleaned = clean(raw).replace(/```json\\s*/gi, '').replace(/```/g, '').trim();
+  console.log('[Selection AI] Cleaned JSON response length:', cleaned.length);
+  if (!cleaned.endsWith(']')) {
+    const lastBracket = cleaned.lastIndexOf('}');
+    if (lastBracket >= 0) {
+      cleaned = cleaned.slice(0, lastBracket + 1) + ']';
+      console.warn('[Selection AI] Response appeared truncated; attempting recovery at last complete object.');
+    }
+  }
+  const value = JSON.parse(cleaned);
   if (!Array.isArray(value)) throw new Error('AI did not return a JSON array.');
   console.log('[Selection AI] Parsed JSON array length:', value.length);
   return value;
@@ -122,6 +131,7 @@ export default function SelectionAIToolbar() {
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const selectionRef = useRef('');
+  const savedTextRef = useRef('');
   const [text, setText] = useState('');
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const [open, setOpen] = useState(false);
@@ -134,6 +144,7 @@ export default function SelectionAIToolbar() {
 
   const hide = useCallback(() => {
     selectionRef.current = '';
+    savedTextRef.current = '';
     setText('');
     setPosition(null);
     setOpen(false);
@@ -157,6 +168,8 @@ export default function SelectionAIToolbar() {
     if (!rect.width && !rect.height) return;
     const selected = value.slice(0, 12000);
     selectionRef.current = selected;
+    savedTextRef.current = selected;
+    console.log('[Selection AI] Editor selection captured', { length: selected.length });
     setText(selected);
     setPosition({
       left: Math.max(8, Math.min(window.innerWidth - 80, rect.left + rect.width / 2 - 36)),
@@ -199,12 +212,12 @@ export default function SelectionAIToolbar() {
     try {
       const selected = savedTextRef.current || selectionRef.current;
       console.log('[Selection AI] Flashcard generation started; selected text length:', selected.length);
-      const raw = await askGroq([{ role: 'user', content: `Generate 5 flashcards from this text as a JSON array ONLY, no other text: [{"front": string, "back": string}]
+      const raw = await askGroq([{ role: 'user', content: `Generate 3 flashcards from this text as a JSON array ONLY, no other text: [{"front": string, "back": string}]
 
 Text: ${selected}` }], FLASHCARD_SYSTEM_PROMPT);
       console.log('[Selection AI] Flashcard response received');
       const cardsValue = parseJsonArray(raw);
-      if (!Array.isArray(cardsValue) || cardsValue.length !== 5) throw new Error('AI did not return 5 flashcards.');
+      if (!Array.isArray(cardsValue) || cardsValue.length !== 3) throw new Error('AI did not return 3 flashcards.');
       const cards = cardsValue.map((x: any) => ({ front: String(x?.front || '').trim(), back: String(x?.back || '').trim() }));
       if (cards.some((x: Flashcard) => !x.front || !x.back)) throw new Error('AI returned an invalid flashcard.');
       const kit = flashcardKit(cards);
@@ -229,12 +242,12 @@ Text: ${selected}` }], FLASHCARD_SYSTEM_PROMPT);
     try {
       const selected = savedTextRef.current || selectionRef.current;
       console.log('[Selection AI] Quiz generation started; selected text length:', selected.length);
-      const raw = await askGroq([{ role: 'user', content: `Generate 5 multiple-choice quiz questions from this text as a JSON array ONLY, no other text: [{"prompt": string, "options": string[], "answer": number, "explanation": string}]
+      const raw = await askGroq([{ role: 'user', content: `Generate 3 multiple-choice quiz questions from this text as a JSON array ONLY, no other text: [{"prompt": string, "options": string[], "answer": number, "explanation": string}]
 
 Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
       console.log('[Selection AI] Quiz response received');
       const questionsValue = parseJsonArray(raw);
-      if (!Array.isArray(questionsValue) || questionsValue.length !== 5) throw new Error('AI did not return 5 quiz questions.');
+      if (!Array.isArray(questionsValue) || questionsValue.length !== 3) throw new Error('AI did not return 3 quiz questions.');
       const questions = questionsValue.map((x: any) => ({
         prompt: String(x?.prompt || '').trim(),
         options: Array.isArray(x?.options) ? x.options.map((o: unknown) => String(o).trim()).filter(Boolean) : [],
@@ -261,7 +274,7 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
 
   const askAI = async () => {
     const question = chatInput.trim();
-    const selected = selectionRef.current;
+    const selected = savedTextRef.current || selectionRef.current;
     if (!question || !selected || chatBusy) return;
 
     const history = [...chatMessages, { role: 'user' as const, content: question }];
@@ -284,7 +297,7 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
   };
 
   const diveDeeper = () => {
-    const selected = selectionRef.current;
+    const selected = savedTextRef.current || selectionRef.current;
     if (!selected) return;
     const messages = [
       { role: 'user', content: `Selected text context:\n${selected}` },
@@ -301,7 +314,7 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
   return (
     <div ref={toolbarRef} data-selection-ai-toolbar className="fixed z-[10000]" style={position} onMouseDown={(e) => e.stopPropagation()}>
       {!open && !chatOpen ? (
-        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(true)} className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold text-foreground shadow-lg hover:bg-secondary">
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); savedTextRef.current = selectionRef.current || window.getSelection()?.toString() || ''; }} onClick={() => setOpen(true)} className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold text-foreground shadow-lg hover:bg-secondary">
           <Sparkles size={14} />
           AI
         </button>
@@ -312,7 +325,7 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Selected text</p>
               <p className="mt-1 line-clamp-2 text-xs" title={text}>{contextPreview}</p>
             </div>
-            <button type="button" onClick={() => setChatOpen(false)} className="shrink-0 rounded-md p-1 hover:bg-secondary" aria-label="Close Ask AI">
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setChatOpen(false)} className="shrink-0 rounded-md p-1 hover:bg-secondary" aria-label="Close Ask AI">
               <X size={15} />
             </button>
           </div>
@@ -336,24 +349,24 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
                 placeholder="Ask about this text…"
                 className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-2 text-xs outline-none"
               />
-              <button type="button" disabled={chatBusy || !chatInput.trim()} onClick={() => void askAI()} className="rounded-md bg-primary px-2.5 text-primary-foreground disabled:opacity-50" aria-label="Send question">
+              <button type="button" disabled={chatBusy || !chatInput.trim()} onMouseDown={(e) => e.preventDefault()} onClick={() => void askAI()} className="rounded-md bg-primary px-2.5 text-primary-foreground disabled:opacity-50" aria-label="Send question">
                 <Send size={14} />
               </button>
             </div>
-            <button type="button" onClick={diveDeeper} className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold hover:bg-secondary">
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={diveDeeper} className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold hover:bg-secondary">
               Dive Deeper
             </button>
           </div>
         </div>
       ) : (
         <div className="mt-1 w-[220px] rounded-lg border border-border bg-card p-1.5 text-foreground shadow-2xl">
-          <button type="button" disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void generateFlashcards()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">
+          <button type="button" disabled={busy} onMouseDown={(e) => { e.preventDefault(); savedTextRef.current = selectionRef.current || window.getSelection()?.toString() || ''; }} onClick={() => void generateFlashcards()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">
             {busyAction === 'flashcards' ? <Loader2 size={14} className="animate-spin" /> : '🧠'} Generate Flashcards
           </button>
-          <button type="button" disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void generateQuiz()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">
+          <button type="button" disabled={busy} onMouseDown={(e) => { e.preventDefault(); savedTextRef.current = selectionRef.current || window.getSelection()?.toString() || ''; }} onClick={() => void generateQuiz()} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">
             {busyAction === 'quiz' ? <Loader2 size={14} className="animate-spin" /> : '❓'} Generate Quiz
           </button>
-          <button type="button" disabled={busy} onMouseDown={() => { const selected = window.getSelection()?.toString().trim(); if (selected) { selectionRef.current = selected.slice(0, 12000); setText(selectionRef.current); } }} onClick={() => { console.log('[Selection AI] Ask AI clicked; context length:', selectionRef.current.length); setOpen(false); setChatOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">💬 Ask AI</button>
+          <button type="button" disabled={busy} onMouseDown={(e) => { e.preventDefault(); savedTextRef.current = selectionRef.current || window.getSelection()?.toString().trim() || ''; console.log('[Selection AI] Ask AI context saved on mousedown:', savedTextRef.current.length); }} onClick={() => { selectionRef.current = savedTextRef.current; setText(savedTextRef.current); console.log('[Selection AI] Ask AI clicked; context length:', savedTextRef.current.length); setOpen(false); setChatOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs hover:bg-secondary disabled:opacity-60">💬 Ask AI</button>
         </div>
       )}
     </div>
