@@ -265,7 +265,7 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
       hide();
     } catch (error) {
       console.error('[Selection AI] Quiz generation failed:', error);
-      toast({ title: 'Could not generate quiz', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+      toast({ title: 'Could not generate quiz', description: 'Could not get a response. Please try again.', variant: 'destructive' });
       setBusy(false);
       setBusyAction(null);
     }
