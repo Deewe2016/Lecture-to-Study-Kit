@@ -74,6 +74,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: requestedModel,
         temperature: 0.7,
+        ...(requestedModel === "llama-3.1-8b-instant" ? { max_tokens: 2000 } : {}),
         stream: true,
         messages: [
           {
