@@ -668,27 +668,71 @@ export default function FilesPage() {
   };
 
   const createWhiteboard = async () => {
-    if (!me) return;
+    console.info('[Files] Whiteboard creation started', {
+      userId: me?.id ?? null,
+      selectedFolderId: selected,
+      rootFolderId: root?.id ?? null,
+    });
+    if (!me) {
+      console.error('[Files] Whiteboard creation stopped: no signed-in user');
+      setError('You must be signed in to create a whiteboard.');
+      return;
+    }
+
     const folderId = selected || root?.id || null;
-    setBusy(true); setError('');
+    const payload = {
+      title: 'Untitled Whiteboard',
+      content: { type: 'excalidraw', version: 2, elements: [], appState: {}, files: {} },
+      owner_id: me.id,
+      folder_id: folderId,
+    };
+
+    console.info('[Files] Whiteboard creation payload prepared', {
+      ownerId: payload.owner_id,
+      folderId: payload.folder_id,
+      title: payload.title,
+    });
+
+    setBusy(true);
+    setError('');
+
     try {
+      console.info('[Files] Creating whiteboard in Supabase');
       const created = await api<WhiteboardRow[]>('/rest/v1/whiteboards?select=*', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
-        body: JSON.stringify({
-          title: 'Untitled Whiteboard',
-          content: { type: 'excalidraw', version: 2, elements: [], appState: {}, files: {} },
-          owner_id: me.id,
-          folder_id: folderId,
-        }),
+        body: JSON.stringify(payload),
       });
-      if (created[0]) {
-        setWhiteboards(prev => [created[0], ...prev]);
-        setNewMenuOpen(false);
-        window.location.assign('/whiteboard?id=' + encodeURIComponent(created[0].id));
+
+      console.info('[Files] Supabase whiteboard creation response received', {
+        count: created.length,
+        id: created[0]?.id ?? null,
+      });
+
+      if (!created[0]) {
+        throw new Error('Supabase created the request but returned no whiteboard row.');
       }
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create whiteboard.'); }
-    finally { setBusy(false); }
+
+      setWhiteboards(prev => [created[0], ...prev]);
+      setNewMenuOpen(false);
+
+      const destination = '/whiteboard?id=' + encodeURIComponent(created[0].id);
+      console.info('[Files] Whiteboard created successfully; navigating to editor', {
+        whiteboardId: created[0].id,
+        destination,
+      });
+      window.location.assign(destination);
+    } catch (e) {
+      console.error('[Files] Whiteboard creation failed', {
+        userId: me.id,
+        folderId,
+        error: e,
+      });
+      setError(e instanceof Error ? e.message : 'Could not create whiteboard.');
+    } finally {
+      console.info('[Files] Whiteboard creation finished');
+      setBusy(false);
+    }
   };
 
   const shareWhiteboard = async (user: UserRow) => {
