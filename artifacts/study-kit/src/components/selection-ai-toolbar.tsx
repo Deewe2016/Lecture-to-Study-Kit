@@ -165,7 +165,11 @@ export default function SelectionAIToolbar() {
   }, [hide]);
 
   useEffect(() => {
-    const mouseup = () => window.setTimeout(detectSelection, 0);
+    const mouseup = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-selection-ai-toolbar]')) return;
+      window.setTimeout(detectSelection, 0);
+    };
     const mousedown = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
       if (!target?.closest('[data-selection-ai-toolbar]')) hide();
