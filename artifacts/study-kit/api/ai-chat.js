@@ -12,6 +12,11 @@ export default async function handler(req, res) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "GROQ_API_KEY is not configured in Vercel." });
 
+  const requestedModel = req.body?.model === "llama-3.1-8b-instant" ? req.body.model : MODEL;
+  const requestedSystemPrompt = typeof req.body?.systemPrompt === "string" && req.body.systemPrompt.trim()
+    ? req.body.systemPrompt.trim().slice(0, 12000)
+    : "You are the AI assistant inside a student study workspace. Be helpful, clear, accurate, and age-appropriate. Explain things simply when useful. Do not claim to have access to information you were not given. Keep responses reasonably concise unless the user asks for detail.";
+
   const messages = Array.isArray(req.body?.messages)
     ? req.body.messages.map(cleanMessage).filter(Boolean).slice(-50)
     : [];
@@ -54,9 +59,9 @@ export default async function handler(req, res) {
       : [];
     console.log("Groq available model IDs:", availableModelIds);
 
-    if (!availableModelIds.includes(MODEL)) {
+    if (!availableModelIds.includes(requestedModel)) {
       return res.status(502).json({
-        error: `Configured chat model ${MODEL} was not returned by Groq /models. Full response: ${modelsBody}`,
+        error: `Configured chat model ${requestedModel} was not returned by Groq /models. Full response: ${modelsBody}`,
       });
     }
 
@@ -67,13 +72,13 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: requestedModel,
         temperature: 0.7,
         stream: true,
         messages: [
           {
             role: "system",
-            content: "You are the AI assistant inside a student study workspace. Be helpful, clear, accurate, and age-appropriate. Explain things simply when useful. Do not claim to have access to information you were not given. Keep responses reasonably concise unless the user asks for detail.",
+            content: requestedSystemPrompt,
           },
           ...messages,
         ],
