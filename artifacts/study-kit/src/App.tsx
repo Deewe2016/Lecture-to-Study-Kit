@@ -53,7 +53,6 @@ import {
   X,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
-import SelectionAIToolbar from '@/components/selection-ai-toolbar';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
@@ -1037,7 +1036,6 @@ function Shell({
         </header>
 
         {children}
-        <SelectionAIToolbar />
       </main>
     </div>
   );
