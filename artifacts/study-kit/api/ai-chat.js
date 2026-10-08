@@ -1,5 +1,4 @@
 const MODEL = "openai/gpt-oss-20b";
-const SELECTION_MODEL = "llama-3.1-8b-instant";
 
 function cleanMessage(message) {
   if (!message || (message.role !== "user" && message.role !== "assistant")) return null;
@@ -12,8 +11,6 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "GROQ_API_KEY is not configured in Vercel." });
-
-  const requestedModel = req.body?.selectionAITool ? SELECTION_MODEL : MODEL;
 
   const messages = Array.isArray(req.body?.messages)
     ? req.body.messages.map(cleanMessage).filter(Boolean).slice(-50)
@@ -57,9 +54,9 @@ export default async function handler(req, res) {
       : [];
     console.log("Groq available model IDs:", availableModelIds);
 
-    if (!availableModelIds.includes(requestedModel)) {
+    if (!availableModelIds.includes(MODEL)) {
       return res.status(502).json({
-        error: `Configured chat model ${requestedModel} was not returned by Groq /models. Full response: ${modelsBody}`,
+        error: `Configured chat model ${MODEL} was not returned by Groq /models. Full response: ${modelsBody}`,
       });
     }
 
@@ -70,7 +67,7 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: requestedModel,
+        model: MODEL,
         temperature: 0.7,
         stream: true,
         messages: [
