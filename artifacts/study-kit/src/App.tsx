@@ -498,7 +498,8 @@ async function compressVideoForTranscription(
         reject(new Error('The selected video could not be opened.'));
     });
 
-    const duration = Number.isFinite(video.duration) ? video.duration : 0;    if (!duration) {
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (!duration) {
       throw new Error('The selected video has no readable duration.');
     }
 
@@ -997,6 +998,7 @@ function Shell({
           >
             <Menu size={20} />
           </button>
+
           <div className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
             <Home size={14} />
             <span className="text-muted-foreground/50">
@@ -1497,7 +1499,8 @@ function NewPage() {
       (sourceMode === 'paste' &&
         pastedTexts.every((text) => !text.trim())) ||
       (sourceMode === 'video' &&
-        !videoUrl.trim() &&        !videoFile) ||
+        !videoUrl.trim() &&
+        !videoFile) ||
       (sourceMode === 'ai' && !aiTopic.trim())
     ) {
       setError(
@@ -1996,7 +1999,8 @@ function NewPage() {
                 <button
                   onClick={() => setSourceMode('paste')}
                   className={`rounded-full border px-3 py-1.5 text-xs ${sourceMode === 'paste' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
-                  data-testid="button-source-paste"                >
+                  data-testid="button-source-paste"
+                >
                   <FileText size={13} className="mr-1 inline" />
                   Paste Text
                 </button>
@@ -2495,7 +2499,8 @@ function KitPage() {
 }
 
 function KitWorkspace({
-  kit,}: {
+  kit,
+}: {
   kit: LocalKit;
 }) {
   const [currentKit, setCurrentKit] = useState<LocalKit>(kit);
@@ -2995,6 +3000,7 @@ function Overview({
           <h3 className="mt-5 font-serif text-2xl tracking-[-.03em]">
             Build the map first.
           </h3>
+
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             Start with today’s short
             review, then come back tomorrow
@@ -3494,6 +3500,7 @@ function CalendarPage() {
           >
             Previous
           </button>
+
           <span className="min-w-32 text-center text-sm font-semibold">
             {month.toLocaleString(
               undefined,
@@ -3992,7 +3999,8 @@ function Flashcards({
           onClick={mark}
           className={`focus-ring h-10 rounded-lg px-5 text-xs font-semibold ${
             reviewed
-              ? 'border border-border bg-secondary'              : 'bg-primary text-primary-foreground'
+              ? 'border border-border bg-secondary'
+              : 'bg-primary text-primary-foreground'
           }`}
           data-testid="button-mark-card"
         >
