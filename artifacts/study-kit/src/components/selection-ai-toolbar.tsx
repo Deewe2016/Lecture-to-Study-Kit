@@ -18,9 +18,8 @@ const clean = (s: string) => {
 async function readStream(response: Response) {
   if (!response.ok || !response.body) {
     const details = await response.text().catch(() => '');
-    let message = details;
-    try { message = JSON.parse(details)?.error || details; } catch {}
-    throw new Error(message || `AI request failed (${response.status}).`);
+    console.error('[Selection AI] Request failed', { status: response.status, details });
+    throw new Error('Could not get a response. Please try again.');
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -38,7 +37,7 @@ async function readStream(response: Response) {
         const data = line.slice(5).trim();
         if (!data || data === '[DONE]') continue;
         const parsed = JSON.parse(data);
-        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.error) { console.error('[Selection AI] Stream error:', parsed.error); throw new Error('Could not get a response. Please try again.'); }
         if (typeof parsed.content === 'string') output += parsed.content;
       }
     }
@@ -53,16 +52,16 @@ async function readStream(response: Response) {
       if (typeof parsed.content === 'string') output += parsed.content;
     }
   }
-  if (!output.trim()) throw new Error('AI returned an empty response.');
+  if (!output.trim()) throw new Error('Could not get a response. Please try again.');
   return output.trim();
 }
 
 async function askGroq(messages: Array<{ role: 'user' | 'assistant'; content: string }>, systemPrompt: string) {
-  console.log('[Selection AI] Sending request to /api/ai-chat', { model: 'llama-3.1-8b-instant', messageCount: messages.length });
+  console.log('[Selection AI] Sending request to /api/ai-chat', { model: 'openai/gpt-oss-20b', messageCount: messages.length });
   const response = await fetch('/api/ai-chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, systemPrompt, model: 'llama-3.1-8b-instant' }),
+    body: JSON.stringify({ messages, systemPrompt, model: 'openai/gpt-oss-20b' }),
   });
   console.log('[Selection AI] API response received', { status: response.status, ok: response.ok });
   return readStream(response);
@@ -229,7 +228,7 @@ Text: ${selected}` }], FLASHCARD_SYSTEM_PROMPT);
       hide();
     } catch (error) {
       console.error('[Selection AI] Flashcard generation failed:', error);
-      toast({ title: 'Could not generate flashcards', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+      toast({ title: 'Could not generate flashcards', description: 'Could not get a response. Please try again.', variant: 'destructive' });
       setBusy(false);
       setBusyAction(null);
     }
@@ -289,7 +288,7 @@ Text: ${selected}` }], QUIZ_SYSTEM_PROMPT);
     } catch (error) {
       setChatMessages(current => [...current, {
         role: 'assistant',
-        content: `Sorry, I couldn't answer that: ${error instanceof Error ? error.message : 'Please try again.'}`,
+        content: 'Could not get a response. Please try again.',
       }]);
     } finally {
       setChatBusy(false);
