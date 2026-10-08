@@ -16,42 +16,36 @@ import { Link } from 'wouter';
 const features = [
   {
     icon: Brain,
-    emoji: '🧠',
     title: 'AI Study Kits',
     description:
       'Upload a lecture, video, or notes. Get flashcards, quizzes, and a review plan instantly.',
   },
   {
     icon: MessageCircle,
-    emoji: '💬',
     title: 'AI Chat',
     description:
       'Ask questions about your material or anything else. Powered by Groq.',
   },
   {
     icon: Folder,
-    emoji: '📁',
     title: 'File Storage',
     description:
       'Store, organize, and share your files and documents in one place.',
   },
   {
     icon: CalendarDays,
-    emoji: '📅',
     title: 'Calendar',
     description:
       'Schedule study sessions, set email reminders, and invite teammates.',
   },
   {
     icon: FileText,
-    emoji: '📄',
     title: 'Documents',
     description:
       'Create and edit documents directly in Flexus. No Google Docs tab needed.',
   },
   {
     icon: Users,
-    emoji: '🗨️',
     title: 'Team Chat',
     description:
       'Message your study group, create spaces, and share study kits instantly.',
@@ -270,16 +264,15 @@ export default function LandingPage() {
           </div>
 
           <div className="mt-10 grid grid-cols-[repeat(2,minmax(0,1fr))] gap-3 sm:gap-4 lg:grid-cols-3">
-            {features.map(({ icon: Icon, emoji, title, description }) => (
+            {features.map(({ icon: Icon, title, description }) => (
               <article
                 key={title}
                 className="group rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-1 hover:border-primary/30 hover:bg-card/80 sm:p-5"
               >
                 <div className="flex items-center gap-2.5">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-base">
-                    {emoji}
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Icon size={18} />
                   </span>
-                  <Icon className="hidden text-primary/70 sm:block" size={16} />
                 </div>
                 <h3 className="mt-5 text-sm font-semibold sm:text-base">{title}</h3>
                 <p className="mt-2 text-[11px] leading-5 text-muted-foreground sm:text-sm sm:leading-6">
