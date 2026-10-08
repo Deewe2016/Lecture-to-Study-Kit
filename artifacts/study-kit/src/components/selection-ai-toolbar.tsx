@@ -111,7 +111,7 @@ function quizKit(questions: QuizQuestion[]) {
 
 function parseJsonArray(raw: string) {
   console.log('[Selection AI] Raw model response length:', raw.length, raw);
-  let cleaned = clean(raw).replace(/```json\\s*/gi, '').replace(/```/g, '').trim();
+  let cleaned = clean(raw).replace(/```json\s*/gi, '').replace(/```/g, '').trim();
   console.log('[Selection AI] Cleaned JSON response length:', cleaned.length);
   if (!cleaned.endsWith(']')) {
     const lastBracket = cleaned.lastIndexOf('}');
