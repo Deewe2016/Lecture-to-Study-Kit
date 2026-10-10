@@ -811,71 +811,40 @@ function EventEditor({
 
   const attachmentItems = attachmentType === 'study_kit' ? kits : files;
   const generateAIEvents = async () => {
-    const description = aiDescription.trim();
-    if (!description) {
-      setError('Describe the events you want to create.');
-      return;
-    }
-
+    const prompt = aiDescription.trim();
+    if (!prompt) { setError('Describe the events you want to create.'); return; }
     setAiGenerating(true);
     setError('');
     setAiSuccess('');
-    console.log('[Calendar AI UI] Starting event generation', { description });
-
+    console.log('[Calendar AI UI] Starting event generation', { prompt });
     try {
-      const response = await fetch('/api/calendar-ai-events', {
+      const response = await fetch('/api/generate-events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description }),
+        body: JSON.stringify({ prompt }),
       });
-      console.log('[Calendar AI UI] API response status', { status: response.status, ok: response.ok });
-
+      console.log('[Calendar AI UI] Generate-events response status', { status: response.status, ok: response.ok });
       const body = await response.json().catch((parseError) => {
         console.error('[Calendar AI UI] API response JSON parse error:', parseError);
-        return {};
+        throw new Error('Could not generate events. Please try again.');
       });
-      console.log('[Calendar AI UI] API response body', body);
-
+      console.log('[Calendar AI UI] Generate-events response body', body);
       if (!response.ok) {
-        throw new Error(body?.error || 'Could not generate events. Please try again.');
-      }
-
-      const rawContent = String(body?.content || '');
-      console.log('[Calendar AI UI] Raw model content', rawContent);
-
-      let cleaned = rawContent
-        .replace(/```json\n?/gi, '')
-        .replace(/```\n?/g, '')
-        .trim();
-      const start = cleaned.indexOf('[');
-      const end = cleaned.lastIndexOf(']');
-      if (start !== -1 && end !== -1) cleaned = cleaned.slice(start, end + 1);
-      console.log('[Calendar AI UI] Cleaned JSON content', cleaned);
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(cleaned);
-      } catch (parseError) {
-        console.error('[Calendar AI UI] Event JSON parse error:', parseError, { rawContent, cleaned });
+        console.error('[Calendar AI UI] Generate-events endpoint failed', { status: response.status, error: body?.error });
         throw new Error('Could not generate events. Please try again.');
       }
-      if (!Array.isArray(parsed)) {
-        console.error('[Calendar AI UI] Parsed response is not an array:', parsed);
+      if (!Array.isArray(body?.events)) {
+        console.error('[Calendar AI UI] Response did not contain an events array', body);
         throw new Error('Could not generate events. Please try again.');
       }
-
-      const normalized = normalizeAIEvents(parsed);
+      const normalized = normalizeAIEvents(body.events);
       console.log('[Calendar AI UI] Final normalized events array', normalized);
-      if (!normalized.length) {
-        throw new Error('No events were found. Try describing days and times more specifically.');
-      }
+      if (!normalized.length) throw new Error('No events were found. Try describing days and times more specifically.');
       setAiEvents(normalized);
     } catch (e) {
       console.error('[Calendar AI UI] Event generation failed:', e);
-      setError(e instanceof Error ? e.message : 'Could not generate events. Please try again.');
-    } finally {
-      setAiGenerating(false);
-    }
+      setError(e instanceof Error && e.message === 'No events were found. Try describing days and times more specifically.' ? e.message : 'Could not generate events. Please try again.');
+    } finally { setAiGenerating(false); }
   };
   const saveAIEvents = async () => {
     if(!me?.id){setError('You are not signed in. Please sign in again before creating calendar events.');return;} if(!aiEvents.length)return;
