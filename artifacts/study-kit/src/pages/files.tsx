@@ -451,11 +451,11 @@ export default function FilesPage() {
     setGlobalSearch('');
     setDebouncedGlobalSearch('');
     if (kind === 'folder') {
-      setSection('mine');
+      setSection(item.owner_id === me?.id ? 'mine' : 'shared');
       setSelected(item.id);
       setFolderDrawerOpen(false);
     } else if (kind === 'file') {
-      setSection('mine');
+      setSection(item.owner_id === me?.id ? 'mine' : 'shared');
       setSelected(item.folder_id || null);
       void openFile(item);
     } else if (kind === 'document') {
@@ -1145,7 +1145,7 @@ export default function FilesPage() {
             <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input ref={globalSearchRef} value={globalSearch} onChange={event => setGlobalSearch(event.target.value)} placeholder="Search files, documents, whiteboards, and study kits..." aria-label="Search all files and workspace content" className="h-12 w-full rounded-xl border border-input bg-card pl-10 pr-20 text-sm outline-none transition-colors focus:border-primary" />
             <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-border px-1.5 py-1 text-[10px] text-muted-foreground">⌘K / Ctrl K</span>
-            {globalSearch.trim() && <button type="button" onClick={() => { setGlobalSearch(''); setDebouncedGlobalSearch(''); }} className="absolute right-3 top-1/2 hidden -translate-y-1/2 rounded p-1 hover:bg-secondary sm:block" aria-label="Clear search"><X size={14}/></button>}
+            {globalSearch.trim() && <button type="button" onClick={() => { setGlobalSearch(''); setDebouncedGlobalSearch(''); }} className="absolute right-12 top-1/2 hidden -translate-y-1/2 rounded p-1 hover:bg-secondary sm:block" aria-label="Clear search"><X size={14}/></button>}
             {debouncedGlobalSearch && <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-[70] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3 shadow-2xl">
               {!hasSearchResults ? <p className="px-2 py-5 text-sm text-muted-foreground">No results found for <span className="font-medium text-foreground">{debouncedGlobalSearch}</span></p> : <div className="space-y-4">
                 {matchingFolders.length > 0 && <section><h3 className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Folders</h3>{matchingFolders.map(item => <button key={item.id} onClick={() => openSearchResult('folder', item)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary"><Folder size={17} className="shrink-0 text-primary"/><span className="min-w-0 flex-1"><span className="block truncate text-sm">{highlightMatch(item.name)}</span><span className="block truncate text-[11px] text-muted-foreground">{folderLocation(item.parent_folder_id)}</span></span></button>)}</section>}
