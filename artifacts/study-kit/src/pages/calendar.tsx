@@ -811,40 +811,45 @@ function EventEditor({
 
   const attachmentItems = attachmentType === 'study_kit' ? kits : files;
   const generateAIEvents = async () => {
-    const prompt = aiDescription.trim();
-    if (!prompt) { setError('Describe the events you want to create.'); return; }
-    setAiGenerating(true);
-    setError('');
-    setAiSuccess('');
-    console.log('[Calendar AI UI] Starting event generation', { prompt });
+    console.log('Generate events clicked');
     try {
+      const prompt = aiDescription.trim();
+      if (!prompt) { setError('Describe the events you want to create.'); return; }
+      setAiGenerating(true);
+      setError('');
+      setAiSuccess('');
+      console.log('[Calendar AI UI] Starting event generation', { prompt });
+      console.log('About to call API');
       const response = await fetch('/api/generate-events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       });
+      console.log('API response:', response.status);
       console.log('[Calendar AI UI] Generate-events response status', { status: response.status, ok: response.ok });
       const body = await response.json().catch((parseError) => {
         console.error('[Calendar AI UI] API response JSON parse error:', parseError);
-        throw new Error('Could not generate events. Please try again.');
+        throw parseError;
       });
       console.log('[Calendar AI UI] Generate-events response body', body);
       if (!response.ok) {
         console.error('[Calendar AI UI] Generate-events endpoint failed', { status: response.status, error: body?.error });
-        throw new Error('Could not generate events. Please try again.');
+        throw new Error(body?.error || `Request failed with status ${response.status}`);
       }
       if (!Array.isArray(body?.events)) {
         console.error('[Calendar AI UI] Response did not contain an events array', body);
-        throw new Error('Could not generate events. Please try again.');
+        throw new Error(body?.error || 'The API response did not contain an events array.');
       }
       const normalized = normalizeAIEvents(body.events);
       console.log('[Calendar AI UI] Final normalized events array', normalized);
       if (!normalized.length) throw new Error('No events were found. Try describing days and times more specifically.');
       setAiEvents(normalized);
-    } catch (e) {
-      console.error('[Calendar AI UI] Event generation failed:', e);
-      setError(e instanceof Error && e.message === 'No events were found. Try describing days and times more specifically.' ? e.message : 'Could not generate events. Please try again.');
-    } finally { setAiGenerating(false); }
+    } catch (err) {
+      console.error('Generate events frontend error:', err);
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setAiGenerating(false);
+    }
   };
   const saveAIEvents = async () => {
     if(!me?.id){setError('You are not signed in. Please sign in again before creating calendar events.');return;} if(!aiEvents.length)return;
