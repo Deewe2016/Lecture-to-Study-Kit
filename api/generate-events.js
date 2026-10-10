@@ -1,4 +1,5 @@
 export default async function handler(req, res) {
+  console.log('Handler called');
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed.' });
@@ -21,7 +22,9 @@ export default async function handler(req, res) {
       headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'openai/gpt-oss-20b', messages, max_tokens: 2000, temperature: 0.1 }),
     });
+    console.log('Groq raw response status:', response.status);
     const raw = await response.text();
+    console.log('Groq raw text:', raw);
     console.log('[Generate Events] Groq HTTP status', response.status);
     if (!response.ok) {
       console.error('[Generate Events] Groq API error', { status: response.status, body: raw.slice(0, 2000) });
@@ -33,7 +36,11 @@ export default async function handler(req, res) {
       console.error('[Generate Events] Groq response was not valid API JSON', error, raw.slice(0, 2000));
       return res.status(502).json({ error: 'Could not generate events. Please try again.' });
     }
-    const content = data?.choices?.[0]?.message?.content;
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      console.error('Invalid Groq response:', JSON.stringify(data));
+      return res.status(500).json({ error: 'Invalid response from AI: ' + JSON.stringify(data) });
+    }
+    const content = data.choices[0].message.content;
     if (typeof content !== 'string' || !content.trim()) {
       console.error('[Generate Events] Groq returned empty message content', JSON.stringify(data).slice(0, 2000));
       return res.status(502).json({ error: 'Could not generate events. Please try again.' });
@@ -60,8 +67,10 @@ export default async function handler(req, res) {
     if (validEvents.length !== events.length) console.warn('[Generate Events] Some generated items were missing required fields', { received: events.length, valid: validEvents.length });
     console.log('[Generate Events] Successfully parsed events', { count: validEvents.length });
     return res.status(200).json({ events: validEvents });
-  } catch (error) {
-    console.error('[Generate Events] Request failed', error);
-    return res.status(500).json({ error: 'Could not generate events. Please try again.' });
+  } catch (err) {
+    console.error('Unhandled error:', err.message, err.stack);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message || 'Could not generate events. Please try again.' });
+    }
   }
 }
