@@ -109,12 +109,21 @@ function conversationTitle(conversation: Conversation) {
   return text.length > 30 ? `${text.slice(0, 30)}…` : text;
 }
 
+function normalizeMathDelimiters(text: string) {
+  // Some model responses wrap display math as "[\\ ... \\]" instead of "\\[...\\]".
+  // Convert that variant before Markdown parses the message.
+  return text
+    .replace(/\[\s*\\\s*([\s\S]*?)\s*\\\s*\]/g, (_match, math: string) => `\\[\n${math.trim()}\n\\]`)
+    .replace(/\\\\\[([\s\S]*?)\\\\\]/g, (_match, math: string) => `\\[\n${math.trim()}\n\\]`);
+}
+
 function renderMarkdown(text: string) {
-  const html = DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }) as string);
+  const normalizedText = normalizeMathDelimiters(text);
+  const html = DOMPurify.sanitize(marked.parse(normalizedText, { gfm: true, breaks: true }) as string);
 
   return (
     <div
-      className="[&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_hr]:my-4 [&_hr]:border-border [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-950 [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-5 [&_pre]:text-zinc-100 [&_code]:rounded [&_code]:bg-secondary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-left [&_table]:text-sm [&_th]:border [&_th]:border-border [&_th]:bg-secondary/80 [&_th]:px-3 [&_th]:py-2 [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_tbody_tr:nth-child(odd)]:bg-card [&_tbody_tr:nth-child(even)]:bg-secondary/35"
+      className="ai-chat-markdown [&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_hr]:my-4 [&_hr]:border-border [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-950 [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-5 [&_pre]:text-zinc-100 [&_code]:rounded [&_code]:bg-secondary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-left [&_table]:text-sm [&_th]:border [&_th]:border-border [&_th]:bg-secondary/80 [&_th]:px-3 [&_th]:py-2 [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_tbody_tr:nth-child(odd)]:bg-card [&_tbody_tr:nth-child(even)]:bg-secondary/35 [&_.MathJax]:text-inherit"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -264,6 +273,45 @@ export default function AIChatPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, thinking]);
+
+  useEffect(() => {
+    const typesetMath = () => {
+      const mathJax = (window as any).MathJax;
+      if (mathJax?.typesetPromise) {
+        void mathJax.typesetPromise(Array.from(document.querySelectorAll('.ai-chat-markdown')));
+      }
+    };
+
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-flexus-mathjax]');
+    if ((window as any).MathJax?.typesetPromise) {
+      typesetMath();
+      return;
+    }
+    if (existingScript) {
+      existingScript.addEventListener('load', typesetMath, { once: true });
+      return () => existingScript.removeEventListener('load', typesetMath);
+    }
+
+    // Configure MathJax before loading it so both inline and display LaTeX are recognized.
+    (window as any).MathJax = {
+      tex: {
+        inlineMath: [['\\\\(', '\\\\)']],
+        displayMath: [['\\\\[', '\\\\]'], ['$', '$']],
+        processEscapes: true,
+      },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] },
+      startup: { typeset: false },
+    };
+
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js';
+    script.async = true;
+    script.dataset.flexusMathjax = 'true';
+    script.onload = typesetMath;
+    document.head.appendChild(script);
+
+    return () => script.removeEventListener('load', typesetMath);
   }, [messages, thinking]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
