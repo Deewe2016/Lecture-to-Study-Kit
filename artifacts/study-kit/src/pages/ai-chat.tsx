@@ -297,7 +297,7 @@ export default function AIChatPage() {
     (window as any).MathJax = {
       tex: {
         inlineMath: [['\\(', '\\)']],
-        displayMath: [['\\[', '\\]'], ['$', '$']],
+        displayMath: [['\\[', '\\]'], ['$$', '$$']],
         processEscapes: true,
       },
       options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] },
