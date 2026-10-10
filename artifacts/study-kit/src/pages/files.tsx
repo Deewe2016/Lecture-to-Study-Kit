@@ -261,6 +261,9 @@ export default function FilesPage() {
   const [folderDrawerOpen, setFolderDrawerOpen] = useState(false);
   const [section, setSection] = useState<'mine' | 'shared'>('mine');
   const [search, setSearch] = useState('');
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [debouncedGlobalSearch, setDebouncedGlobalSearch] = useState('');
+  const globalSearchRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -311,6 +314,27 @@ export default function FilesPage() {
   };
 
   useEffect(() => { void load(); }, [me?.id]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedGlobalSearch(globalSearch.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [globalSearch]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        globalSearchRef.current?.focus();
+      }
+      if (event.key === 'Escape' && document.activeElement === globalSearchRef.current) {
+        setGlobalSearch('');
+        setDebouncedGlobalSearch('');
+        globalSearchRef.current?.blur();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     try { localStorage.setItem('flexus-file-pins', JSON.stringify(pinned)); } catch {}
@@ -400,6 +424,48 @@ export default function FilesPage() {
     ...(section === 'mine' ? studyKits : []).slice(0, 3).map(kit => ({ kind: 'kit' as const, date: kit.createdAt || '', kit }))]
     .sort((a, b) => +new Date(b.date || 0) - +new Date(a.date || 0))
     .slice(0, 8);
+
+  const folderLocation = (folderId: string | null): string => {
+    if (!folderId) return 'My Files';
+    const folder = folders.find(item => item.id === folderId);
+    if (!folder) return 'My Files';
+    const parent = folder.parent_folder_id ? folderLocation(folder.parent_folder_id) : '';
+    return parent && parent !== 'My Files' ? `${parent} / ${folder.name}` : folder.name;
+  };
+
+  const matchingFolders = debouncedGlobalSearch ? visibleFolders.filter(folder => folder.name.toLowerCase().includes(debouncedGlobalSearch.toLowerCase())).slice(0, 5) : [];
+  const matchingFiles = debouncedGlobalSearch ? visibleFiles.filter(file => file.name.toLowerCase().includes(debouncedGlobalSearch.toLowerCase())).slice(0, 5) : [];
+  const matchingDocuments = debouncedGlobalSearch ? visibleDocuments.filter(document => document.title.toLowerCase().includes(debouncedGlobalSearch.toLowerCase())).slice(0, 5) : [];
+  const matchingWhiteboards = debouncedGlobalSearch ? visibleWhiteboards.filter(board => board.title.toLowerCase().includes(debouncedGlobalSearch.toLowerCase())).slice(0, 5) : [];
+  const matchingKits = debouncedGlobalSearch && section === 'mine' ? kits.filter(kit => kit.title.toLowerCase().includes(debouncedGlobalSearch.toLowerCase())).slice(0, 5) : [];
+  const hasSearchResults = matchingFolders.length + matchingFiles.length + matchingDocuments.length + matchingWhiteboards.length + matchingKits.length > 0;
+
+  const highlightMatch = (name: string) => {
+    const query = debouncedGlobalSearch.toLowerCase();
+    const index = name.toLowerCase().indexOf(query);
+    if (!query || index < 0) return name;
+    return <>{name.slice(0, index)}<mark className="rounded bg-primary/25 text-foreground">{name.slice(index, index + query.length)}</mark>{name.slice(index + query.length)}</>;
+  };
+
+  const openSearchResult = (kind: 'folder' | 'file' | 'document' | 'whiteboard' | 'kit', item: any) => {
+    setGlobalSearch('');
+    setDebouncedGlobalSearch('');
+    if (kind === 'folder') {
+      setSection('mine');
+      setSelected(item.id);
+      setFolderDrawerOpen(false);
+    } else if (kind === 'file') {
+      setSection('mine');
+      setSelected(item.folder_id || null);
+      void openFile(item);
+    } else if (kind === 'document') {
+      window.location.assign('/document/' + item.id);
+    } else if (kind === 'whiteboard') {
+      window.location.assign('/whiteboard?id=' + encodeURIComponent(item.id));
+    } else {
+      window.location.assign('/kit/' + item.id);
+    }
+  };
 
   const children = (parent: string | null) => visibleFolders.filter(f => f.parent_folder_id === parent);
 
@@ -1074,7 +1140,23 @@ export default function FilesPage() {
         </aside>
         {folderDrawerOpen && <button type="button" onClick={() => setFolderDrawerOpen(false)} className="fixed inset-0 z-[80] bg-black/50 xl:hidden" aria-label="Close folders" />}
 
-        <div className="min-w-0"><button type="button" onClick={() => setFolderDrawerOpen(true)} className="mb-4 flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-4 text-xs font-semibold xl:hidden"><FolderOpen size={15} className="text-primary"/> Browse folders</button>
+        <div className="min-w-0">
+          <div className="relative mb-5">
+            <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input ref={globalSearchRef} value={globalSearch} onChange={event => setGlobalSearch(event.target.value)} placeholder="Search files, documents, whiteboards, and study kits..." aria-label="Search all files and workspace content" className="h-12 w-full rounded-xl border border-input bg-card pl-10 pr-20 text-sm outline-none transition-colors focus:border-primary" />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-border px-1.5 py-1 text-[10px] text-muted-foreground">⌘K / Ctrl K</span>
+            {globalSearch.trim() && <button type="button" onClick={() => { setGlobalSearch(''); setDebouncedGlobalSearch(''); }} className="absolute right-3 top-1/2 hidden -translate-y-1/2 rounded p-1 hover:bg-secondary sm:block" aria-label="Clear search"><X size={14}/></button>}
+            {debouncedGlobalSearch && <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-[70] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3 shadow-2xl">
+              {!hasSearchResults ? <p className="px-2 py-5 text-sm text-muted-foreground">No results found for <span className="font-medium text-foreground">{debouncedGlobalSearch}</span></p> : <div className="space-y-4">
+                {matchingFolders.length > 0 && <section><h3 className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Folders</h3>{matchingFolders.map(item => <button key={item.id} onClick={() => openSearchResult('folder', item)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary"><Folder size={17} className="shrink-0 text-primary"/><span className="min-w-0 flex-1"><span className="block truncate text-sm">{highlightMatch(item.name)}</span><span className="block truncate text-[11px] text-muted-foreground">{folderLocation(item.parent_folder_id)}</span></span></button>)}</section>}
+                {matchingFiles.length > 0 && <section><h3 className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Files</h3>{matchingFiles.map(item => { const Icon = iconFor(item.type, item.name); return <button key={item.id} onClick={() => openSearchResult('file', item)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary"><Icon size={17} className="shrink-0 text-primary"/><span className="min-w-0 flex-1"><span className="block truncate text-sm">{highlightMatch(item.name)}</span><span className="block truncate text-[11px] text-muted-foreground">{folderLocation(item.folder_id)}</span></span></button>; })}</section>}
+                {matchingDocuments.length > 0 && <section><h3 className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Documents</h3>{matchingDocuments.map(item => <button key={item.id} onClick={() => openSearchResult('document', item)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary"><FileText size={17} className="shrink-0 text-primary"/><span className="min-w-0 flex-1"><span className="block truncate text-sm">{highlightMatch(item.title)}</span><span className="block truncate text-[11px] text-muted-foreground">{folderLocation(item.folder_id)}</span></span></button>)}</section>}
+                {matchingWhiteboards.length > 0 && <section><h3 className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Whiteboards</h3>{matchingWhiteboards.map(item => <button key={item.id} onClick={() => openSearchResult('whiteboard', item)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary"><Pencil size={17} className="shrink-0 text-primary"/><span className="min-w-0 flex-1"><span className="block truncate text-sm">{highlightMatch(item.title)}</span><span className="block truncate text-[11px] text-muted-foreground">{folderLocation(item.folder_id)}</span></span></button>)}</section>}
+                {matchingKits.length > 0 && <section><h3 className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Study Kits</h3>{matchingKits.map(item => <button key={item.id} onClick={() => openSearchResult('kit', item)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary"><BookOpen size={17} className="shrink-0 text-primary"/><span className="min-w-0 flex-1"><span className="block truncate text-sm">{highlightMatch(item.title)}</span><span className="block truncate text-[11px] text-muted-foreground">{folderLocation(studyKitsFolder?.id || null)}</span></span></button>)}</section>}
+              </div>}
+            </div>}
+          </div>
+          <button type="button" onClick={() => setFolderDrawerOpen(true)} className="mb-4 flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-4 text-xs font-semibold xl:hidden"><FolderOpen size={15} className="text-primary"/> Browse folders</button>
           {!selected ? <div>
             <div className="flex items-center justify-between"><div><h2 className="font-serif text-2xl">Recent</h2><p className="mt-1 text-xs text-muted-foreground">Your latest files and study kits</p></div></div>
             {!recentItems.length ? <div className="mt-5 rounded-2xl border border-dashed border-primary/30 bg-card/70 p-12 text-center"><div className="mx-auto flex w-fit items-center gap-2 text-primary"><UploadCloud size={30}/><BookOpen size={30}/></div><h2 className="mt-4 font-serif text-2xl">Nothing here yet</h2><p className="mt-2 text-sm text-muted-foreground">Use + New above to add something to your workspace.</p></div> : <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{recentItems.map(item => item.kind === 'file' ? fileCard(item.file) : item.kind === 'document' ? documentCard(item.document) : item.kind === 'whiteboard' ? whiteboardCard(item.whiteboard) : kitCard(item.kit))}</div>}
