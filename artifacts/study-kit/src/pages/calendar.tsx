@@ -9,6 +9,8 @@ import {
   Plus,
   Repeat,
   Search,
+  Sparkles,
+  Loader2,
   Users,
   X,
 } from 'lucide-react';
@@ -525,6 +527,14 @@ function TimeGrid({
   );
 }
 
+type AIEventDraft = { id: string; title: string; startTime: string; endTime: string; recurrence: 'none'|'daily'|'weekly'|'monthly'|'yearly'; daysOfWeek: string[]; color: string; startDate: string; endDate?: string };
+const WEEKDAY_INDEX: Record<string,number> = { sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6 };
+function cleanAIJson(value:string) { let v=value.replace(/\x60\x60\x60json\s*/gi,'').replace(/\x60\x60\x60/g,'').trim(); const a=v.indexOf('['),b=v.lastIndexOf(']'); return a>=0&&b>a?v.slice(a,b+1):v; }
+function normalizeAIEvents(raw:any):AIEventDraft[] {
+ if(!Array.isArray(raw)) throw new Error('The AI response did not contain an event list. Please try again.');
+ return raw.map((item:any,i:number)=>{const cv=String(item?.color||'blueberry').toLowerCase();const aliases:Record<string,string>={blue:'blueberry',red:'tomato',pink:'flamingo',orange:'tangerine',yellow:'banana',green:'basil',purple:'grape'};const color=COLORS.some(c=>c.id===cv)?cv:aliases[cv]||'blueberry';const recurrence=['daily','weekly','monthly','yearly'].includes(String(item?.recurrence).toLowerCase())?String(item.recurrence).toLowerCase() as AIEventDraft['recurrence']:'none';const days=Array.isArray(item?.daysOfWeek)?item.daysOfWeek.map((d:any)=>String(d).toLowerCase()).filter((d:string)=>d in WEEKDAY_INDEX):[];return {id:'ai-'+Date.now()+'-'+i,title:String(item?.title||'Untitled event'),startTime:/^\d{1,2}:\d{2}$/.test(String(item?.startTime))?String(item.startTime).padStart(5,'0'):'09:00',endTime:/^\d{1,2}:\d{2}$/.test(String(item?.endTime))?String(item.endTime).padStart(5,'0'):'10:00',recurrence,daysOfWeek:[...new Set(days)],color,startDate:String(item?.startDate||'today'),endDate:item?.endDate};});
+}
+function nextAIEventDate(startDate:string,recurrence:AIEventDraft['recurrence'],days:string[]) {const today=startOfDay(new Date());if(startDate.toLowerCase()!=='today'){const d=new Date(startDate+'T00:00:00');if(!Number.isNaN(d.getTime()))return d;}if(recurrence==='weekly'&&days.length){for(let n=1;n<=7;n++){const d=addDays(today,n);if(days.some(day=>WEEKDAY_INDEX[day]===d.getDay()))return d;}}return today;}
 type CalendarErrorBoundaryProps = {
   children: ReactNode;
   onError?: (error: Error) => void;
@@ -632,6 +642,12 @@ function EventEditor({
   const [attachmentType, setAttachmentType] = useState<'study_kit' | 'file'>('study_kit');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [editorTab, setEditorTab] = useState<'manual'|'ai'>('manual');
+  const [aiDescription, setAiDescription] = useState('');
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiEvents, setAiEvents] = useState<AIEventDraft[]>([]);
+  const [aiSuccess, setAiSuccess] = useState('');
 
   useEffect(() => {
     void Promise.all([
@@ -792,6 +808,18 @@ function EventEditor({
   };
 
   const attachmentItems = attachmentType === 'study_kit' ? kits : files;
+  const generateAIEvents = async () => {
+    if (!aiDescription.trim()) { setError('Describe the events you want to create.'); return; }
+    setAiGenerating(true); setError(''); setAiSuccess('');
+    try { const response=await fetch('/api/calendar-ai-events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:aiDescription.trim()})}); const body=await response.json().catch(()=>({})); if(!response.ok)throw new Error(body?.error||'Could not generate events. Please try again.'); const parsed=JSON.parse(cleanAIJson(String(body?.content||''))); const normalized=normalizeAIEvents(parsed); if(!normalized.length)throw new Error('No events were found. Try describing days and times more specifically.'); setAiEvents(normalized); }
+    catch(e){setError(e instanceof Error?e.message:'Could not generate events. Please try again.');} finally{setAiGenerating(false);}
+  };
+  const saveAIEvents = async () => {
+    if(!me?.id){setError('You are not signed in. Please sign in again before creating calendar events.');return;} if(!aiEvents.length)return;
+    setAiSaving(true);setError('');
+    try { const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'America/Los_Angeles'; const payload=aiEvents.map(item=>{const day=nextAIEventDate(item.startDate,item.recurrence,item.daysOfWeek);const parts=item.startTime.split(':').map(Number),ends=item.endTime.split(':').map(Number);const st=new Date(day);st.setHours(parts[0],parts[1],0,0);const en=new Date(day);en.setHours(ends[0],ends[1],0,0);if(en<=st)en.setDate(en.getDate()+1);let rule:RecurrenceRule|null=null;if(item.recurrence!=='none'){const byWeekday=item.recurrence==='weekly'&&item.daysOfWeek.length?item.daysOfWeek.map(d=>WEEKDAY_INDEX[d]).sort((a,b)=>a-b):undefined;let end:RecurrenceEnd={type:'never'};if(item.endDate)end={type:'date',date:item.endDate};const weeks=aiDescription.match(/for the next\s+(\d+)\s+weeks?/i);if(!item.endDate&&weeks&&item.recurrence==='weekly')end={type:'date',date:formatInputDate(addDays(day,Number(weeks[1])*7))};rule={frequency:item.recurrence,interval:1,byWeekday,dayOfMonth:item.recurrence==='monthly'?day.getDate():undefined,month:item.recurrence==='yearly'?day.getMonth()+1:undefined,end};}return {owner_id:me.id,title:item.title.trim(),start_at:st.toISOString(),end_at:en.toISOString(),timezone,color:item.color,location:null,description:null,all_day:false,recurrence_rule:rule,reminders:[],notify_invites:false};}); await api('/rest/v1/calendar_events',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify(payload)});setAiSuccess(payload.length+' events created successfully!');setAiEvents([]);setAiDescription('');onSaved(); }
+    catch(e){setError(e instanceof Error?e.message:'Could not save events. Please try again.');}finally{setAiSaving(false);}
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex min-h-[100dvh] flex-col bg-background text-foreground">
@@ -803,13 +831,16 @@ function EventEditor({
         <div className="flex items-center gap-2">
           {initialEvent && <button onClick={() => onRequestDelete(initialEvent)} disabled={saving} className="rounded-lg px-4 py-2 text-xs font-semibold text-red-400 hover:bg-red-400/10 disabled:opacity-50">Delete</button>}
           <button onClick={onClose} disabled={saving} className="rounded-lg border border-border px-4 py-2 text-xs font-semibold hover:bg-secondary">Cancel</button>
-          {editorTab === 'manual' || initialEvent ? <button onClick={save} disabled={saving} className="rounded-lg bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button> : null}
+          {editorTab === 'manual' || initialEvent ? {editorTab==='manual'||initialEvent?<button onClick={save} disabled={saving} className="rounded-lg bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>:null} : null}
         </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-5 py-8 sm:px-10 sm:py-12">
+          {!initialEvent && <div className="mb-8 flex gap-2 rounded-xl border border-border bg-card p-1.5"><button type="button" onClick={()=>setEditorTab('manual')} className={editorTab==='manual'?'flex-1 rounded-lg bg-secondary px-4 py-3 text-sm font-semibold':'flex-1 rounded-lg px-4 py-3 text-sm text-muted-foreground'}>Manual form</button><button type="button" onClick={()=>setEditorTab('ai')} className={editorTab==='ai'?'flex-1 rounded-lg bg-secondary px-4 py-3 text-sm font-semibold':'flex-1 rounded-lg px-4 py-3 text-sm text-muted-foreground'}><Sparkles size={15} className="mr-2 inline"/> Ask AI</button></div>}
+          {aiSuccess&&<div className="mb-5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">{aiSuccess}</div>}
           {error && <div className="mb-5 rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-3 text-xs text-red-300">{error}</div>}
+          {editorTab==='ai'&&!initialEvent ? <section className="space-y-5"><h2 className="font-serif text-3xl">Describe your events</h2><textarea value={aiDescription} onChange={e=>setAiDescription(e.target.value)} placeholder="Describe your events in plain English... e.g. I have math class every Monday and Wednesday from 3-4pm, Science Olympiad practice every Saturday at 10am for 2 hours" rows={7} className="min-h-48 w-full resize-y rounded-xl border border-input bg-card p-4 text-sm leading-6"/><div className="flex flex-wrap gap-2">{['Class every Monday 5-6pm','Team meeting every Friday at 2pm for 1 hour','Study session daily at 8pm for 30 minutes'].map(v=><button key={v} type="button" onClick={()=>setAiDescription(v)} className="rounded-full border border-border bg-card px-3 py-2 text-xs hover:bg-secondary">{v}</button>)}</div><button type="button" onClick={()=>void generateAIEvents()} disabled={aiGenerating||aiSaving||!aiDescription.trim()} className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">{aiGenerating?<Loader2 size={16} className="animate-spin"/>:<Sparkles size={16}/>} {aiGenerating?'Generating events…':'Generate Events'}</button>{aiEvents.length>0&&<div className="space-y-4 border-t border-border pt-6"><div className="flex items-center justify-between"><h3 className="text-lg font-semibold">Preview events</h3><button type="button" onClick={()=>void saveAIEvents()} disabled={aiSaving} className="rounded-lg bg-primary px-4 py-3 text-xs font-semibold text-primary-foreground">{aiSaving?'Saving…':'Save all events'}</button></div>{aiEvents.map(item=><article key={item.id} className="rounded-xl border border-border bg-card p-4"><div className="flex items-start gap-3"><span className="mt-3 h-3 w-3 rounded-full" style={{backgroundColor:EVENT_COLOR[item.color]||EVENT_COLOR.blueberry}}/><div className="min-w-0 flex-1 space-y-3"><input value={item.title} aria-label="Event title" onChange={e=>setAiEvents(cur=>cur.map(v=>v.id===item.id?{...v,title:e.target.value}:v))} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm font-semibold"/><div className="grid gap-3 sm:grid-cols-2"><label className="text-xs">Start time<input type="time" value={item.startTime} onChange={e=>setAiEvents(cur=>cur.map(v=>v.id===item.id?{...v,startTime:e.target.value}:v))} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3"/></label><label className="text-xs">End time<input type="time" value={item.endTime} onChange={e=>setAiEvents(cur=>cur.map(v=>v.id===item.id?{...v,endTime:e.target.value}:v))} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3"/></label><label className="text-xs">Recurrence<select value={item.recurrence} onChange={e=>setAiEvents(cur=>cur.map(v=>v.id===item.id?{...v,recurrence:e.target.value as AIEventDraft['recurrence']}:v))} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3"><option value="none">One time</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><label className="text-xs">Color<select value={item.color} onChange={e=>setAiEvents(cur=>cur.map(v=>v.id===item.id?{...v,color:e.target.value}:v))} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3">{COLORS.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></label><label className="text-xs sm:col-span-2">Start date<input type="date" value={item.startDate.toLowerCase()==='today'?formatInputDate(new Date()):item.startDate} onChange={e=>setAiEvents(cur=>cur.map(v=>v.id===item.id?{...v,startDate:e.target.value}:v))} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3"/></label></div><div className="text-xs text-muted-foreground">{item.recurrence==='weekly'&&item.daysOfWeek.length?'Weekly: '+item.daysOfWeek.join(', '):item.recurrence==='none'?'One time':item.recurrence} · {COLORS.find(c=>c.id===item.color)?.label}</div></div><button type="button" aria-label="Remove event" onClick={()=>setAiEvents(cur=>cur.filter(v=>v.id!==item.id))} className="rounded-md p-2 hover:bg-secondary"><X size={16}/></button></div></article>)}</div>}</section> : <>
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus placeholder="Event title" className="w-full border-0 bg-transparent font-serif text-4xl tracking-tight outline-none placeholder:text-muted-foreground/50 sm:text-5xl" />
 
           <div className="mt-10 grid gap-8 lg:grid-cols-[1fr_300px]">
@@ -1065,6 +1096,7 @@ function EventEditor({
               </div>
             </aside>
           </div>
+          </>}
         </div>
       </div>
     </div>
