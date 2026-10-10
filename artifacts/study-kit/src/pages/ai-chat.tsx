@@ -296,8 +296,8 @@ export default function AIChatPage() {
     // Configure MathJax before loading it so both inline and display LaTeX are recognized.
     (window as any).MathJax = {
       tex: {
-        inlineMath: [['\\\\(', '\\\\)']],
-        displayMath: [['\\\\[', '\\\\]'], ['$', '$']],
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]'], ['$', '$']],
         processEscapes: true,
       },
       options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] },
