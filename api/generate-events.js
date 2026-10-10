@@ -1,7 +1,3 @@
-const SYSTEM_PROMPT = `Return ONLY a JSON array in this format:
-[{"title":"Art Class","date":"2026-10-13","startTime":"18:30","endTime":"20:30","color":"blue"}]
-Use ISO dates (YYYY-MM-DD) and 24-hour times (HH:mm). Interpret weekdays as the next matching date from today. Do not include markdown or any text outside the JSON array.`;
-
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed." });
@@ -16,6 +12,14 @@ export default async function handler(req, res) {
   if (!prompt) {
     return res.status(400).json({ error: "Describe the events you want to create." });
   }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const requestedWeeks = Number.parseInt(String(req.body?.weeks ?? "12"), 10);
+  const weeks = [4, 8, 12, 24].includes(requestedWeeks) ? requestedWeeks : 12;
+  const systemPrompt = `Return ONLY a JSON array in this format:
+[{"title":"Art Class","date":"YYYY-MM-DD","startTime":"18:30","endTime":"20:30","color":"blue"}]
+Today's date is: ${today}.
+For recurring events, generate every occurrence within the next ${weeks} weeks, starting with the next matching date after today (unless the user specifies a date). For "every tuesday", include every Tuesday in that period. For "every day", include each day in that period. For "every monday and wednesday", include both Mondays and Wednesdays in that period. Return each occurrence as its own array item with its actual ISO date. For one-time events, return only the requested event(s). Use ISO dates (YYYY-MM-DD) and 24-hour times (HH:mm). Do not include markdown, recurrence fields, or any text outside the JSON array.`;
 
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
@@ -33,9 +37,9 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "openai/gpt-oss-20b",
         temperature: 0.1,
-        max_tokens: 1500,
+        max_tokens: 6000,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           { role: "user", content: prompt },
         ],
       }),
