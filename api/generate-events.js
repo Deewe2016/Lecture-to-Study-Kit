@@ -3,6 +3,16 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed." });
   }
 
+  // Deletion is confirmed in the calendar UI. This action only echoes valid IDs
+  // for the frontend to delete from Supabase after the user confirms.
+  if (req.body?.action === "delete") {
+    const eventIds = req.body?.eventIds;
+    if (!Array.isArray(eventIds) || eventIds.some((id) => typeof id !== "string" || !id.trim())) {
+      return res.status(400).json({ error: "A valid list of event IDs is required." });
+    }
+    return res.status(200).json({ toDelete: [...new Set(eventIds)] });
+  }
+
   const prompt = typeof req.body?.prompt === "string"
     ? req.body.prompt.trim()
     : typeof req.body?.description === "string"
