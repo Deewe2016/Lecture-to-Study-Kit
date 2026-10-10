@@ -916,11 +916,30 @@ function EventEditor({
     setAiSaving(true);
     setError('');
     try {
+      // Use POST for the application API; it validates the confirmed IDs before
+      // the frontend performs the Supabase REST deletion.
+      const confirmationResponse = await fetch('/api/generate-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', eventIds: selectedIds }),
+      });
+      const confirmationBody = await confirmationResponse.json().catch(() => ({}));
+      if (!confirmationResponse.ok) {
+        throw new Error(confirmationBody?.error || `Request failed with status ${confirmationResponse.status}`);
+      }
+      if (!Array.isArray(confirmationBody?.toDelete)) {
+        throw new Error('The delete endpoint did not return a valid event ID list.');
+      }
+      const confirmedIds = [...new Set<string>(
+        confirmationBody.toDelete.filter((id: unknown): id is string => selectedIds.includes(id as string)),
+      )];
+      if (!confirmedIds.length) throw new Error('No confirmed event IDs were returned.');
+
       await api(
-        `/rest/v1/calendar_events?id=in.(${selectedIds.join(',')})&owner_id=eq.${me.id}`,
+        `/rest/v1/calendar_events?id=in.(${confirmedIds.join(',')})&owner_id=eq.${me.id}`,
         { method: 'DELETE', headers: { Prefer: 'return=minimal' } },
       );
-      const message = `${selectedIds.length} events deleted successfully`;
+      const message = `${confirmedIds.length} events deleted successfully`;
       toast({ title: message });
       setAiSuccess(message);
       setAiDeleteEvents([]);
