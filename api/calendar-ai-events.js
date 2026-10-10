@@ -27,6 +27,12 @@ export default async function handler(req, res) {
   }
 
   try {
+    const messages = [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: description },
+    ];
+    console.log("[Calendar AI] Exact Groq prompt:", JSON.stringify(messages, null, 2));
+
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -37,29 +43,61 @@ export default async function handler(req, res) {
         model: "openai/gpt-oss-20b",
         temperature: 0.1,
         max_tokens: 3000,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: description },
-        ],
+        messages,
       }),
     });
 
+    const rawResponse = await response.text().catch((error) => {
+      console.error("[Calendar AI] Failed to read Groq response body:", error);
+      return "";
+    });
+    console.log("[Calendar AI] Groq HTTP status:", response.status, response.ok);
+    console.log("[Calendar AI] Raw Groq API response:", rawResponse);
+
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      console.error("Calendar AI Groq error:", response.status, detail.slice(0, 1000));
+      console.error("[Calendar AI] Groq API returned an error status:", response.status, rawResponse);
       return res.status(502).json({ error: "Could not generate events. Please try again." });
     }
 
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || !content.trim()) {
-      console.error("Calendar AI: Groq returned no message content.");
-      return res.status(502).json({ error: "The AI returned an empty response. Please try again." });
+    let data;
+    try {
+      data = JSON.parse(rawResponse);
+    } catch (parseError) {
+      console.error("[Calendar AI] Groq API response JSON parse error:", parseError);
+      return res.status(502).json({ error: "Could not generate events. Please try again." });
     }
 
-    return res.status(200).json({ content });
+    const content = data?.choices?.[0]?.message?.content;
+    console.log("[Calendar AI] Extracted model content:", content);
+    if (typeof content !== "string" || !content.trim()) {
+      console.error("[Calendar AI] Groq returned no message content:", data);
+      return res.status(502).json({ error: "Could not generate events. Please try again." });
+    }
+
+    let cleaned = content
+      .replace(/\\`\\`\\`json\\n?/gi, "")
+      .replace(/\\`\\`\\`\\n?/g, "")
+      .trim();
+    const start = cleaned.indexOf("[");
+    const end = cleaned.lastIndexOf("]");
+    if (start !== -1 && end !== -1) cleaned = cleaned.slice(start, end + 1);
+
+    let events;
+    try {
+      events = JSON.parse(cleaned);
+      if (!Array.isArray(events)) throw new Error("AI response was not a JSON array.");
+    } catch (parseError) {
+      console.error("[Calendar AI] Event array JSON parse error:", parseError, {
+        rawContent: content,
+        cleanedContent: cleaned,
+      });
+      return res.status(502).json({ error: "Could not generate events. Please try again." });
+    }
+
+    console.log("[Calendar AI] Final parsed events array:", events);
+    return res.status(200).json({ content: JSON.stringify(events) });
   } catch (error) {
-    console.error("Calendar AI request failed:", error);
+    console.error("[Calendar AI] Request failed:", error);
     return res.status(502).json({ error: "Could not generate events. Please try again." });
   }
 }
