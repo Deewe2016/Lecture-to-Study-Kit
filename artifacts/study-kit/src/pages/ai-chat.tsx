@@ -300,7 +300,11 @@ export default function AIChatPage() {
     const typesetMath = () => {
       const mathJax = (window as any).MathJax;
       if (mathJax?.typesetPromise) {
-        void mathJax.typesetPromise(Array.from(document.querySelectorAll('.ai-chat-markdown')));
+        const containers = Array.from(document.querySelectorAll('.ai-chat-markdown'));
+        // React may restore the raw HTML when the composer state changes. Clear MathJax's
+        // previous bookkeeping and typeset the current DOM again after each render.
+        mathJax.typesetClear?.(containers);
+        void mathJax.typesetPromise(containers);
       }
     };
 
@@ -333,7 +337,7 @@ export default function AIChatPage() {
     document.head.appendChild(script);
 
     return () => script.removeEventListener('load', typesetMath);
-  }, [messages, thinking]);
+  }, [messages, thinking, input]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
