@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
+import { useToast } from '@/hooks/use-toast';
 
 type EmailReminder = {
   id: string;
@@ -600,6 +601,7 @@ function EventEditor({
   onRequestDelete: (event: CalendarEvent) => void;
 }) {
   const me = getStoredUser();
+  const { toast } = useToast();
   const [title, setTitle] = useState(initialEvent?.title || '');
   const [start, setStart] = useState(initialEvent ? localDateTimeInput(initialEvent.start_at) : `${formatInputDate(selectedDate)}T09:00`);
   const [end, setEnd] = useState(initialEvent ? localDateTimeInput(initialEvent.end_at) : `${formatInputDate(selectedDate)}T10:00`);
@@ -817,7 +819,7 @@ function EventEditor({
   const saveAIEvents = async () => {
     if(!me?.id){setError('You are not signed in. Please sign in again before creating calendar events.');return;} if(!aiEvents.length)return;
     setAiSaving(true);setError('');
-    try { const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'America/Los_Angeles'; const payload=aiEvents.map(item=>{const day=nextAIEventDate(item.startDate,item.recurrence,item.daysOfWeek);const parts=item.startTime.split(':').map(Number),ends=item.endTime.split(':').map(Number);const st=new Date(day);st.setHours(parts[0],parts[1],0,0);const en=new Date(day);en.setHours(ends[0],ends[1],0,0);if(en<=st)en.setDate(en.getDate()+1);let rule:RecurrenceRule|null=null;if(item.recurrence!=='none'){const byWeekday=item.recurrence==='weekly'&&item.daysOfWeek.length?item.daysOfWeek.map(d=>WEEKDAY_INDEX[d]).sort((a,b)=>a-b):undefined;let end:RecurrenceEnd={type:'never'};if(item.endDate)end={type:'date',date:item.endDate};const weeks=aiDescription.match(/for the next\s+(\d+)\s+weeks?/i);if(!item.endDate&&weeks&&item.recurrence==='weekly')end={type:'date',date:formatInputDate(addDays(day,Number(weeks[1])*7))};rule={frequency:item.recurrence,interval:1,byWeekday,dayOfMonth:item.recurrence==='monthly'?day.getDate():undefined,month:item.recurrence==='yearly'?day.getMonth()+1:undefined,end};}return {owner_id:me.id,title:item.title.trim(),start_at:st.toISOString(),end_at:en.toISOString(),timezone,color:item.color,location:null,description:null,all_day:false,recurrence_rule:rule,reminders:[],notify_invites:false};}); await api('/rest/v1/calendar_events',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify(payload)});setAiSuccess(payload.length+' events created successfully!');setAiEvents([]);setAiDescription('');onSaved(); }
+    try { const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'America/Los_Angeles'; const payload=aiEvents.map(item=>{const day=nextAIEventDate(item.startDate,item.recurrence,item.daysOfWeek);const parts=item.startTime.split(':').map(Number),ends=item.endTime.split(':').map(Number);const st=new Date(day);st.setHours(parts[0],parts[1],0,0);const en=new Date(day);en.setHours(ends[0],ends[1],0,0);if(en<=st)en.setDate(en.getDate()+1);let rule:RecurrenceRule|null=null;if(item.recurrence!=='none'){const byWeekday=item.recurrence==='weekly'&&item.daysOfWeek.length?item.daysOfWeek.map(d=>WEEKDAY_INDEX[d]).sort((a,b)=>a-b):undefined;let end:RecurrenceEnd={type:'never'};if(item.endDate)end={type:'date',date:item.endDate};const weeks=aiDescription.match(/for the next\s+(\d+)\s+weeks?/i);if(!item.endDate&&weeks&&item.recurrence==='weekly')end={type:'date',date:formatInputDate(addDays(day,Number(weeks[1])*7))};rule={frequency:item.recurrence,interval:1,byWeekday,dayOfMonth:item.recurrence==='monthly'?day.getDate():undefined,month:item.recurrence==='yearly'?day.getMonth()+1:undefined,end};}return {owner_id:me.id,title:item.title.trim(),start_at:st.toISOString(),end_at:en.toISOString(),timezone,color:item.color,location:null,description:null,all_day:false,recurrence_rule:rule,reminders:[],notify_invites:false};}); await api('/rest/v1/calendar_events',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify(payload)});setAiSuccess(payload.length+' events created successfully!');toast({title:payload.length+' events created successfully!'});setAiEvents([]);setAiDescription('');onSaved(); }
     catch(e){setError(e instanceof Error?e.message:'Could not save events. Please try again.');}finally{setAiSaving(false);}
   };
 
