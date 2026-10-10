@@ -844,8 +844,8 @@ function EventEditor({
       console.log('[Calendar AI UI] Raw model content', rawContent);
 
       let cleaned = rawContent
-        .replace(/\\`\\`\\`json\\n?/gi, '')
-        .replace(/\\`\\`\\`\\n?/g, '')
+        .replace(/```json\n?/gi, '')
+        .replace(/```\n?/g, '')
         .trim();
       const start = cleaned.indexOf('[');
       const end = cleaned.lastIndexOf(']');
