@@ -405,9 +405,13 @@ export default function FilesPage() {
     return visibleWhiteboards.filter(w => (!selected || w.folder_id === selected) && (!q || w.title.toLowerCase().includes(q)));
   }, [visibleWhiteboards, selected, search]);
 
+  const currentFolders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return visibleFolders.filter(folder => folder.parent_folder_id === selected && (!q || folder.name.toLowerCase().includes(q)));
+  }, [visibleFolders, selected, search]);
   const currentFiles = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return visibleFiles.filter(f => (!selected || f.folder_id === selected) && (!q || f.name.toLowerCase().includes(q)));
+    return visibleFiles.filter(f => f.folder_id === selected && (!q || f.name.toLowerCase().includes(q)));
   }, [visibleFiles, selected, search]);
   const currentDocuments = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -986,6 +990,26 @@ export default function FilesPage() {
     </div>
   );
 
+  const folderCard = (folder: FolderRow) => (
+    <div key={folder.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
+      <div className="flex items-start gap-3">
+        <button type="button" onClick={() => { setSelected(folder.id); setSearch(''); setFolderDrawerOpen(false); }} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Folder size={23}/></div>
+          <span className="min-w-0"><span className="block truncate text-sm font-medium">{folder.name}</span><span className="mt-1 block text-[10px] text-muted-foreground">{children(folder.id).length} subfolders</span></span>
+        </button>
+        {folder.owner_id === me?.id && <div className="relative shrink-0">
+          <button type="button" onClick={() => setMenu(menu === 'folder-card:' + folder.id ? null : 'folder-card:' + folder.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="Folder options"><MoreHorizontal size={14}/></button>
+          {menu === 'folder-card:' + folder.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
+            <button type="button" onClick={() => { setEditingItem({kind:'folder',id:folder.id}); setEditingValue(folder.name); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
+            <button type="button" onClick={() => { togglePin(folder.id); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pin size={13}/> Pin</button>
+            {folder.id !== root?.id && <button type="button" onClick={() => openMoveDialog({kind:'folder',id:folder.id,name:folder.name,currentFolderId:folder.parent_folder_id})} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Move size={13}/> Move</button>}
+            {folder.id !== root?.id && <button type="button" onClick={() => { void deleteFolder(folder.id); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>}
+          </div>}
+        </div>}
+      </div>
+    </div>
+  );
+
   const whiteboardCard = (whiteboard: WhiteboardRow) => (
     <div key={whiteboard.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
       <button type="button" onClick={() => window.location.assign('/whiteboard?id=' + encodeURIComponent(whiteboard.id))} className="w-full text-left">
@@ -1163,8 +1187,8 @@ export default function FilesPage() {
             <div className="mt-10"><h2 className="font-serif text-2xl">Quick access</h2>{quick.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{quick.map(f=><button key={f.id} onClick={()=>{setSection('mine');setSelected(f.id)}} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left hover:border-primary/40"><Folder size={20} className="text-primary"/><span className="truncate text-sm font-medium">{f.name}</span></button>)}</div> : <p className="mt-3 text-xs text-muted-foreground">Pin folders from their menu to keep them here.</p>}</div>
           </div> : <div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search files by name" className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-xs outline-none"/></div><div className="flex rounded-lg border border-border p-1"><button onClick={()=>setView('grid')} className={`rounded-md p-1.5 ${view==='grid'?'bg-secondary':''}`}><Grid2X2 size={15}/></button><button onClick={()=>setView('list')} className={`rounded-md p-1.5 ${view==='list'?'bg-secondary':''}`}><List size={15}/></button></div></div>
-            <div className="mt-5 flex items-center justify-between"><h2 className="font-serif text-2xl">{section==='shared'?'Shared with Me':(folders.find(f=>f.id===selected)?.name || 'My Files')}</h2><span className="text-xs text-muted-foreground">{currentFiles.length + currentDocuments.length + currentWhiteboards.length} items</span></div>
-            {selected === studyKitsFolder?.id ? (studyKits.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{studyKits.filter(k => !search || k.title.toLowerCase().includes(search.toLowerCase())).map(kitCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No study kits yet.</div>) : (currentFiles.length || currentDocuments.length || currentWhiteboards.length) ? <div className={view==='grid'?'mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4':'mt-4 space-y-2'}>{currentWhiteboards.map(whiteboardCard)}{currentDocuments.map(documentCard)}{currentFiles.map(fileCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No files in this folder.</div>}
+            <div className="mt-5 flex items-center justify-between"><h2 className="font-serif text-2xl">{section==='shared'?'Shared with Me':(folders.find(f=>f.id===selected)?.name || 'My Files')}</h2><span className="text-xs text-muted-foreground">{currentFolders.length + currentFiles.length + currentDocuments.length + currentWhiteboards.length} items</span></div>
+            {selected === studyKitsFolder?.id ? (studyKits.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{studyKits.filter(k => !search || k.title.toLowerCase().includes(search.toLowerCase())).map(kitCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">No study kits yet.</div>) : (currentFolders.length || currentFiles.length || currentDocuments.length || currentWhiteboards.length) ? <div className={view==='grid'?'mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4':'mt-4 space-y-2'}>{currentFolders.map(folderCard)}{currentWhiteboards.map(whiteboardCard)}{currentDocuments.map(documentCard)}{currentFiles.map(fileCard)}</div> : <div className="mt-4 rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">This folder is empty.</div>}
           </div>}
         </div>
       </div>
