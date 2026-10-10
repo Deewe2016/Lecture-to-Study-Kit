@@ -110,20 +110,41 @@ function conversationTitle(conversation: Conversation) {
 }
 
 function normalizeMathDelimiters(text: string) {
-  // Some model responses wrap display math as "[\\ ... \\]" instead of "\\[...\\]".
-  // Convert that variant before Markdown parses the message.
+  // Models sometimes emit [\\ ... \\] or [\\\\ ... \\\\] instead of valid display delimiters.
   return text
-    .replace(/\[\s*\\\s*([\s\S]*?)\s*\\\s*\]/g, (_match, math: string) => `\\[\n${math.trim()}\n\\]`)
-    .replace(/\\\\\[([\s\S]*?)\\\\\]/g, (_match, math: string) => `\\[\n${math.trim()}\n\\]`);
+    .replace(/\[\s*\\{1,2}\s*([\s\S]*?)\s*\\{1,2}\s*\]/g, (_match, math: string) => `\\[\n${math.trim()}\n\\]`)
+    .replace(/\\\\\[\s*([\s\S]*?)\s*\\\\\]/g, (_match, math: string) => `\\[\n${math.trim()}\n\\]`);
+}
+
+function escapeMathHtml(text: string) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function renderMarkdown(text: string) {
   const normalizedText = normalizeMathDelimiters(text);
-  const html = DOMPurify.sanitize(marked.parse(normalizedText, { gfm: true, breaks: true }) as string);
-
+  const mathExpressions: Array<{ token: string; html: string }> = [];
+  // Protect LaTeX before Markdown parsing so backslash escaping and breaks:true
+  // cannot remove delimiters or insert <br> tags inside equations.
+  const markdownSafeText = normalizedText.replace(
+    /\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$|\\\(([\s\S]*?)\\\)/g,
+    (match, displayLatex?: string, dollarLatex?: string, inlineLatex?: string) => {
+      const token = `FLEXUSMATHTOKEN${mathExpressions.length}END`;
+      const isDisplay = displayLatex !== undefined || dollarLatex !== undefined;
+      const latex = displayLatex ?? dollarLatex ?? inlineLatex ?? match;
+      const delimiters = isDisplay ? `\\[\n${latex.trim()}\n\\]` : `\\(${latex.trim()}\\)`;
+      mathExpressions.push({
+        token,
+        html: `<span class="${isDisplay ? 'math-display' : 'math-inline'}">${escapeMathHtml(delimiters)}</span>`,
+      });
+      return token;
+    },
+  );
+  let html = marked.parse(markdownSafeText, { gfm: true, breaks: true }) as string;
+  for (const expression of mathExpressions) html = html.replace(expression.token, expression.html);
+  html = DOMPurify.sanitize(html);
   return (
     <div
-      className="ai-chat-markdown [&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_hr]:my-4 [&_hr]:border-border [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-950 [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-5 [&_pre]:text-zinc-100 [&_code]:rounded [&_code]:bg-secondary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-left [&_table]:text-sm [&_th]:border [&_th]:border-border [&_th]:bg-secondary/80 [&_th]:px-3 [&_th]:py-2 [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_tbody_tr:nth-child(odd)]:bg-card [&_tbody_tr:nth-child(even)]:bg-secondary/35 [&_.MathJax]:text-inherit"
+      className="ai-chat-markdown [&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:list-decimal [&_li]:my-1 [&_hr]:my-4 [&_hr]:border-border [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-950 [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-sm [&_pre]:leading-5 [&_pre]:text-zinc-100 [&_code]:rounded [&_code]:bg-secondary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-left [&_table]:text-sm [&_th]:border [&_th]:border-border [&_th]:bg-secondary/80 [&_th]:px-3 [&_th]:py-2 [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_tbody_tr:nth-child(odd)]:bg-card [&_tbody_tr:nth-child(even)]:bg-secondary/35 [&_.MathJax]:text-inherit"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
