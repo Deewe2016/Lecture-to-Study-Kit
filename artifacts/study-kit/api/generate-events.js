@@ -14,12 +14,18 @@ export default async function handler(req, res) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const requestedWeeks = Number.parseInt(String(req.body?.weeks ?? "12"), 10);
-  const weeks = [4, 8, 12, 24].includes(requestedWeeks) ? requestedWeeks : 12;
+  const weeksInput = String(req.body?.weeks ?? "12").trim();
+  const weeks = Number(weeksInput);
+  if (!/^\\d+$/.test(weeksInput) || !Number.isSafeInteger(weeks) || weeks <= 0) {
+    return res.status(400).json({ error: "Number of weeks must be a positive whole number." });
+  }
+  const allowedColors = ["tomato", "flamingo", "tangerine", "banana", "sage", "basil", "peacock", "blueberry", "lavender", "grape"];
+  const requestedColor = String(req.body?.color ?? "tomato").toLowerCase();
+  const color = allowedColors.includes(requestedColor) ? requestedColor : "tomato";
   const systemPrompt = `Return ONLY a JSON array in this format:
-[{"title":"Art Class","date":"YYYY-MM-DD","startTime":"18:30","endTime":"20:30","color":"blue"}]
+[{"title":"Art Class","date":"YYYY-MM-DD","startTime":"18:30","endTime":"20:30","color":"${color}"}]
 Today's date is: ${today}.
-For recurring events, generate every occurrence within the next ${weeks} weeks, starting with the next matching date after today (unless the user specifies a date). For "every tuesday", include every Tuesday in that period. For "every day", include each day in that period. For "every monday and wednesday", include both Mondays and Wednesdays in that period. Return each occurrence as its own array item with its actual ISO date. For one-time events, return only the requested event(s). Use ISO dates (YYYY-MM-DD) and 24-hour times (HH:mm). Do not include markdown, recurrence fields, or any text outside the JSON array.`;
+Generate ${weeks} weeks of occurrences. For recurring events, generate every occurrence within that period, starting with the next matching date after today (unless the user specifies a date). For "every tuesday", include every Tuesday in that period. For "every day", include each day in that period. For "every monday and wednesday", include both Mondays and Wednesdays in that period. Return each occurrence as its own array item with its actual ISO date. For one-time events, return only the requested event(s). Use ISO dates (YYYY-MM-DD) and 24-hour times (HH:mm). Set the color of EVERY generated event to "${color}". Do not include markdown, recurrence fields, or any text outside the JSON array.`;
 
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
@@ -98,6 +104,7 @@ For recurring events, generate every occurrence within the next ${weeks} weeks, 
     // The calendar UI expects startDate; accept the simpler prompt's date field.
     const events = parsedEvents.map((event) => ({
       ...event,
+      color,
       startDate: event?.startDate || event?.date || "today",
     }));
 
