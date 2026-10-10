@@ -8,7 +8,7 @@ const SYSTEM_PROMPT = `You are a calendar assistant. The user will describe even
   "color": "blue",
   "startDate": "today"
 }]
-No other text, just the JSON array.`;
+No other text, just the JSON array. Interpret 'today' as the current local date. For recurring weekly events, include the requested weekdays. If the description gives a duration such as 'for 2 hours' or 'for 30 minutes', calculate endTime from startTime. If the description says 'for the next N weeks', include an endDate covering that recurrence period.`;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
