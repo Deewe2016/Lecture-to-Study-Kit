@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   const today = new Date().toISOString().slice(0, 10);
   const weeksInput = String(req.body?.weeks ?? "12").trim();
   const weeks = Number(weeksInput);
-  if (!/^\\d+$/.test(weeksInput) || !Number.isSafeInteger(weeks) || weeks <= 0) {
+  if (!/^\d+$/.test(weeksInput) || !Number.isSafeInteger(weeks) || weeks <= 0) {
     return res.status(400).json({ error: "Number of weeks must be a positive whole number." });
   }
   const allowedColors = ["tomato", "flamingo", "tangerine", "banana", "sage", "basil", "peacock", "blueberry", "lavender", "grape"];
