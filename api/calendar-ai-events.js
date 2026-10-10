@@ -75,8 +75,8 @@ export default async function handler(req, res) {
     }
 
     let cleaned = content
-      .replace(/\\`\\`\\`json\\n?/gi, "")
-      .replace(/\\`\\`\\`\\n?/g, "")
+      .replace(/```json\n?/gi, "")
+      .replace(/```\n?/g, "")
       .trim();
     const start = cleaned.indexOf("[");
     const end = cleaned.lastIndexOf("]");
