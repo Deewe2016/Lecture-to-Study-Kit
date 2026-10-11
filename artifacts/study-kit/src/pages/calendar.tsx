@@ -860,16 +860,18 @@ function EventEditor({
     }
   };
   const findAIEventsToDelete = async () => {
-    const prompt = aiDescription.trim();
-    if (!prompt) { setError('Describe which events to delete.'); return; }
-    if (!me?.id) { setError('You are not signed in. Please sign in again before deleting calendar events.'); return; }
-
-    setAiGenerating(true);
-    setError('');
-    setAiSuccess('');
-    setAiDeleteEvents([]);
-    setAiDeleteSelectedIds([]);
+    console.log('me:', me, 'supabase:', !!(globalThis as any).supabase);
     try {
+      const prompt = aiDescription.trim();
+      if (!prompt) { setError('Describe which events to delete.'); return; }
+      if (!me?.id) { setError('You are not signed in. Please sign in again before deleting calendar events.'); return; }
+
+      setAiGenerating(true);
+      setError('');
+      setAiSuccess('');
+      setAiDeleteEvents([]);
+      setAiDeleteSelectedIds([]);
+
       const currentEvents = await api<CalendarEvent[]>(
         `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,reminders,notify_invites,created_at,updated_at&owner_id=eq.${me.id}&order=start_at.asc&limit=500`,
       );
@@ -901,7 +903,9 @@ function EventEditor({
       if (!matchedEvents.length) throw new Error('The AI could not match your description to any events. Try being more specific.');
       setAiDeleteEvents(matchedEvents);
       setAiDeleteSelectedIds(matchedEvents.map((event) => event.id));
-    } catch (err) {
+    } catch (err: any) {
+      console.error('Find events to delete JavaScript error:', err);
+      alert('JS Error: ' + err.message + '\n' + err.stack);
       setError(err instanceof Error ? err.message : 'Could not find events to delete.');
     } finally {
       setAiGenerating(false);
