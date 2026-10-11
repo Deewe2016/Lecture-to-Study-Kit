@@ -1,6 +1,7 @@
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed." });
+  console.log('delete-events called with method:', req.method);
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: `Method ${req.method} not allowed. Use POST.` });
   }
 
   const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
