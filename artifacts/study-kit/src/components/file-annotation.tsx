@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, LoaderCircle, Save } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -264,7 +264,7 @@ export default function FileAnnotationViewer({
         .file-annotation-page > pre {
           display: block; max-width: calc(100vw - 190px); width: auto; height: auto;
         }
-        .file-annotation-page > img { max-height: none; object-fit: contain; }
+        .file-annotation-page > img { max-height: calc(100dvh - 150px); object-fit: contain; }
         .file-annotation-excalidraw { position: absolute; inset: 0; z-index: 2; pointer-events: all; }
         .file-annotation-excalidraw[data-annotation-mode="false"] { pointer-events: none; }
         .file-annotation-excalidraw .excalidraw,
