@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, LoaderCircle, Save } from 'lucide-react';
+import { ChevronLeft, LoaderCircle, Save } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
@@ -89,9 +89,7 @@ export default function FileAnnotationViewer({
   const [annotationId, setAnnotationId] = useState<string | null>(null);
   const [pageScenes, setPageScenes] = useState<Record<string, Scene>>({});
   const scenesRef = useRef<Record<string, Scene>>({});
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageCount, setPageCount] = useState(1);
-  const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [pdfCanvases, setPdfCanvases] = useState<HTMLCanvasElement[]>([]);
   const [textContent, setTextContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -137,29 +135,31 @@ export default function FileAnnotationViewer({
 
   useEffect(() => {
     let cancelled = false;
-    setPdfCanvas(null);
-    setPageCount(1);
+    setPdfCanvases([]);
     if (!isPdf(file)) return;
     void (async () => {
       try {
         const pdf = await pdfjsLib.getDocument(src).promise;
-        if (cancelled) return;
-        setPageCount(pdf.numPages);
-        const page = await pdf.getPage(Math.min(pageNumber, pdf.numPages));
-        const viewport = page.getViewport({ scale: 1.5 });
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.ceil(viewport.width);
-        canvas.height = Math.ceil(viewport.height);
-        const context = canvas.getContext('2d');
-        if (!context) throw new Error('Could not create the PDF page canvas.');
-        await page.render({ canvasContext: context, viewport }).promise;
-        if (!cancelled) setPdfCanvas(canvas);
+        const rendered: HTMLCanvasElement[] = [];
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          if (cancelled) return;
+          const page = await pdf.getPage(pageNumber);
+          const viewport = page.getViewport({ scale: 1.35 });
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Could not create a PDF page canvas.');
+          await page.render({ canvasContext: context, viewport }).promise;
+          rendered.push(canvas);
+        }
+        if (!cancelled) setPdfCanvases(rendered);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not render this PDF page.');
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not render this PDF.');
       }
     })();
     return () => { cancelled = true; };
-  }, [file.id, file.name, file.type, src, pageNumber]);
+  }, [file.id, file.name, file.type, src]);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,19 +181,15 @@ export default function FileAnnotationViewer({
     return () => { cancelled = true; };
   }, [file.id, file.name, file.type, src]);
 
-  const handleChange = useCallback((elements: readonly any[], appState: any, files: any) => {
+  const handleChange = useCallback((pageKey: string, elements: readonly any[], appState: any, files: any) => {
     if (!loaded) return;
     const scene: Scene = {
       elements: elements as any[],
-      appState: {
-        viewBackgroundColor: 'transparent',
-        gridSize: appState.gridSize ?? null,
-      },
+      appState: { viewBackgroundColor: 'transparent', gridSize: appState.gridSize ?? null },
       files: files || {},
     };
-    const next = { ...scenesRef.current, [pageKey]: scene };
-    scenesRef.current = next;
-  }, [loaded, pageKey]);
+    scenesRef.current = { ...scenesRef.current, [pageKey]: scene };
+  }, [loaded]);
 
   const initialData = useMemo(() => {
     const scene = pageScenes[pageKey] || emptyScene();
@@ -243,7 +239,20 @@ export default function FileAnnotationViewer({
   const pdf = isPdf(file);
   const image = isImage(file);
   const textFile = isTextFile(file);
-  const canNavigatePages = pdf && pageCount > 1;
+  const pageCount = pdf ? pdfCanvases.length : 1;
+
+  const renderAnnotationLayer = (pageKey: string) => {
+    const scene = pageScenes[pageKey] || emptyScene();
+    const initialData = { elements: scene.elements, appState: { ...scene.appState, viewBackgroundColor: 'transparent' }, files: scene.files };
+    return loaded ? (
+      <div className="file-annotation-excalidraw" data-annotation-mode="true" data-page={pageKey}>
+        <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-black/60">Loading drawing tools…</div>}>
+          <Excalidraw key={pageKey} theme="light" initialData={initialData}
+            onChange={(elements, appState, files) => handleChange(pageKey, elements, appState, files)} />
+        </Suspense>
+      </div>
+    ) : null;
+  };
 
   return (
     <div className="fixed inset-0 z-[10001] flex h-[100dvh] w-[100vw] flex-col overflow-hidden bg-[#181818] text-white">
@@ -252,87 +261,84 @@ export default function FileAnnotationViewer({
         .file-annotation-excalidraw .excalidraw,
         .file-annotation-excalidraw .App,
         .file-annotation-excalidraw .layer-ui__wrapper,
-        .file-annotation-excalidraw .Island {
-          background: transparent !important;
-        }
+        .file-annotation-excalidraw .Island { background: transparent !important; }
         .file-annotation-excalidraw .excalidraw__canvas,
-        .file-annotation-excalidraw canvas {
-          background: transparent !important;
-        }
-        .file-annotation-excalidraw .App-menu_top {
-          background: transparent !important;
-        }
+        .file-annotation-excalidraw canvas { background: transparent !important; }
         .file-annotation-page {
-          position: relative;
-          display: inline-block;
-          max-width: calc(100vw - 32px);
-          max-height: calc(100dvh - 150px);
-          overflow: hidden;
-          background: white;
-          box-shadow: 0 8px 30px rgba(0,0,0,.35);
+          position: relative; display: block; width: fit-content;
+          max-width: calc(100vw - 190px); margin: 0 auto; overflow: visible;
+          background: white; box-shadow: 0 8px 30px rgba(0,0,0,.35);
         }
         .file-annotation-page > img,
-        .file-annotation-page > canvas {
-          display: block;
-          max-width: calc(100vw - 32px);
-          max-height: calc(100dvh - 150px);
-          width: auto;
-          height: auto;
-          object-fit: contain;
+        .file-annotation-page > canvas,
+        .file-annotation-page > pre {
+          display: block; max-width: calc(100vw - 190px); width: auto; height: auto;
         }
-        .file-annotation-excalidraw {
-          position: absolute;
-          inset: 0;
-          z-index: 2;
-        }
+        .file-annotation-page > img { max-height: none; object-fit: contain; }
+        .file-annotation-excalidraw { position: absolute; inset: 0; z-index: 2; pointer-events: all; }
+        .file-annotation-excalidraw[data-annotation-mode="false"] { pointer-events: none; }
         .file-annotation-excalidraw .excalidraw,
-        .file-annotation-excalidraw .App {
-          width: 100%;
-          height: 100%;
+        .file-annotation-excalidraw .App { width: 100%; height: 100%; background: transparent !important; }
+        .file-annotation-excalidraw .App-toolbar {
+          position: fixed !important; left: 12px !important; top: 50% !important;
+          transform: translateY(-50%) !important; z-index: 10020 !important;
+          max-height: calc(100dvh - 150px); overflow-y: auto;
+        }
+        .file-annotation-excalidraw .undo-redo-buttons {
+          position: fixed !important; right: 12px !important; top: 50% !important;
+          transform: translateY(-50%) !important; z-index: 10020 !important;
+          display: flex !important; flex-direction: column !important;
+        }
+        .file-annotation-excalidraw .layer-ui__wrapper__top-right {
+          position: fixed !important; right: 12px !important; top: calc(50% + 90px) !important;
+          z-index: 10020 !important;
+        }
+        .file-annotation-pages { display: flex; flex-direction: column; align-items: stretch; gap: 20px; min-width: 0; padding: 20px 0 40px; }
+        .file-annotation-page:not(:first-child) .App-toolbar,
+        .file-annotation-page:not(:first-child) .undo-redo-buttons,
+        .file-annotation-page:not(:first-child) .layer-ui__wrapper__top-right { display: none !important; }
+        @media (max-width: 640px) {
+          .file-annotation-page { max-width: calc(100vw - 112px); }
+          .file-annotation-page > img, .file-annotation-page > canvas, .file-annotation-page > pre { max-width: calc(100vw - 112px); }
         }
       `}</style>
-      <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#202020] px-3 py-2 sm:px-5">
-        <button type="button" onClick={onBack} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-sm hover:bg-white/10" aria-label="Back to file viewer">
-          <ChevronLeft size={18}/> <span>Back</span>
-        </button>
+      <header className="relative z-30 flex min-h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#202020] px-3 py-2 sm:px-5">
+        <button type="button" onClick={onBack} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-sm hover:bg-white/10" aria-label="Back to file viewer"><ChevronLeft size={18}/> <span>Back</span></button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{file.name}</p>
-          <p className="text-[10px] text-white/55">{pdf ? `Page ${pageNumber} of ${pageCount}` : 'Annotation layer'}</p>
+          <p className="text-[10px] text-white/55">{pdf ? `${pageCount} pages · scroll to navigate` : 'Annotation layer'}</p>
         </div>
-        <button type="button" onClick={() => void save()} disabled={!loaded || saving || loading} className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-cyan-400 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4">
-          {saving ? <LoaderCircle size={15} className="animate-spin"/> : <Save size={15}/>}
-          {saving ? 'Saving…' : 'Save Annotation'}
+        <button type="button" onClick={() => void save()} disabled={!loaded || saving || loading || (pdf && pdfCanvases.length === 0)} className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-cyan-400 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4">
+          {saving ? <LoaderCircle size={15} className="animate-spin"/> : <Save size={15}/>} {saving ? 'Saving…' : 'Save Annotation'}
         </button>
       </header>
-      {canNavigatePages && <div className="flex shrink-0 items-center justify-center gap-4 border-b border-white/10 bg-[#202020] px-3 py-2">
-        <button type="button" disabled={pageNumber <= 1} onClick={() => setPageNumber(p => Math.max(1, p - 1))} className="rounded-md p-2 hover:bg-white/10 disabled:opacity-30" aria-label="Previous PDF page"><ChevronLeft size={18}/></button>
-        <span className="text-xs text-white/75">Page {pageNumber} / {pageCount}</span>
-        <button type="button" disabled={pageNumber >= pageCount} onClick={() => setPageNumber(p => Math.min(pageCount, p + 1))} className="rounded-md p-2 hover:bg-white/10 disabled:opacity-30" aria-label="Next PDF page"><ChevronRight size={18}/></button>
-      </div>}
-      <main className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto bg-[#303030] p-4">
-        {loading || (pdf && !pdfCanvas) || (textFile && textPageLoading) ? (
-          <div className="flex items-center gap-2 text-sm text-white/60"><LoaderCircle size={18} className="animate-spin"/> Loading file and annotations…</div>
+      <main className="relative min-h-0 flex-1 overflow-auto bg-[#303030] px-2 sm:px-4">
+        {loading || (pdf && pdfCanvases.length === 0) || (textFile && textPageLoading) ? (
+          <div className="flex min-h-full items-center justify-center gap-2 text-sm text-white/60"><LoaderCircle size={18} className="animate-spin"/> Loading file and annotations…</div>
         ) : error && !loaded ? (
-          <div className="max-w-xl rounded-xl border border-red-300/20 bg-red-950/40 p-5 text-sm text-red-100">{error}</div>
+          <div className="mx-auto mt-10 max-w-xl rounded-xl border border-red-300/20 bg-red-950/40 p-5 text-sm text-red-100">{error}</div>
         ) : (
-          <div className="file-annotation-page">
-            {pdf && pdfCanvas && <canvas width={pdfCanvas.width} height={pdfCanvas.height} ref={node => {
-              if (!node || !pdfCanvas) return;
-              const context = node.getContext('2d');
-              if (context) context.drawImage(pdfCanvas, 0, 0);
-            }}/>}
-            {image && <img src={src} alt={file.name}/>}
-            {textFile && <pre className="m-0 max-h-[calc(100dvh-150px)] w-[min(900px,calc(100vw-32px))] overflow-auto whitespace-pre-wrap break-words p-10 font-mono text-sm text-black">{textContent}</pre>}
-            {!pdf && !image && !textFile && <div className="flex min-h-[360px] w-[min(900px,calc(100vw-32px))] items-center justify-center bg-white p-8 text-center text-sm text-zinc-700"><div><p className="font-semibold">{file.name}</p><p className="mt-2">This file type cannot be previewed in Flexus yet. You can still add notes on this canvas.</p></div></div>}
-            {loaded && <div className="file-annotation-excalidraw">
-              <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-black/60">Loading drawing tools…</div>}>
-                <Excalidraw key={pageKey} theme="light" initialData={initialData} onChange={handleChange} />
-              </Suspense>
-            </div>}
+          <div className="file-annotation-pages">
+            {pdf && pdfCanvases.map((canvas, index) => {
+              const pageKey = String(index + 1);
+              return <section key={pageKey} className="file-annotation-page">
+                <canvas aria-label={`${file.name} page ${index + 1}`} width={canvas.width} height={canvas.height}
+                  ref={node => { if (!node) return; const context = node.getContext('2d'); if (context) context.drawImage(canvas, 0, 0); }} />
+                {renderAnnotationLayer(pageKey)}
+              </section>;
+            })}
+            {image && <section className="file-annotation-page"><img src={src} alt={file.name}/>{renderAnnotationLayer('1')}</section>}
+            {textFile && <section className="file-annotation-page"><pre className="m-0 w-full whitespace-pre-wrap break-words p-8 font-mono text-sm text-black">{textContent}</pre>{renderAnnotationLayer('1')}</section>}
+            {!pdf && !image && !textFile && <section className="file-annotation-page">
+              <div className="flex min-h-[360px] w-[min(900px,calc(100vw-190px))] items-center justify-center bg-white p-8 text-center text-sm text-zinc-700">
+                <div><p className="font-semibold">{file.name}</p><p className="mt-2">This file type cannot be previewed in Flexus yet. You can still add notes on this canvas.</p></div>
+              </div>
+              {renderAnnotationLayer('1')}
+            </section>}
           </div>
         )}
       </main>
-      {error && loaded && <div role="alert" className="shrink-0 border-t border-red-300/20 bg-red-950/50 px-4 py-2 text-xs text-red-100">{error}</div>}
+      {error && loaded && <div role="alert" className="relative z-30 shrink-0 border-t border-red-300/20 bg-red-950/50 px-4 py-2 text-xs text-red-100">{error}</div>}
     </div>
   );
 }
