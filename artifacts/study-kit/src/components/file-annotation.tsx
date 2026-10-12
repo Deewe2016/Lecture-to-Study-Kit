@@ -251,6 +251,16 @@ export default function FileAnnotationViewer({
       <div className="file-annotation-excalidraw" data-annotation-mode="true" data-page={pageKey}>
         <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-black/60">Loading drawing tools…</div>}>
           <Excalidraw key={pageKey} theme="light" initialData={initialData}
+            excalidrawAPI={(api: any) => setPageApi(pageKey, api)}
+            UIOptions={{
+              canvasActions: {
+                export: false,
+                loadScene: false,
+                saveToActiveFile: false,
+                toggleTheme: false,
+              },
+              tools: { image: false },
+            }}
             onChange={(elements, appState, files) => handleChange(pageKey, elements, appState, files)} />
         </Suspense>
       </div>
