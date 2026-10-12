@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ChevronLeft, ChevronRight, LoaderCircle, Save } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { getAccessToken } from '@/lib/auth';
+import { getAccessToken, getStoredUser } from '@/lib/auth';
 import '@excalidraw/excalidraw/index.css';
 
 const Excalidraw = lazy(async () => {
@@ -92,7 +92,6 @@ export default function FileAnnotationViewer({
   const [pageNumber, setPageNumber] = useState(1);
   const [pageCount, setPageCount] = useState(1);
   const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
-  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [textContent, setTextContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -194,7 +193,6 @@ export default function FileAnnotationViewer({
     };
     const next = { ...scenesRef.current, [pageKey]: scene };
     scenesRef.current = next;
-    setPageScenes(next);
   }, [loaded, pageKey]);
 
   const initialData = useMemo(() => {
@@ -211,8 +209,11 @@ export default function FileAnnotationViewer({
     setSaving(true);
     setError('');
     try {
+      const user = getStoredUser();
+      if (!user?.id) throw new Error('You must be signed in to save annotations.');
       const payload = {
         file_id: file.id,
+        owner_id: user.id,
         data: { version: 1, pages: scenesRef.current },
         updated_at: new Date().toISOString(),
       };
@@ -320,7 +321,7 @@ export default function FileAnnotationViewer({
               const context = node.getContext('2d');
               if (context) context.drawImage(pdfCanvas, 0, 0);
             }}/>}
-            {image && <img src={src} alt={file.name} onLoad={event => setImageDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}/>}
+            {image && <img src={src} alt={file.name}/>}
             {textFile && <pre className="m-0 max-h-[calc(100dvh-150px)] w-[min(900px,calc(100vw-32px))] overflow-auto whitespace-pre-wrap break-words p-10 font-mono text-sm text-black">{textContent}</pre>}
             {!pdf && !image && !textFile && <div className="flex min-h-[360px] w-[min(900px,calc(100vw-32px))] items-center justify-center bg-white p-8 text-center text-sm text-zinc-700"><div><p className="font-semibold">{file.name}</p><p className="mt-2">This file type cannot be previewed in Flexus yet. You can still add notes on this canvas.</p></div></div>}
             {loaded && <div className="file-annotation-excalidraw">
