@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, LoaderCircle, Save } from 'lucide-react';
+import { ArrowUpRight, ChevronLeft, Circle, Eraser, LoaderCircle, MousePointer2, Pencil, Redo2, Save, Square, Type, Undo2 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
@@ -96,6 +96,9 @@ export default function FileAnnotationViewer({
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [textPageLoading, setTextPageLoading] = useState(false);
+  const apisRef = useRef<Record<string, any>>({});
+  const activeApiRef = useRef<any>(null);
+  const [activePageKey, setActivePageKey] = useState('1');
 
   useEffect(() => {
     let cancelled = false;
@@ -226,6 +229,16 @@ export default function FileAnnotationViewer({
     }
   };
 
+  const setPageApi = useCallback((pageKey: string, api: any) => {
+    if (api) apisRef.current[pageKey] = api;
+    else delete apisRef.current[pageKey];
+    if (activePageKey === pageKey) activeApiRef.current = api || null;
+  }, [activePageKey]);
+
+  const chooseTool = (type: string) => activeApiRef.current?.setActiveTool?.({ type });
+  const undo = () => activeApiRef.current?.history?.undo?.();
+  const redo = () => activeApiRef.current?.history?.redo?.();
+
   const pdf = isPdf(file);
   const image = isImage(file);
   const textFile = isTextFile(file);
@@ -262,7 +275,7 @@ export default function FileAnnotationViewer({
         .file-annotation-page > img,
         .file-annotation-page > canvas,
         .file-annotation-page > pre {
-          display: block; max-width: calc(100vw - 190px); width: auto; height: auto;
+          display: block; max-width: calc(100vw - 120px); width: auto; height: auto;
         }
         .file-annotation-page > img { max-height: calc(100dvh - 150px); object-fit: contain; }
         .file-annotation-excalidraw { position: absolute; inset: 0; z-index: 2; pointer-events: all; }
@@ -311,15 +324,15 @@ export default function FileAnnotationViewer({
           <div className="file-annotation-pages">
             {pdf && pdfCanvases.map((canvas, index) => {
               const pageKey = String(index + 1);
-              return <section key={pageKey} className="file-annotation-page">
+              return <section key={pageKey} className="file-annotation-page" onPointerEnter={() => { setActivePageKey(pageKey); activeApiRef.current = apisRef.current[pageKey] || null; }}>
                 <canvas aria-label={`${file.name} page ${index + 1}`} width={canvas.width} height={canvas.height}
                   ref={node => { if (!node) return; const context = node.getContext('2d'); if (context) context.drawImage(canvas, 0, 0); }} />
                 {renderAnnotationLayer(pageKey)}
               </section>;
             })}
-            {image && <section className="file-annotation-page"><img src={src} alt={file.name}/>{renderAnnotationLayer('1')}</section>}
-            {textFile && <section className="file-annotation-page"><pre className="m-0 w-full whitespace-pre-wrap break-words p-8 font-mono text-sm text-black">{textContent}</pre>{renderAnnotationLayer('1')}</section>}
-            {!pdf && !image && !textFile && <section className="file-annotation-page">
+            {image && <section className="file-annotation-page" onPointerEnter={() => { setActivePageKey('1'); activeApiRef.current = apisRef.current['1'] || null; }}><img src={src} alt={file.name}/>{renderAnnotationLayer('1')}</section>}
+            {textFile && <section className="file-annotation-page" onPointerEnter={() => { setActivePageKey('1'); activeApiRef.current = apisRef.current['1'] || null; }}><pre className="m-0 w-full whitespace-pre-wrap break-words p-8 font-mono text-sm text-black">{textContent}</pre>{renderAnnotationLayer('1')}</section>}
+            {!pdf && !image && !textFile && <section className="file-annotation-page" onPointerEnter={() => { setActivePageKey('1'); activeApiRef.current = apisRef.current['1'] || null; }}>
               <div className="flex min-h-[360px] w-[min(900px,calc(100vw-190px))] items-center justify-center bg-white p-8 text-center text-sm text-zinc-700">
                 <div><p className="font-semibold">{file.name}</p><p className="mt-2">This file type cannot be previewed in Flexus yet. You can still add notes on this canvas.</p></div>
               </div>
@@ -328,7 +341,7 @@ export default function FileAnnotationViewer({
           </div>
         )}
       </main>
-      {error && loaded && <div role="alert" className="relative z-30 shrink-0 border-t border-red-300/20 bg-red-950/50 px-4 py-2 text-xs text-red-100">{error}</div>}
+      {loaded && !(loading || (pdf && pdfCanvases.length === 0 && !error) || (textFile && textPageLoading)) && <><nav aria-label="Annotation tools" className="file-annotation-custom-toolbar">\n        <button type="button" title="Select" aria-label="Select" className="file-annotation-tool-button" onClick={() => chooseTool('selection')}><MousePointer2 size={19}/></button>\n        <button type="button" title="Pen / Draw" aria-label="Pen / Draw" className="file-annotation-tool-button" onClick={() => chooseTool('freedraw')}><Pencil size={19}/></button>\n        <button type="button" title="Rectangle" aria-label="Rectangle" className="file-annotation-tool-button" onClick={() => chooseTool('rectangle')}><Square size={19}/></button>\n        <button type="button" title="Circle" aria-label="Circle" className="file-annotation-tool-button" onClick={() => chooseTool('ellipse')}><Circle size={19}/></button>\n        <button type="button" title="Arrow" aria-label="Arrow" className="file-annotation-tool-button" onClick={() => chooseTool('arrow')}><ArrowUpRight size={19}/></button>\n        <button type="button" title="Text" aria-label="Text" className="file-annotation-tool-button" onClick={() => chooseTool('text')}><Type size={19}/></button>\n        <button type="button" title="Eraser" aria-label="Eraser" className="file-annotation-tool-button" onClick={() => chooseTool('eraser')}><Eraser size={19}/></button>\n      </nav><nav aria-label="Undo and redo" className="file-annotation-history-toolbar">\n        <button type="button" title="Undo" aria-label="Undo" className="file-annotation-tool-button" onClick={undo}><Undo2 size={19}/></button>\n        <button type="button" title="Redo" aria-label="Redo" className="file-annotation-tool-button" onClick={redo}><Redo2 size={19}/></button>\n      </nav></>}\n      {error && loaded && <div role="alert" className="relative z-30 shrink-0 border-t border-red-300/20 bg-red-950/50 px-4 py-2 text-xs text-red-100">{error}</div>}
     </div>
   );
 }
