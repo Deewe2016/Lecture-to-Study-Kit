@@ -7,6 +7,7 @@ import {
   Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen, FilePlus2, ChevronDown
 } from 'lucide-react';
 import { getAccessToken, getStoredUser } from '@/lib/auth';
+import FileAnnotationViewer from '@/components/file-annotation';
 
 type FolderRow = { id: string; name: string; parent_folder_id: string | null; owner_id: string; created_at: string };
 type FileRow = { id: string; name: string; folder_id: string | null; owner_id: string; storage_path: string; size: number; type: string; created_at: string };
@@ -15,6 +16,7 @@ type DocumentRow = { id: string; title: string; content: any; owner_id: string; 
 type DocumentShareRow = { id: string; document_id: string; shared_with_user_id: string; shared_by_user_id: string; created_at: string };
 type WhiteboardRow = { id: string; title: string; content: any; owner_id: string; folder_id: string | null; created_at: string; updated_at: string };
 type WhiteboardShareRow = { id: string; whiteboard_id: string; shared_with_user_id: string; shared_by_user_id: string; created_at: string };
+type AnnotationListRow = { file_id: string; owner_id: string };
 type UserRow = { id: string; email: string; display_name: string };
 
 const url = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
@@ -201,8 +203,10 @@ function PdfPreview({ src, name }: { src: string; name: string }) {
   );
 }
 
-function FileViewer({ file, src, onClose }: { file: FileRow; src: string; onClose: () => void }) {
+function FileViewer({ file, src, onClose, annotated, startAnnotating, onAnnotationSaved }: { file: FileRow; src: string; onClose: () => void; annotated: boolean; startAnnotating: boolean; onAnnotationSaved: (fileId: string) => void }) {
   const [zoom, setZoom] = useState(1);
+  const [annotating, setAnnotating] = useState(startAnnotating);
+  if (annotating) return <FileAnnotationViewer file={file} src={src} onBack={() => setAnnotating(false)} onSaved={onAnnotationSaved} />;
   const isPdf = file.type.includes('pdf') || /\.pdf$/i.test(file.name);
   const isImage = file.type.startsWith('image/');
   const isVideo = file.type.startsWith('video/');
@@ -214,7 +218,11 @@ function FileViewer({ file, src, onClose }: { file: FileRow; src: string; onClos
           <p className="truncate text-sm font-medium">{file.name}</p>
           <p className="text-[10px] text-muted-foreground">{formatBytes(Number(file.size))}</p>
         </div>
-        <button onClick={onClose} className="rounded-lg p-2.5 hover:bg-secondary" aria-label="Close full screen viewer"><X size={20}/></button>
+        <div className="flex shrink-0 items-center gap-2">
+          {annotated && <span className="hidden rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2 py-1 text-[10px] font-medium text-cyan-200 sm:inline-flex">Annotated</span>}
+          <button type="button" onClick={() => setAnnotating(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"><Pencil size={15}/> Annotate</button>
+          <button onClick={onClose} className="rounded-lg p-2.5 hover:bg-secondary" aria-label="Close full screen viewer"><X size={20}/></button>
+        </div>
       </div>
       <div className="min-h-0 flex-1">
         {isPdf ? <PdfPreview src={src} name={file.name} /> : isImage ? (
@@ -268,7 +276,8 @@ export default function FilesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [menu, setMenu] = useState<string | null>(null);
-  const [modal, setModal] = useState<{ file: FileRow; url?: string } | null>(null);
+  const [modal, setModal] = useState<{ file: FileRow; url?: string; annotating?: boolean } | null>(null);
+  const [annotatedFileIds, setAnnotatedFileIds] = useState<Set<string>>(() => new Set());
   const [dialog, setDialog] = useState<{ kind: 'folder' | 'rename' | 'share' | 'document-share' | 'whiteboard-share' | 'move'; id?: string; name?: string; fileId?: string } | null>(null);
   const [moveItem, setMoveItem] = useState<{ kind: 'file' | 'folder' | 'document' | 'whiteboard'; id: string; name: string; currentFolderId: string | null } | null>(null);
   const [moveTargetId, setMoveTargetId] = useState('');
@@ -285,7 +294,7 @@ export default function FilesPage() {
     if (!me) return;
     setError('');
     try {
-      const [fs, fl, sh, docs, docShares, wbs, wbShares] = await Promise.all([
+      const [fs, fl, sh, docs, docShares, wbs, wbShares, annotations] = await Promise.all([
         api<FolderRow[]>('/rest/v1/folders?select=*&order=name.asc'),
         api<FileRow[]>('/rest/v1/files?select=*&order=created_at.desc'),
         api<ShareRow[]>('/rest/v1/file_shares?select=*'),
@@ -293,6 +302,7 @@ export default function FilesPage() {
         api<DocumentShareRow[]>('/rest/v1/document_shares?select=*'),
         api<WhiteboardRow[]>('/rest/v1/whiteboards?select=*&order=updated_at.desc'),
         api<WhiteboardShareRow[]>('/rest/v1/whiteboard_shares?select=*'),
+        api<AnnotationListRow[]>(`/rest/v1/annotations?select=file_id,owner_id&owner_id=eq.${encodeURIComponent(me.id)}`),
       ]);
       const normalizedFolders = await ensureRoot(fs);
       setFolders(normalizedFolders);
@@ -302,6 +312,7 @@ export default function FilesPage() {
       setDocumentShares(docShares);
       setWhiteboards(wbs);
       setWhiteboardShares(wbShares);
+      setAnnotatedFileIds(new Set(annotations.map(annotation => annotation.file_id).filter(Boolean)));
       setKits(readLocalKits());
     } catch (e) {
       if (isJwtError(e)) {
@@ -641,13 +652,13 @@ export default function FilesPage() {
     } finally { setBusy(false); }
   };
 
-  const openFile = async (file: FileRow) => {
+  const openFile = async (file: FileRow, annotating = false) => {
     try {
       const response = await api<{ signedURL: string }>('/storage/v1/object/sign/user-files/' + file.storage_path.split('/').map(encodeURIComponent).join('/'), {
         method: 'POST', body: JSON.stringify({ expiresIn: 600 }),
       });
       const signed = response.signedURL.startsWith('http') ? response.signedURL : `${url}/storage/v1${response.signedURL}`;
-      setModal({ file, url: signed });
+      setModal({ file, url: signed, annotating });
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open file.'); }
   };
 
@@ -1079,11 +1090,13 @@ export default function FilesPage() {
               {file.name.length > 15 ? file.name.slice(0, 15) + '…' : file.name}
             </p>
           )}
-          <p className="mt-1 text-[10px] text-muted-foreground">
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
             {formatBytes(Number(file.size))} · {formatDate(file.created_at)}
+            {annotatedFileIds.has(file.id) && <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-1.5 py-0.5 font-medium text-cyan-200">Annotated</span>}
           </p>
         </div>
-        <div className="mt-3 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <button type="button" onClick={() => void openFile(file, true)} className="inline-flex items-center gap-1.5 rounded-md border border-primary/25 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"><Pencil size={13}/> Annotate</button>
           {file.owner_id === me?.id && (
             <div className="relative">
               <button
@@ -1193,7 +1206,7 @@ export default function FilesPage() {
         </div>
       </div>
 
-      {modal?.url && <FileViewer file={modal.file} src={modal.url} onClose={() => setModal(null)} />}
+      {modal?.url && <FileViewer file={modal.file} src={modal.url} onClose={() => setModal(null)} annotated={annotatedFileIds.has(modal.file.id)} startAnnotating={Boolean(modal.annotating)} onAnnotationSaved={(fileId) => setAnnotatedFileIds(previous => new Set(previous).add(fileId))} />}
 
       {deleteDialog && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-5">
         <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
