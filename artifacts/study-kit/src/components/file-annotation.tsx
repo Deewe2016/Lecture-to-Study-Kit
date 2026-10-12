@@ -303,7 +303,7 @@ export default function FileAnnotationViewer({
         </button>
       </header>
       <main className="relative min-h-0 flex-1 overflow-auto bg-[#303030] px-2 sm:px-4">
-        {loading || (pdf && pdfCanvases.length === 0) || (textFile && textPageLoading) ? (
+        {loading || (pdf && pdfCanvases.length === 0 && !error) || (textFile && textPageLoading) ? (
           <div className="flex min-h-full items-center justify-center gap-2 text-sm text-white/60"><LoaderCircle size={18} className="animate-spin"/> Loading file and annotations…</div>
         ) : error && !loaded ? (
           <div className="mx-auto mt-10 max-w-xl rounded-xl border border-red-300/20 bg-red-950/40 p-5 text-sm text-red-100">{error}</div>
