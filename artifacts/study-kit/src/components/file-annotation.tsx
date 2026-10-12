@@ -263,46 +263,55 @@ export default function FileAnnotationViewer({
         .file-annotation-excalidraw,
         .file-annotation-excalidraw .excalidraw,
         .file-annotation-excalidraw .App,
-        .file-annotation-excalidraw .layer-ui__wrapper,
         .file-annotation-excalidraw .Island { background: transparent !important; }
         .file-annotation-excalidraw .excalidraw__canvas,
         .file-annotation-excalidraw canvas { background: transparent !important; }
+        .file-annotation-excalidraw .layer-ui__wrapper,
+        .file-annotation-excalidraw .App-toolbar,
+        .file-annotation-excalidraw .undo-redo-buttons,
+        .file-annotation-excalidraw .layer-ui__wrapper__top-right,
+        .file-annotation-excalidraw .main-menu-trigger,
+        .file-annotation-excalidraw .help-icon,
+        .file-annotation-excalidraw .footer,
+        .file-annotation-excalidraw .sidebar { display: none !important; }
         .file-annotation-page {
           position: relative; display: block; width: fit-content;
-          max-width: calc(100vw - 190px); margin: 0 auto; overflow: visible;
+          max-width: calc(100vw - 120px); margin: 0 auto; overflow: visible;
           background: white; box-shadow: 0 8px 30px rgba(0,0,0,.35);
         }
         .file-annotation-page > img,
         .file-annotation-page > canvas,
         .file-annotation-page > pre {
-          display: block; max-width: calc(100vw - 120px); width: auto; height: auto;
+          display: block; max-width: 100%; width: auto; height: auto;
         }
         .file-annotation-page > img { max-height: calc(100dvh - 150px); object-fit: contain; }
         .file-annotation-excalidraw { position: absolute; inset: 0; z-index: 2; pointer-events: all; }
         .file-annotation-excalidraw[data-annotation-mode="false"] { pointer-events: none; }
         .file-annotation-excalidraw .excalidraw,
         .file-annotation-excalidraw .App { width: 100%; height: 100%; background: transparent !important; }
-        .file-annotation-excalidraw .App-toolbar {
-          position: fixed !important; left: 12px !important; top: 50% !important;
-          transform: translateY(-50%) !important; z-index: 10020 !important;
-          max-height: calc(100dvh - 150px); overflow-y: auto;
+        .file-annotation-pages {
+          display: flex; flex-direction: column; align-items: stretch; gap: 20px;
+          min-width: 0; padding: 20px 60px 40px; box-sizing: border-box;
         }
-        .file-annotation-excalidraw .undo-redo-buttons {
-          position: fixed !important; right: 12px !important; top: 50% !important;
-          transform: translateY(-50%) !important; z-index: 10020 !important;
-          display: flex !important; flex-direction: column !important;
+        .file-annotation-custom-toolbar, .file-annotation-history-toolbar {
+          position: fixed; top: 50%; transform: translateY(-50%); z-index: 10030;
+          display: flex; flex-direction: column; align-items: center; gap: 6px;
+          padding: 7px; border: 1px solid rgba(255,255,255,.18); border-radius: 12px;
+          background: #202020; box-shadow: 0 8px 28px rgba(0,0,0,.35);
         }
-        .file-annotation-excalidraw .layer-ui__wrapper__top-right {
-          position: fixed !important; right: 12px !important; top: calc(50% + 90px) !important;
-          z-index: 10020 !important;
+        .file-annotation-custom-toolbar { left: 0; }
+        .file-annotation-history-toolbar { right: 0; }
+        .file-annotation-tool-button {
+          display: flex; align-items: center; justify-content: center;
+          width: 38px; height: 38px; border-radius: 8px; color: #f4f4f5;
         }
-        .file-annotation-pages { display: flex; flex-direction: column; align-items: stretch; gap: 20px; min-width: 0; padding: 20px 0 40px; }
-        .file-annotation-page:not(:first-child) .App-toolbar,
-        .file-annotation-page:not(:first-child) .undo-redo-buttons,
-        .file-annotation-page:not(:first-child) .layer-ui__wrapper__top-right { display: none !important; }
+        .file-annotation-tool-button:hover { background: rgba(255,255,255,.12); }
         @media (max-width: 640px) {
-          .file-annotation-page { max-width: calc(100vw - 112px); }
-          .file-annotation-page > img, .file-annotation-page > canvas, .file-annotation-page > pre { max-width: calc(100vw - 112px); }
+          .file-annotation-pages { padding-left: 60px; padding-right: 60px; }
+          .file-annotation-page { max-width: calc(100vw - 120px); }
+          .file-annotation-page > img { max-height: calc(100dvh - 150px); }
+          .file-annotation-custom-toolbar, .file-annotation-history-toolbar { padding: 4px; gap: 3px; }
+          .file-annotation-tool-button { width: 32px; height: 32px; }
         }
       `}</style>
       <header className="relative z-30 flex min-h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#202020] px-3 py-2 sm:px-5">
@@ -333,7 +342,7 @@ export default function FileAnnotationViewer({
             {image && <section className="file-annotation-page" onPointerEnter={() => { setActivePageKey('1'); activeApiRef.current = apisRef.current['1'] || null; }}><img src={src} alt={file.name}/>{renderAnnotationLayer('1')}</section>}
             {textFile && <section className="file-annotation-page" onPointerEnter={() => { setActivePageKey('1'); activeApiRef.current = apisRef.current['1'] || null; }}><pre className="m-0 w-full whitespace-pre-wrap break-words p-8 font-mono text-sm text-black">{textContent}</pre>{renderAnnotationLayer('1')}</section>}
             {!pdf && !image && !textFile && <section className="file-annotation-page" onPointerEnter={() => { setActivePageKey('1'); activeApiRef.current = apisRef.current['1'] || null; }}>
-              <div className="flex min-h-[360px] w-[min(900px,calc(100vw-190px))] items-center justify-center bg-white p-8 text-center text-sm text-zinc-700">
+              <div className="flex min-h-[360px] w-[min(900px,calc(100vw-120px))] items-center justify-center bg-white p-8 text-center text-sm text-zinc-700">
                 <div><p className="font-semibold">{file.name}</p><p className="mt-2">This file type cannot be previewed in Flexus yet. You can still add notes on this canvas.</p></div>
               </div>
               {renderAnnotationLayer('1')}
@@ -341,7 +350,24 @@ export default function FileAnnotationViewer({
           </div>
         )}
       </main>
-      {loaded && !(loading || (pdf && pdfCanvases.length === 0 && !error) || (textFile && textPageLoading)) && <><nav aria-label="Annotation tools" className="file-annotation-custom-toolbar">\n        <button type="button" title="Select" aria-label="Select" className="file-annotation-tool-button" onClick={() => chooseTool('selection')}><MousePointer2 size={19}/></button>\n        <button type="button" title="Pen / Draw" aria-label="Pen / Draw" className="file-annotation-tool-button" onClick={() => chooseTool('freedraw')}><Pencil size={19}/></button>\n        <button type="button" title="Rectangle" aria-label="Rectangle" className="file-annotation-tool-button" onClick={() => chooseTool('rectangle')}><Square size={19}/></button>\n        <button type="button" title="Circle" aria-label="Circle" className="file-annotation-tool-button" onClick={() => chooseTool('ellipse')}><Circle size={19}/></button>\n        <button type="button" title="Arrow" aria-label="Arrow" className="file-annotation-tool-button" onClick={() => chooseTool('arrow')}><ArrowUpRight size={19}/></button>\n        <button type="button" title="Text" aria-label="Text" className="file-annotation-tool-button" onClick={() => chooseTool('text')}><Type size={19}/></button>\n        <button type="button" title="Eraser" aria-label="Eraser" className="file-annotation-tool-button" onClick={() => chooseTool('eraser')}><Eraser size={19}/></button>\n      </nav><nav aria-label="Undo and redo" className="file-annotation-history-toolbar">\n        <button type="button" title="Undo" aria-label="Undo" className="file-annotation-tool-button" onClick={undo}><Undo2 size={19}/></button>\n        <button type="button" title="Redo" aria-label="Redo" className="file-annotation-tool-button" onClick={redo}><Redo2 size={19}/></button>\n      </nav></>}\n      {error && loaded && <div role="alert" className="relative z-30 shrink-0 border-t border-red-300/20 bg-red-950/50 px-4 py-2 text-xs text-red-100">{error}</div>}
+      {loaded && !(loading || (pdf && pdfCanvases.length === 0 && !error) || (textFile && textPageLoading)) && (
+        <>
+          <nav aria-label="Annotation tools" className="file-annotation-custom-toolbar">
+            <button type="button" title="Select" aria-label="Select" className="file-annotation-tool-button" onClick={() => chooseTool('selection')}><MousePointer2 size={19}/></button>
+            <button type="button" title="Pen / Draw" aria-label="Pen / Draw" className="file-annotation-tool-button" onClick={() => chooseTool('freedraw')}><Pencil size={19}/></button>
+            <button type="button" title="Rectangle" aria-label="Rectangle" className="file-annotation-tool-button" onClick={() => chooseTool('rectangle')}><Square size={19}/></button>
+            <button type="button" title="Circle" aria-label="Circle" className="file-annotation-tool-button" onClick={() => chooseTool('ellipse')}><Circle size={19}/></button>
+            <button type="button" title="Arrow" aria-label="Arrow" className="file-annotation-tool-button" onClick={() => chooseTool('arrow')}><ArrowUpRight size={19}/></button>
+            <button type="button" title="Text" aria-label="Text" className="file-annotation-tool-button" onClick={() => chooseTool('text')}><Type size={19}/></button>
+            <button type="button" title="Eraser" aria-label="Eraser" className="file-annotation-tool-button" onClick={() => chooseTool('eraser')}><Eraser size={19}/></button>
+          </nav>
+          <nav aria-label="Undo and redo" className="file-annotation-history-toolbar">
+            <button type="button" title="Undo" aria-label="Undo" className="file-annotation-tool-button" onClick={undo}><Undo2 size={19}/></button>
+            <button type="button" title="Redo" aria-label="Redo" className="file-annotation-tool-button" onClick={redo}><Redo2 size={19}/></button>
+          </nav>
+        </>
+      )}
+      {error && loaded && <div role="alert" className="relative z-30 shrink-0 border-t border-red-300/20 bg-red-950/50 px-4 py-2 text-xs text-red-100">{error}</div>}
     </div>
   );
 }
