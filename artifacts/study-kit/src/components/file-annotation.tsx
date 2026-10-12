@@ -96,7 +96,6 @@ export default function FileAnnotationViewer({
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [textPageLoading, setTextPageLoading] = useState(false);
-  const pageKey = String(pageNumber);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,15 +189,6 @@ export default function FileAnnotationViewer({
     };
     scenesRef.current = { ...scenesRef.current, [pageKey]: scene };
   }, [loaded]);
-
-  const initialData = useMemo(() => {
-    const scene = pageScenes[pageKey] || emptyScene();
-    return {
-      elements: scene.elements,
-      appState: { ...scene.appState, viewBackgroundColor: 'transparent' },
-      files: scene.files,
-    };
-  }, [pageScenes, pageKey]);
 
   const save = async () => {
     if (!loaded) return;
