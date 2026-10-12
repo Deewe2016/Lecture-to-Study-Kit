@@ -877,10 +877,11 @@ function EventEditor({
       );
       if (!currentEvents.length) throw new Error('There are no calendar events to delete.');
 
-      const response = await fetch('/api/delete-events', {
+      const response = await fetch('/api/generate-events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'find-to-delete',
           prompt,
           events: currentEvents.map((event) => ({
             id: event.id,
