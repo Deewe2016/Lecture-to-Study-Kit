@@ -220,7 +220,7 @@ function FileViewer({ file, src, onClose, annotated, startAnnotating, onAnnotati
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {annotated && <span className="hidden rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2 py-1 text-[10px] font-medium text-cyan-200 sm:inline-flex">Annotated</span>}
-          <button type="button" onClick={() => setAnnotating(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"><Pencil size={15}/> Annotate</button>
+          <button type="button" onClick={() => setAnnotating(true)} className="inline-flex items-center gap-1.5 rounded-md border border-primary/30 px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"><Pencil size={14}/> Annotate</button>
           <button onClick={onClose} className="rounded-lg p-2.5 hover:bg-secondary" aria-label="Close full screen viewer"><X size={20}/></button>
         </div>
       </div>
@@ -1096,7 +1096,6 @@ export default function FilesPage() {
           </p>
         </div>
         <div className="mt-3 flex items-center justify-between gap-2">
-          <button type="button" onClick={() => void openFile(file, true)} className="inline-flex items-center gap-1.5 rounded-md border border-primary/25 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"><Pencil size={13}/> Annotate</button>
           {file.owner_id === me?.id && (
             <div className="relative">
               <button
