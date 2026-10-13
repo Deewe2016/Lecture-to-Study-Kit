@@ -99,6 +99,8 @@ export default function FileAnnotationViewer({
   const apisRef = useRef<Record<string, any>>({});
   const activeApiRef = useRef<any>(null);
   const [activePageKey, setActivePageKey] = useState('1');
+  const [strokeColor, setStrokeColor] = useState('#1e1e1e');
+  const [strokeWidth, setStrokeWidth] = useState(2);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,6 +238,14 @@ export default function FileAnnotationViewer({
   }, [activePageKey]);
 
   const chooseTool = (type: string) => activeApiRef.current?.setActiveTool?.({ type });
+  const applyStrokeColor = (color: string) => {
+    setStrokeColor(color);
+    activeApiRef.current?.updateScene?.({ appState: { currentItemStrokeColor: color } });
+  };
+  const applyStrokeWidth = (width: number) => {
+    setStrokeWidth(width);
+    activeApiRef.current?.updateScene?.({ appState: { currentItemStrokeWidth: width } });
+  };
   const undo = () => activeApiRef.current?.history?.undo?.();
   const redo = () => activeApiRef.current?.history?.redo?.();
 
@@ -316,6 +326,19 @@ export default function FileAnnotationViewer({
           width: 38px; height: 38px; border-radius: 8px; color: #f4f4f5;
         }
         .file-annotation-tool-button:hover { background: rgba(255,255,255,.12); }
+        .file-annotation-style-controls {
+          display: flex; flex-direction: column; align-items: center; gap: 5px;
+          border-top: 1px solid rgba(255,255,255,.18); margin-top: 4px; padding-top: 8px;
+        }
+        .file-annotation-color-picker {
+          width: 30px; height: 30px; padding: 2px; border: 1px solid rgba(255,255,255,.35);
+          border-radius: 7px; background: #303030; cursor: pointer;
+        }
+        .file-annotation-width-button {
+          width: 34px; height: 28px; display: flex; align-items: center; justify-content: center;
+          border-radius: 6px; color: #f4f4f5; font-size: 11px;
+        }
+        .file-annotation-width-button[aria-pressed="true"] { background: rgba(34,211,238,.28); outline: 1px solid #22d3ee; }
         @media (max-width: 640px) {
           .file-annotation-pages { padding-left: 60px; padding-right: 60px; }
           .file-annotation-page { max-width: calc(100vw - 120px); }
@@ -381,6 +404,32 @@ export default function FileAnnotationViewer({
             <button type="button" title="Arrow" aria-label="Arrow" className="file-annotation-tool-button" onClick={() => chooseTool('arrow')}><ArrowUpRight size={19}/></button>
             <button type="button" title="Text" aria-label="Text" className="file-annotation-tool-button" onClick={() => chooseTool('text')}><Type size={19}/></button>
             <button type="button" title="Eraser" aria-label="Eraser" className="file-annotation-tool-button" onClick={() => chooseTool('eraser')}><Eraser size={19}/></button>
+            <div className="file-annotation-style-controls" aria-label="Drawing style">
+              <label title="Stroke color" className="flex flex-col items-center gap-1 text-[9px] text-white/70">
+                Color
+                <input
+                  type="color"
+                  aria-label="Stroke color"
+                  className="file-annotation-color-picker"
+                  value={strokeColor}
+                  onChange={(event) => applyStrokeColor(event.target.value)}
+                />
+              </label>
+              <span className="text-[9px] text-white/70">Thickness</span>
+              {[1, 2, 4].map((width) => (
+                <button
+                  key={width}
+                  type="button"
+                  title={width === 1 ? 'Thin stroke' : width === 2 ? 'Medium stroke' : 'Thick stroke'}
+                  aria-label={width === 1 ? 'Thin stroke' : width === 2 ? 'Medium stroke' : 'Thick stroke'}
+                  aria-pressed={strokeWidth === width}
+                  className="file-annotation-width-button"
+                  onClick={() => applyStrokeWidth(width)}
+                >
+                  <span style={{ display: 'block', width: 20, height: width, borderRadius: 4, background: 'currentColor' }} />
+                </button>
+              ))}
+            </div>
           </nav>
           <nav aria-label="Undo and redo" className="file-annotation-history-toolbar">
             <button type="button" title="Undo" aria-label="Undo" className="file-annotation-tool-button" onClick={undo}><Undo2 size={19}/></button>
