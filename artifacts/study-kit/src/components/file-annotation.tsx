@@ -334,7 +334,18 @@ export default function FileAnnotationViewer({
           {saving ? <LoaderCircle size={15} className="animate-spin"/> : <Save size={15}/>} {saving ? 'Saving…' : 'Save Annotation'}
         </button>
       </header>
-      <main className="relative min-h-0 flex-1 overflow-auto bg-[#303030] px-2 sm:px-4">
+      <main
+        className="relative min-h-0 flex-1 overflow-auto bg-[#303030] px-2 sm:px-4"
+        onWheelCapture={(event) => {
+          // Excalidraw captures wheel input over the transparent drawing layer.
+          // Route vertical wheel movement to the PDF viewer so pages remain scrollable.
+          if (event.deltaY !== 0) {
+            event.currentTarget.scrollTop += event.deltaY;
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
         {loading || (pdf && pdfCanvases.length === 0 && !error) || (textFile && textPageLoading) ? (
           <div className="flex min-h-full items-center justify-center gap-2 text-sm text-white/60"><LoaderCircle size={18} className="animate-spin"/> Loading file and annotations…</div>
         ) : error && !loaded ? (
