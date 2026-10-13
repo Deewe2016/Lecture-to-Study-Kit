@@ -140,6 +140,8 @@ function PdfPreview({ src, name, onRefreshSignedUrl }: { src: string; name: stri
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [zoom, setZoom] = useState(1);
+  const refreshSignedUrlRef = useRef(onRefreshSignedUrl);
+  refreshSignedUrlRef.current = onRefreshSignedUrl;
 
   useEffect(() => {
     let cancelled = false;
@@ -167,7 +169,7 @@ function PdfPreview({ src, name, onRefreshSignedUrl }: { src: string; name: stri
         const message = e instanceof Error ? e.message : 'Could not render this PDF.';
         if (message.includes('400')) {
           try {
-            await onRefreshSignedUrl();
+            await refreshSignedUrlRef.current();
             // The refreshed src restarts this effect and retries the PDF load.
             return;
           } catch (refreshError) {
@@ -181,7 +183,7 @@ function PdfPreview({ src, name, onRefreshSignedUrl }: { src: string; name: stri
       }
     })();
     return () => { cancelled = true; };
-  }, [src, onRefreshSignedUrl]);
+  }, [src]);
 
   if (loading) return <div className="flex min-h-[70vh] items-center justify-center text-sm text-muted-foreground">Rendering PDF…</div>;
   if (error) return <div className="flex min-h-[70vh] items-center justify-center text-sm text-red-200">{error}</div>;
