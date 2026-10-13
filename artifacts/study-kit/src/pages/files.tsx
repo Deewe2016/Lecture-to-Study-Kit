@@ -135,7 +135,7 @@ function safeName(name: string) {
 }
 
 
-function PdfPreview({ src, name }: { src: string; name: string }) {
+function PdfPreview({ src, name, onRefreshSignedUrl }: { src: string; name: string; onRefreshSignedUrl: () => Promise<string> }) {
   const [canvases, setCanvases] = useState<HTMLCanvasElement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -163,13 +163,25 @@ function PdfPreview({ src, name }: { src: string; name: string }) {
         }
         if (!cancelled) setCanvases(rendered);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not render this PDF.');
+        if (cancelled) return;
+        const message = e instanceof Error ? e.message : 'Could not render this PDF.';
+        if (message.includes('400')) {
+          try {
+            await onRefreshSignedUrl();
+            // The refreshed src restarts this effect and retries the PDF load.
+            return;
+          } catch (refreshError) {
+            if (!cancelled) setError(refreshError instanceof Error ? refreshError.message : message);
+          }
+        } else {
+          setError(message);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [src]);
+  }, [src, onRefreshSignedUrl]);
 
   if (loading) return <div className="flex min-h-[70vh] items-center justify-center text-sm text-muted-foreground">Rendering PDF…</div>;
   if (error) return <div className="flex min-h-[70vh] items-center justify-center text-sm text-red-200">{error}</div>;
@@ -203,7 +215,7 @@ function PdfPreview({ src, name }: { src: string; name: string }) {
   );
 }
 
-function FileViewer({ file, src, onClose, annotated, startAnnotating, onAnnotationSaved }: { file: FileRow; src: string; onClose: () => void; annotated: boolean; startAnnotating: boolean; onAnnotationSaved: (fileId: string) => void }) {
+function FileViewer({ file, src, onClose, annotated, startAnnotating, onAnnotationSaved, onRefreshSignedUrl }: { file: FileRow; src: string; onClose: () => void; annotated: boolean; startAnnotating: boolean; onAnnotationSaved: (fileId: string) => void; onRefreshSignedUrl: () => Promise<string> }) {
   const [zoom, setZoom] = useState(1);
   const [annotating, setAnnotating] = useState(startAnnotating);
   if (annotating) return <FileAnnotationViewer file={file} src={src} onBack={() => setAnnotating(false)} onSaved={onAnnotationSaved} />;
@@ -225,7 +237,7 @@ function FileViewer({ file, src, onClose, annotated, startAnnotating, onAnnotati
         </div>
       </div>
       <div className="min-h-0 flex-1">
-        {isPdf ? <PdfPreview src={src} name={file.name} /> : isImage ? (
+        {isPdf ? <PdfPreview src={src} name={file.name} onRefreshSignedUrl={onRefreshSignedUrl} /> : isImage ? (
           <div className="relative flex h-full items-center justify-center overflow-auto bg-zinc-950 p-6">
             <div className="absolute right-5 top-5 z-10 flex items-center gap-1 rounded-lg border border-white/10 bg-black/60 p-1">
               <button onClick={() => setZoom((z) => Math.max(0.25, z - 0.2))} className="rounded-md p-2 text-white hover:bg-white/10" aria-label="Zoom out"><ZoomOut size={17}/></button>
@@ -652,12 +664,22 @@ export default function FilesPage() {
     } finally { setBusy(false); }
   };
 
+  const createSignedUrl = async (file: FileRow) => {
+    const response = await api<{ signedURL: string }>('/storage/v1/object/sign/user-files/' + file.storage_path.split('/').map(encodeURIComponent).join('/'), {
+      method: 'POST', body: JSON.stringify({ expiresIn: 3600 }),
+    });
+    return response.signedURL.startsWith('http') ? response.signedURL : `${url}/storage/v1${response.signedURL}`;
+  };
+
+  const refreshSignedUrl = async (file: FileRow) => {
+    const signed = await createSignedUrl(file);
+    setModal(current => current?.file.id === file.id ? { ...current, url: signed } : current);
+    return signed;
+  };
+
   const openFile = async (file: FileRow, annotating = false) => {
     try {
-      const response = await api<{ signedURL: string }>('/storage/v1/object/sign/user-files/' + file.storage_path.split('/').map(encodeURIComponent).join('/'), {
-        method: 'POST', body: JSON.stringify({ expiresIn: 600 }),
-      });
-      const signed = response.signedURL.startsWith('http') ? response.signedURL : `${url}/storage/v1${response.signedURL}`;
+      const signed = await createSignedUrl(file);
       setModal({ file, url: signed, annotating });
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open file.'); }
   };
@@ -665,7 +687,7 @@ export default function FilesPage() {
   const download = async (file: FileRow) => {
     try {
       const response = await api<{ signedURL: string }>('/storage/v1/object/sign/user-files/' + file.storage_path.split('/').map(encodeURIComponent).join('/'), {
-        method: 'POST', body: JSON.stringify({ expiresIn: 600 }),
+        method: 'POST', body: JSON.stringify({ expiresIn: 3600 }),
       });
       const signed = response.signedURL.startsWith('http') ? response.signedURL : `${url}/storage/v1${response.signedURL}`;
       window.open(signed, '_blank', 'noopener,noreferrer');
@@ -1205,7 +1227,7 @@ export default function FilesPage() {
         </div>
       </div>
 
-      {modal?.url && <FileViewer file={modal.file} src={modal.url} onClose={() => setModal(null)} annotated={annotatedFileIds.has(modal.file.id)} startAnnotating={Boolean(modal.annotating)} onAnnotationSaved={(fileId) => setAnnotatedFileIds(previous => new Set(previous).add(fileId))} />}
+      {modal?.url && <FileViewer file={modal.file} src={modal.url} onClose={() => setModal(null)} annotated={annotatedFileIds.has(modal.file.id)} startAnnotating={Boolean(modal.annotating)} onAnnotationSaved={(fileId) => setAnnotatedFileIds(previous => new Set(previous).add(fileId))} onRefreshSignedUrl={() => refreshSignedUrl(modal.file)} />}
 
       {deleteDialog && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-5">
         <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
