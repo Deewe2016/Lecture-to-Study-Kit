@@ -620,7 +620,7 @@ function EventEditor({
   selectedDate: Date;
   editScope: 'series' | 'occurrence';
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (focusDate?: Date) => void;
   onRequestDelete: (event: CalendarEvent) => void;
 }) {
   const me = getStoredUser();
@@ -1046,16 +1046,31 @@ function EventEditor({
           notify_invites: false,
         };
       });
-      await api('/rest/v1/calendar_events', {
+      const insertedEvents = await api<CalendarEvent[]>('/rest/v1/calendar_events', {
         method: 'POST',
-        headers: { Prefer: 'return=minimal' },
+        headers: { Prefer: 'return=representation' },
         body: JSON.stringify(payload),
       });
+      console.log('[Calendar AI] Supabase returned newly created events:', {
+        count: insertedEvents.length,
+        allDayCount: insertedEvents.filter((event) => event.all_day).length,
+        events: insertedEvents.map((event) => ({
+          id: event.id,
+          title: event.title,
+          start_at: event.start_at,
+          end_at: event.end_at,
+          all_day: event.all_day,
+          timezone: event.timezone,
+        })),
+      });
+      const firstCreatedEvent = [...insertedEvents].sort(
+        (a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime(),
+      )[0];
       setAiSuccess(payload.length + ' events created successfully!');
       toast({ title: payload.length + ' events created successfully!' });
       setAiEvents([]);
       setAiDescription('');
-      onSaved();
+      onSaved(firstCreatedEvent?.start_at ? new Date(firstCreatedEvent.start_at) : undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save events. Please try again.');
     } finally {
@@ -1398,9 +1413,35 @@ export default function CalendarPage() {
           )
         : [];
 
+      console.log('[Calendar] Supabase event query results', {
+        ownedCount: owned.length,
+        ownedAllDayCount: owned.filter((event) => event.all_day).length,
+        ownedAllDayEvents: owned.filter((event) => event.all_day).map((event) => ({
+          id: event.id,
+          title: event.title,
+          start_at: event.start_at,
+          end_at: event.end_at,
+          all_day: event.all_day,
+        })),
+        invitedCount: invited.length,
+        invitedAllDayCount: invited.filter((event) => event.all_day).length,
+      });
+
       const byId = new Map<string, CalendarEvent>();
       [...owned, ...invited].forEach((event) => byId.set(event.id, event));
-      setBaseEvents([...byId.values()].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()));
+      const loadedEvents = [...byId.values()].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+      console.log('[Calendar] Final Supabase events passed to calendar rendering', {
+        count: loadedEvents.length,
+        allDayCount: loadedEvents.filter((event) => event.all_day).length,
+        allDayEvents: loadedEvents.filter((event) => event.all_day).map((event) => ({
+          id: event.id,
+          title: event.title,
+          start_at: event.start_at,
+          end_at: event.end_at,
+          all_day: event.all_day,
+        })),
+      });
+      setBaseEvents(loadedEvents);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load calendar.');
     } finally {
@@ -1535,7 +1576,7 @@ export default function CalendarPage() {
             selectedDate={editor.date}
             editScope={editor.editScope}
             onClose={() => setEditor(null)}
-            onSaved={() => { setEditor(null); void loadEvents(); }}
+            onSaved={(focusDate) => { if (focusDate) setDate(focusDate); setEditor(null); void loadEvents(); }}
             onRequestDelete={requestDelete}
           />
         </CalendarErrorBoundary>
