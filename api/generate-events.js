@@ -169,29 +169,32 @@ Return no markdown or explanatory text.`;
   }
 
   const now = new Date();
-  const todayStr = now.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  const today = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-  ].join("-");
-  const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const nextDates = daysOfWeek.map((day, i) => {
-    const diff = (i - now.getDay() + 7) % 7 || 7;
-    const next = new Date(now);
-    next.setDate(now.getDate() + diff);
-    const date = [
-      next.getFullYear(),
-      String(next.getMonth() + 1).padStart(2, "0"),
-      String(next.getDate()).padStart(2, "0"),
-    ].join("-");
-    return `Next ${day}: ${date}`;
-  }).join(", ");
+  const todayISO = now.toISOString().slice(0, 10);
+  const todayDay = now.toLocaleDateString("en-US", { weekday: "long" });
+
+  // Calculate the next occurrence of each weekday. This endpoint is JavaScript,
+  // so the TypeScript parameter annotation from the supplied example is omitted.
+  function getNextWeekday(dayIndex) {
+    const today = new Date();
+    const todayIndex = today.getDay();
+    let daysUntil = dayIndex - todayIndex;
+    if (daysUntil <= 0) daysUntil += 7;
+    const next = new Date(today);
+    next.setDate(today.getDate() + daysUntil);
+    return next.toISOString().slice(0, 10);
+  }
+
+  const weekdayDates = {
+    Sunday: getNextWeekday(0),
+    Monday: getNextWeekday(1),
+    Tuesday: getNextWeekday(2),
+    Wednesday: getNextWeekday(3),
+    Thursday: getNextWeekday(4),
+    Friday: getNextWeekday(5),
+    Saturday: getNextWeekday(6),
+  };
+
+  const dateContext = `Today is ${todayDay} ${todayISO}. Next weekday dates: ${JSON.stringify(weekdayDates)}`;
   const weeksInput = String(req.body?.weeks ?? "12").trim();
   const weeks = Number(weeksInput);
   if (!/^\d+$/.test(weeksInput) || !Number.isSafeInteger(weeks) || weeks <= 0) {
@@ -205,9 +208,9 @@ Return no markdown or explanatory text.`;
 ${allDay
   ? '[{"title":"Holiday","date":"YYYY-MM-DD","all_day":true,"color":"' + color + '"}]'
   : '[{"title":"Art Class","date":"YYYY-MM-DD","startTime":"18:30","endTime":"20:30","all_day":false,"color":"' + color + '"}]'}
-Today is ${todayStr} (${today}).
-${nextDates}
-Use these exact dates when the user says "next Wednesday" or "every Tuesday". Interpret weekday names relative to this current date; for recurring requests, the first occurrence should be the next matching date after today unless the user explicitly asks to include today.
+${dateContext}
+IMPORTANT: Use ONLY the exact dates provided above for each weekday. Do not calculate dates yourself.
+For recurring requests, the first occurrence should be the next matching date after today unless the user explicitly asks to include today.
 Generate ${weeks} weeks of occurrences. For recurring events, generate every occurrence within that period, starting with the next matching date after today (unless the user specifies a date). For "every Tuesday", include every Tuesday in that period. For "every day", include each day in that period. For "every Monday and Wednesday", include both Mondays and Wednesdays in that period. Return each occurrence as its own array item with its actual ISO date. For one-time events, return only the requested event(s). ${allDay
   ? 'These are ALL-DAY events: set all_day to true and do not include startTime or endTime. Interpret dates and recurrence from the user request; include dates such as December 25 or first Monday of the month when specified.'
   : 'Use ISO dates (YYYY-MM-DD) and 24-hour times (HH:mm), and set all_day to false.'}
