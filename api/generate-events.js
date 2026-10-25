@@ -169,19 +169,25 @@ Return no markdown or explanatory text.`;
   }
 
   const now = new Date();
-  const todayISO = now.toISOString().slice(0, 10);
+  // Use local calendar dates consistently; toISOString() converts to UTC and can
+  // shift the date relative to the server's local weekday.
+  function formatLocalISODate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const todayISO = formatLocalISODate(now);
   const todayDay = now.toLocaleDateString("en-US", { weekday: "long" });
 
-  // Calculate the next occurrence of each weekday. This endpoint is JavaScript,
-  // so the TypeScript parameter annotation from the supplied example is omitted.
+  // Calculate every weekday from the same captured date.
   function getNextWeekday(dayIndex) {
-    const today = new Date();
-    const todayIndex = today.getDay();
+    const todayIndex = now.getDay();
     let daysUntil = dayIndex - todayIndex;
     if (daysUntil <= 0) daysUntil += 7;
-    const next = new Date(today);
-    next.setDate(today.getDate() + daysUntil);
-    return next.toISOString().slice(0, 10);
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysUntil);
+    return formatLocalISODate(next);
   }
 
   const weekdayDates = {
@@ -193,8 +199,6 @@ Return no markdown or explanatory text.`;
     Friday: getNextWeekday(5),
     Saturday: getNextWeekday(6),
   };
-
-  const dateContext = `Today is ${todayDay} ${todayISO}. Next weekday dates: ${JSON.stringify(weekdayDates)}`;
   const weeksInput = String(req.body?.weeks ?? "12").trim();
   const weeks = Number(weeksInput);
   if (!/^\d+$/.test(weeksInput) || !Number.isSafeInteger(weeks) || weeks <= 0) {
@@ -204,17 +208,25 @@ Return no markdown or explanatory text.`;
   const requestedColor = String(req.body?.color ?? "tomato").toLowerCase();
   const color = allowedColors.includes(requestedColor) ? requestedColor : "tomato";
   const allDay = req.body?.allDay === true;
-  const systemPrompt = `Return ONLY a JSON array in this format:
-${allDay
-  ? '[{"title":"Holiday","date":"YYYY-MM-DD","all_day":true,"color":"' + color + '"}]'
-  : '[{"title":"Art Class","date":"YYYY-MM-DD","startTime":"18:30","endTime":"20:30","all_day":false,"color":"' + color + '"}]'}
-${dateContext}
-IMPORTANT: Use ONLY the exact dates provided above for each weekday. Do not calculate dates yourself.
-For recurring requests, the first occurrence should be the next matching date after today unless the user explicitly asks to include today.
-Generate ${weeks} weeks of occurrences. For recurring events, generate every occurrence within that period, starting with the next matching date after today (unless the user specifies a date). For "every Tuesday", include every Tuesday in that period. For "every day", include each day in that period. For "every Monday and Wednesday", include both Mondays and Wednesdays in that period. Return each occurrence as its own array item with its actual ISO date. For one-time events, return only the requested event(s). ${allDay
-  ? 'These are ALL-DAY events: set all_day to true and do not include startTime or endTime. Interpret dates and recurrence from the user request; include dates such as December 25 or first Monday of the month when specified.'
-  : 'Use ISO dates (YYYY-MM-DD) and 24-hour times (HH:mm), and set all_day to false.'}
-Set the color of EVERY generated event to "${color}". Do not include markdown, recurrence fields, or any text outside the JSON array.`;
+  const fullPrompt = `YOU MUST USE ONLY THESE EXACT DATES. DO NOT USE ANY OTHER DATES.
+TODAY: ${todayISO} (${todayDay})
+NEXT MONDAY: ${weekdayDates.Monday}
+NEXT TUESDAY: ${weekdayDates.Tuesday}
+NEXT WEDNESDAY: ${weekdayDates.Wednesday}
+NEXT THURSDAY: ${weekdayDates.Thursday}
+NEXT FRIDAY: ${weekdayDates.Friday}
+NEXT SATURDAY: ${weekdayDates.Saturday}
+NEXT SUNDAY: ${weekdayDates.Sunday}
+
+RULES:
+- If user says "Wednesday" use NEXT WEDNESDAY date above
+- If user says "every Tuesday" start from NEXT TUESDAY date above
+- NEVER use October 31 2026 unless that IS the next occurrence of the requested day
+- Generate ${weeks} weeks of occurrences starting from the correct date above
+
+User request: ${prompt}
+
+Return ONLY a JSON array: [{"title":"string","date":"YYYY-MM-DD","startTime":"HH:MM","endTime":"HH:MM","color":"string","allDay":boolean}] `;
 
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
@@ -223,6 +235,22 @@ Set the color of EVERY generated event to "${color}". Do not include markdown, r
   }
 
   try {
+    const testWed = weekdayDates.Wednesday;
+    const testDate = new Date(testWed + "T00:00:00");
+    const testDay = testDate.toLocaleDateString("en-US", { weekday: "long" });
+    console.log("Wednesday date:", testWed, "is a:", testDay);
+    if (testDay !== "Wednesday") {
+      console.error("DATE CALCULATION IS WRONG", { testWed, testDay, todayISO, todayDay, weekdayDates });
+      return res.status(500).json({ error: "Date calculation validation failed. No events were sent to the AI." });
+    }
+
+    console.log("DATE CONTEXT BEING SENT TO GROQ:", {
+      todayISO,
+      todayDay,
+      weekdayDates,
+    });
+    console.log("FULL PROMPT:", fullPrompt);
+
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -234,8 +262,7 @@ Set the color of EVERY generated event to "${color}". Do not include markdown, r
         temperature: 0.1,
         max_tokens: 6000,
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt },
+          { role: "system", content: fullPrompt },
         ],
       }),
     });
