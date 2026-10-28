@@ -238,6 +238,13 @@ Return ONLY a JSON array: [{"title":"string","date":"YYYY-MM-DD","startTime":"HH
   }
 
   try {
+    console.log("Today:", todayISO, todayDay);
+    console.log(
+      "Next Wed:",
+      getNextWeekday(3),
+      new Date(getNextWeekday(3) + "T12:00:00").toLocaleDateString("en-US", { weekday: "long" })
+    );
+
     const testWed = weekdayDates.Wednesday;
     const testDate = new Date(testWed + "T00:00:00");
     const testDay = testDate.toLocaleDateString("en-US", { weekday: "long" });
