@@ -168,27 +168,30 @@ Return no markdown or explanatory text.`;
     return res.status(400).json({ error: "Describe the events you want to create." });
   }
 
-  const now = new Date();
-  // Use local calendar dates consistently; toISOString() converts to UTC and can
-  // shift the date relative to the server's local weekday.
-  function formatLocalISODate(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
+  function getNextWeekday(targetDay) {
+    const today = new Date();
+    // Reset time to midnight to avoid timezone issues.
+    today.setHours(0, 0, 0, 0);
+    const currentDay = today.getDay(); // 0=Sun, 1=Mon, etc.
+    let daysToAdd = targetDay - currentDay;
+    if (daysToAdd <= 0) daysToAdd += 7; // Always go to NEXT occurrence.
+    const result = new Date(today);
+    result.setDate(today.getDate() + daysToAdd);
+    // Format as YYYY-MM-DD without toISOString (avoids timezone offset bugs).
+    const year = result.getFullYear();
+    const month = String(result.getMonth() + 1).padStart(2, "0");
+    const day = String(result.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   }
 
-  const todayISO = formatLocalISODate(now);
-  const todayDay = now.toLocaleDateString("en-US", { weekday: "long" });
-
-  // Calculate every weekday from the same captured date.
-  function getNextWeekday(dayIndex) {
-    const todayIndex = now.getDay();
-    let daysUntil = dayIndex - todayIndex;
-    if (daysUntil <= 0) daysUntil += 7;
-    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysUntil);
-    return formatLocalISODate(next);
-  }
+  // Get today's date without timezone conversion.
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const todayYear = now.getFullYear();
+  const todayMonth = String(now.getMonth() + 1).padStart(2, "0");
+  const todayDay2 = String(now.getDate()).padStart(2, "0");
+  const todayISO = `${todayYear}-${todayMonth}-${todayDay2}`;
+  const todayDay = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][now.getDay()];
 
   const weekdayDates = {
     Sunday: getNextWeekday(0),
