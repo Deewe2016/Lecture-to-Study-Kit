@@ -273,6 +273,7 @@ Return ONLY a JSON array: [{"title":"string","date":"YYYY-MM-DD","startTime":"HH
         max_tokens: 6000,
         messages: [
           { role: "system", content: fullPrompt },
+          { role: "user", content: `Create calendar events for: ${prompt}` },
         ],
       }),
     });
