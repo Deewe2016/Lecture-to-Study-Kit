@@ -920,14 +920,22 @@ function EventEditor({
           })),
         }),
       });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body?.error || `Request failed with status ${response.status}`);
-      if (!Array.isArray(body?.ids)) throw new Error('The AI response did not contain a list of event IDs.');
+      const data = await response.json().catch(() => ({}));
+      console.log('find-to-delete response:', data);
+      if (!response.ok) throw new Error(data?.error || `Request failed with status ${response.status}`);
+      if (!Array.isArray(data?.ids)) throw new Error('The AI response did not contain a list of event IDs.');
+      if (data.ids.length === 0) {
+        setError('No matching events found. Try describing them differently.');
+        return;
+      }
 
       const validIds = new Set(currentEvents.map((event) => event.id));
-      const matchedIds = [...new Set<string>(body.ids.filter((id: unknown): id is string => typeof id === 'string' && validIds.has(id)))];
+      const matchedIds = [...new Set<string>(data.ids.filter((id: unknown): id is string => typeof id === 'string' && validIds.has(id)))];
       const matchedEvents = currentEvents.filter((event) => matchedIds.includes(event.id));
-      if (!matchedEvents.length) throw new Error('The AI could not match your description to any events. Try being more specific.');
+      if (!matchedEvents.length) {
+        setError('No matching events found. Try describing them differently.');
+        return;
+      }
       setAiDeleteEvents(matchedEvents);
       setAiDeleteSelectedIds(matchedEvents.map((event) => event.id));
     } catch (err: any) {
