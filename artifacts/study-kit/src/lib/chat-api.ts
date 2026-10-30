@@ -1,6 +1,6 @@
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-import { getAccessToken } from './auth';
+import { getAccessToken, refreshAccessToken, redirectToLogin } from './auth';
 
 export type ChatUser = { id: string; email: string; display_name: string };
 export type ChatSpace = { id: string; name: string; members: string[]; created_by: string; created_at: string };
@@ -38,32 +38,58 @@ async function waitForClockSkew(token: string) {
 
 async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
   ensureConfigured();
-  let lastError: Error | null = null;
-  for (let attempt = 0; attempt < AUTH_RETRY_ATTEMPTS; attempt += 1) {
-    const token = getAccessToken();
-    if (!token) throw new Error('You must be signed in to use Chat.');
-    try {
-      await waitForClockSkew(token);
-      const response = await fetch(`${SUPABASE_URL}${path}`, { ...init, headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) } });
-      const body = await response.text();
-      let data: unknown = null;
-      try { data = body ? JSON.parse(body) : null; } catch { data = body; }
-      if (!response.ok) {
-        const message = typeof data === 'object' && data !== null ? String((data as any).message || (data as any).hint || (data as any).details || `Supabase request failed (${response.status})`) : `Supabase request failed (${response.status})`;
-        const error = new Error(message);
-        if (!isChatAuthError(error) || attempt === AUTH_RETRY_ATTEMPTS - 1) throw error;
-        lastError = error;
-        await new Promise<void>((resolve) => window.setTimeout(resolve, AUTH_RETRY_DELAY_MS));
-        continue;
-      }
-      return data as T;
-    } catch (error) {
-      if (!isChatAuthError(error) || attempt === AUTH_RETRY_ATTEMPTS - 1) throw error;
-      lastError = error instanceof Error ? error : new Error(String(error));
-      await new Promise<void>((resolve) => window.setTimeout(resolve, AUTH_RETRY_DELAY_MS));
+
+  const send = async (token: string) => {
+    await waitForClockSkew(token);
+    const response = await fetch(`${SUPABASE_URL}${path}`, {
+      ...init,
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(init.headers || {}),
+      },
+    });
+    const body = await response.text();
+    let data: unknown = null;
+    try { data = body ? JSON.parse(body) : null; } catch { data = body; }
+    const message = typeof data === 'object' && data !== null
+      ? String((data as any).message || (data as any).hint || (data as any).details || `Supabase request failed (${response.status})`)
+      : `Supabase request failed (${response.status})`;
+    return { response, data, message };
+  };
+
+  let token = getAccessToken();
+  if (!token) {
+    await redirectToLogin();
+    throw new Error('Your session expired. Please log in again.');
+  }
+
+  let result = await send(token);
+  const expired = (value: typeof result) => value.response.status === 401 || /jwt expired/i.test(value.message);
+
+  if (!result.response.ok && expired(result)) {
+    token = await refreshAccessToken() || '';
+    if (!token) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
+    }
+    result = await send(token);
+    if (!result.response.ok && expired(result)) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
     }
   }
-  throw lastError || new Error('Supabase request failed.');
+
+  if (!result.response.ok) {
+    const error = new Error(result.message);
+    if (isChatAuthError(error)) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
+    }
+    throw error;
+  }
+  return result.data as T;
 }
 
 export async function searchUsers(query: string, currentUserId: string): Promise<ChatUser[]> {
