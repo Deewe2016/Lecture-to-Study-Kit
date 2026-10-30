@@ -6,7 +6,7 @@ import {
   FileVideo, Folder, FolderOpen, Grid2X2, List, MoreHorizontal, Pencil, Pin, Move,
   Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen, FilePlus2, ChevronDown
 } from 'lucide-react';
-import { getAccessToken, getStoredUser } from '@/lib/auth';
+import { getAccessToken, getStoredUser, refreshAccessToken, redirectToLogin } from '@/lib/auth';
 import FileAnnotationViewer from '@/components/file-annotation';
 
 type FolderRow = { id: string; name: string; parent_folder_id: string | null; owner_id: string; created_at: string };
@@ -69,46 +69,58 @@ async function waitForJwtClockSkew(token: string) {
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!url || !anon) throw new Error('Files storage is not configured.');
-  let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt < AUTH_RETRY_ATTEMPTS; attempt += 1) {
-    const token = getAccessToken();
-    if (!token) throw new Error('You must be signed in to use Files.');
+  const send = async (token: string) => {
+    await waitForJwtClockSkew(token);
+    const response = await fetch(`${url}${path}`, {
+      ...init,
+      headers: {
+        apikey: anon,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(init.headers || {}),
+      },
+    });
+    const body = await response.text();
+    let data: unknown = null;
+    try { data = body ? JSON.parse(body) : null; } catch { data = body; }
+    const message = typeof data === 'object' && data
+      ? String((data as any).message || (data as any).details || (data as any).hint || `Request failed (${response.status})`)
+      : `Request failed (${response.status})`;
+    return { response, data, message };
+  };
 
-    try {
-      await waitForJwtClockSkew(token);
-      const response = await fetch(`${url}${path}`, {
-        ...init,
-        headers: {
-          apikey: anon,
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...(init.headers || {}),
-        },
-      });
-      const body = await response.text();
-      let data: unknown = null;
-      try { data = body ? JSON.parse(body) : null; } catch { data = body; }
-
-      if (!response.ok) {
-        const message = typeof data === 'object' && data
-          ? String((data as any).message || (data as any).details || (data as any).hint || `Request failed (${response.status})`)
-          : `Request failed (${response.status})`;
-        const error = new Error(message);
-        if (!isJwtError(error) || attempt === AUTH_RETRY_ATTEMPTS - 1) throw error;
-        lastError = error;
-      } else {
-        return data as T;
-      }
-    } catch (error) {
-      if (!isJwtError(error) || attempt === AUTH_RETRY_ATTEMPTS - 1) throw error;
-      lastError = error instanceof Error ? error : new Error(String(error));
-    }
-
-    await new Promise<void>((resolve) => window.setTimeout(resolve, AUTH_RETRY_DELAY_MS));
+  let token = getAccessToken();
+  if (!token) {
+    await redirectToLogin();
+    throw new Error('Your session expired. Please log in again.');
   }
 
-  throw lastError || new Error('Supabase request failed.');
+  let result = await send(token);
+  const expired = (value: typeof result) => value.response.status === 401 || /jwt expired/i.test(value.message);
+
+  if (!result.response.ok && expired(result)) {
+    token = await refreshAccessToken() || '';
+    if (!token) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
+    }
+    result = await send(token);
+    if (!result.response.ok && expired(result)) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
+    }
+  }
+
+  if (!result.response.ok) {
+    const error = new Error(result.message);
+    if (isJwtError(error)) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
+    }
+    throw error;
+  }
+  return result.data as T;
 }
 
 function formatBytes(bytes: number) {
