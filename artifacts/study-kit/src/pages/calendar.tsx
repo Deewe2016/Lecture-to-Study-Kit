@@ -14,7 +14,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { getAccessToken, getStoredUser } from '@/lib/auth';
+import { getAccessToken, getStoredUser, refreshAccessToken, redirectToLogin } from '@/lib/auth';
 import { useToast } from '@/hooks/use-toast';
 
 type EmailReminder = {
@@ -91,30 +91,53 @@ const COLORS = [
 
 const EVENT_COLOR = Object.fromEntries(COLORS.map((color) => [color.id, color.value]));
 
-function api<T>(path: string, init: RequestInit = {}) {
-  const token = getAccessToken();
-  if (!token || !url || !anon) throw new Error('Calendar is not configured.');
-  return fetch(url + path, {
-    ...init,
-    headers: {
-      apikey: anon,
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-    },
-  }).then(async (response) => {
+async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (!url || !anon) throw new Error('Calendar is not configured.');
+
+  const send = async (token: string) => {
+    const response = await fetch(url + path, {
+      ...init,
+      headers: {
+        apikey: anon,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(init.headers || {}),
+      },
+    });
     const body = await response.text();
     let data: unknown = null;
     try { data = body ? JSON.parse(body) : null; } catch { data = body; }
-    if (!response.ok) {
-      const message =
-        typeof data === 'object' && data
-          ? String((data as any).message || (data as any).details || (data as any).hint || `Request failed (${response.status})`)
-          : `Request failed (${response.status})`;
-      throw new Error(message);
+    const message =
+      typeof data === 'object' && data
+        ? String((data as any).message || (data as any).details || (data as any).hint || `Request failed (${response.status})`)
+        : `Request failed (${response.status})`;
+    return { response, data, message };
+  };
+
+  let token = getAccessToken();
+  if (!token) {
+    await redirectToLogin();
+    throw new Error('Your session expired. Please log in again.');
+  }
+
+  let result = await send(token);
+  const expired = (value: typeof result) => value.response.status === 401 || /jwt expired/i.test(value.message);
+
+  if (!result.response.ok && expired(result)) {
+    token = await refreshAccessToken() || '';
+    if (!token) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
     }
-    return data as T;
-  });
+    result = await send(token);
+    if (!result.response.ok && expired(result)) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
+    }
+  }
+
+  if (!result.response.ok) throw new Error(result.message);
+  return result.data as T;
 }
 
 function pad(value: number) {
