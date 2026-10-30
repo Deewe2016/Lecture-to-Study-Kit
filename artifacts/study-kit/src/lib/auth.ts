@@ -86,6 +86,30 @@ async function request<T>(path: string, init: RequestInit = {}, accessToken?: st
   return data as T;
 }
 
+let refreshAccessTokenPromise: Promise<string | null> | null = null;
+
+export async function refreshAccessToken(): Promise<string | null> {
+  if (refreshAccessTokenPromise) return refreshAccessTokenPromise;
+  const session = readSession();
+  if (!session?.refresh_token) return null;
+
+  refreshAccessTokenPromise = (async () => {
+    const user = await refreshSession(session);
+    return user ? getAccessToken() : null;
+  })();
+
+  try {
+    return await refreshAccessTokenPromise;
+  } finally {
+    refreshAccessTokenPromise = null;
+  }
+}
+
+export async function redirectToLogin() {
+  await signOut();
+  window.location.assign('/auth');
+}
+
 async function refreshSession(session: AuthSession): Promise<AuthUser | null> {
   if (!session.refresh_token) return null;
   try {
