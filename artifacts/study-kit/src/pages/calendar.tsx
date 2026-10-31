@@ -944,8 +944,9 @@ function EventEditor({
         }),
       });
       const data = await response.json().catch(() => ({}));
-      console.log('find-to-delete response:', data);
-      if (!response.ok) throw new Error(data?.error || `Request failed with status ${response.status}`);
+      console.log('find-to-delete response:', JSON.stringify(data));
+      if (data?.error) throw new Error(String(data.error));
+      if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
       if (!Array.isArray(data?.ids)) throw new Error('The AI response did not contain a list of event IDs.');
       if (data.ids.length === 0) {
         setError('No matching events found. Try describing them differently.');
