@@ -911,8 +911,8 @@ function EventEditor({
   const findAIEventsToDelete = async () => {
     console.log('me:', me, 'supabase:', !!(globalThis as any).supabase);
     try {
-      const prompt = aiDescription.trim();
-      if (!prompt) { setError('Describe which events to delete.'); return; }
+      const userPrompt = aiDescription.trim();
+      if (!userPrompt) { setError('Describe which events to delete.'); return; }
       if (!me?.id) { setError('You are not signed in. Please sign in again before deleting calendar events.'); return; }
 
       setAiGenerating(true);
