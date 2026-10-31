@@ -921,27 +921,52 @@ function EventEditor({
       setAiDeleteEvents([]);
       setAiDeleteSelectedIds([]);
 
-      const currentEvents = await api<CalendarEvent[]>(
-        `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,reminders,notify_invites,created_at,updated_at&owner_id=eq.${me.id}&order=start_at.asc&limit=500`,
-      );
-      if (!currentEvents.length) throw new Error('There are no calendar events to delete.');
+      const [ownedEvents, inviteRows] = await Promise.all([
+        api<CalendarEvent[]>(
+          `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,reminders,notify_invites,created_at,updated_at&owner_id=eq.${me.id}&order=start_at.asc&limit=500`,
+        ),
+        api<InviteRow[]>(
+          `/rest/v1/calendar_event_invites?select=id,event_id,user_id&user_id=eq.${me.id}&limit=500`,
+        ),
+      ]);
+      const invitedIds = [...new Set(inviteRows.map((row) => row.event_id))];
+      const invitedEvents = invitedIds.length
+        ? await api<CalendarEvent[]>(
+            `/rest/v1/calendar_events?select=id,owner_id,title,start_at,end_at,timezone,color,location,description,all_day,recurrence_rule,reminders,notify_invites,created_at,updated_at&id=in.(${invitedIds.join(',')})&order=start_at.asc&limit=500`,
+          )
+        : [];
+      const eventsById = new Map<string, CalendarEvent>();
+      [...ownedEvents, ...invitedEvents].forEach((event) => eventsById.set(event.id, event));
+      const allCalendarEvents = [...eventsById.values()]
+        .filter((event) =>
+          typeof event.id === 'string' &&
+          typeof event.title === 'string' &&
+          typeof event.start_at === 'string' &&
+          typeof event.end_at === 'string'
+        )
+        .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+      if (!allCalendarEvents.length) {
+        setError('No calendar events were found.');
+        return;
+      }
 
+      const body = {
+        action: 'find-to-delete',
+        prompt: userPrompt,
+        events: allCalendarEvents.map((e) => ({
+          id: e.id,
+          title: e.title,
+          start_at: e.start_at,
+          end_at: e.end_at,
+          all_day: e.all_day,
+          recurrence_rule: e.recurrence_rule,
+        })),
+      };
+      console.log('find-to-delete request:', JSON.stringify(body));
       const response = await fetch('/api/generate-events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'find-to-delete',
-          prompt,
-          events: currentEvents.map((event) => ({
-            id: event.id,
-            title: event.title,
-            start_at: event.start_at,
-            end_at: event.end_at,
-            all_day: event.all_day,
-            color: event.color,
-            recurrence_rule: event.recurrence_rule,
-          })),
-        }),
+        body: JSON.stringify(body),
       });
       const data = await response.json().catch(() => ({}));
       console.log('find-to-delete response:', JSON.stringify(data));
@@ -949,13 +974,13 @@ function EventEditor({
       if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
       if (!Array.isArray(data?.ids)) throw new Error('The AI response did not contain a list of event IDs.');
       if (data.ids.length === 0) {
-        setError('No matching events found. Try describing them differently.');
+        setError('No matching events found.');
         return;
       }
 
-      const validIds = new Set(currentEvents.map((event) => event.id));
+      const validIds = new Set(allCalendarEvents.map((event) => event.id));
       const matchedIds = [...new Set<string>(data.ids.filter((id: unknown): id is string => typeof id === 'string' && validIds.has(id)))];
-      const matchedEvents = currentEvents.filter((event) => matchedIds.includes(event.id));
+      const matchedEvents = allCalendarEvents.filter((event) => matchedIds.includes(event.id));
       if (!matchedEvents.length) {
         setError('No matching events found. Try describing them differently.');
         return;
