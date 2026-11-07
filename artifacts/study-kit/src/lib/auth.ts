@@ -40,7 +40,6 @@ function emitAuthState(event: 'TOKEN_REFRESHED' | 'SIGNED_OUT') {
 
 function saveSession(session: AuthSession) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  emitAuthState('TOKEN_REFRESHED');
   return toUser(session.user);
 }
 
@@ -167,7 +166,9 @@ async function refreshSession(session: AuthSession): Promise<AuthUser | null> {
       method: 'POST',
       body: JSON.stringify({ refresh_token: session.refresh_token }),
     });
-    return saveSession(next);
+    const user = saveSession(next);
+    emitAuthState('TOKEN_REFRESHED');
+    return user;
   } catch {
     localStorage.removeItem(SESSION_KEY);
     return null;
