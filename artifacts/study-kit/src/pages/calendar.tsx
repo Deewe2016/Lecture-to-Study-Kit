@@ -945,8 +945,9 @@ function EventEditor({
           typeof event.end_at === 'string'
         )
         .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
-      if (!allCalendarEvents.length) {
-        setError('No calendar events were found.');
+      console.log('Calendar events count:', allCalendarEvents.length);
+      if (allCalendarEvents.length === 0) {
+        setError('No events found in your calendar to delete.');
         return;
       }
 
@@ -954,37 +955,31 @@ function EventEditor({
         action: 'find-to-delete',
         prompt: userPrompt,
         events: allCalendarEvents.map((e) => ({
-          id: e.id,
-          title: e.title,
-          start_at: e.start_at,
-          end_at: e.end_at,
-          all_day: e.all_day,
-          recurrence_rule: e.recurrence_rule,
+          id: String(e.id),
+          title: String(e.title),
+          start_at: String(e.start_at || (e as any).startAt || (e as any).start || ''),
+          end_at: String(e.end_at || (e as any).endAt || (e as any).end || ''),
+          all_day: Boolean(e.all_day || (e as any).allDay),
+          recurrence_rule: e.recurrence_rule || (e as any).recurrenceRule || null,
         })),
       };
-      console.log('find-to-delete request:', JSON.stringify(body));
+      console.log('Sending to find-to-delete:', JSON.stringify(body).slice(0, 500));
       const response = await fetch('/api/generate-events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await response.json().catch(() => ({}));
-      console.log('find-to-delete response:', JSON.stringify(data));
-      if (data?.error) throw new Error(String(data.error));
-      if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
-      if (!Array.isArray(data?.ids)) throw new Error('The AI response did not contain a list of event IDs.');
-      if (data.ids.length === 0) {
-        setError('No matching events found.');
-        return;
-      }
 
-      const validIds = new Set(allCalendarEvents.map((event) => event.id));
-      const matchedIds = [...new Set<string>(data.ids.filter((id: unknown): id is string => typeof id === 'string' && validIds.has(id)))];
-      const matchedEvents = allCalendarEvents.filter((event) => matchedIds.includes(event.id));
-      if (!matchedEvents.length) {
+      const data = await response.json();
+      console.log('find-to-delete response:', JSON.stringify(data));
+      if (data.error) throw new Error(data.error);
+      if (!data.ids) throw new Error('No ids in response: ' + JSON.stringify(data));
+      if (data.ids.length === 0) {
         setError('No matching events found. Try describing them differently.');
         return;
       }
+
+      const matchedEvents = allCalendarEvents.filter((e) => data.ids.includes(e.id));
       setAiDeleteEvents(matchedEvents);
       setAiDeleteSelectedIds(matchedEvents.map((event) => event.id));
     } catch (err: any) {
