@@ -4,7 +4,7 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { Bot, FileText, MessageSquare, Paperclip, Plus, Send, Sparkles, Trash2, User, X } from 'lucide-react';
-import { getAccessToken, getStoredUser } from '@/lib/auth';
+import { authenticatedFetch, getAccessToken, getStoredUser } from '@/lib/auth';
 
 type Attachment = {
   id: string;
@@ -508,7 +508,7 @@ export default function AIChatPage() {
     setLoadingFiles(true);
     setError('');
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${SUPABASE_URL}/rest/v1/files?select=id,name,storage_path,size,type,created_at&owner_id=eq.${encodeURIComponent(me.id)}&order=created_at.desc`,
         {
           headers: {
@@ -531,7 +531,7 @@ export default function AIChatPage() {
   const getSignedFileUrl = async (file: FileRow) => {
     const token = getAccessToken();
     if (!token) throw new Error('You must be signed in to use your files.');
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `${SUPABASE_URL}/storage/v1/object/sign/user-files/${file.storage_path.split('/').map(encodeURIComponent).join('/')}`,
       {
         method: 'POST',
