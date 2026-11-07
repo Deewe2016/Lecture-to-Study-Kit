@@ -6,7 +6,7 @@ import {
   FileVideo, Folder, FolderOpen, Grid2X2, List, MoreHorizontal, Pencil, Pin, Move,
   Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen, FilePlus2, ChevronDown
 } from 'lucide-react';
-import { getAccessToken, getStoredUser, refreshAccessToken, redirectToLogin } from '@/lib/auth';
+import { authenticatedFetch, getAccessToken, getStoredUser, refreshAccessToken, redirectToLogin } from '@/lib/auth';
 import FileAnnotationViewer from '@/components/file-annotation';
 
 type FolderRow = { id: string; name: string; parent_folder_id: string | null; owner_id: string; created_at: string };
@@ -661,7 +661,7 @@ export default function FilesPage() {
     setBusy(true); setError('');
     const path = `${me.id}/${folderId}/${Date.now()}-${safeName(file.name)}`;
     try {
-      const storageResponse = await fetch(`${url}/storage/v1/object/user-files/${encodeURIComponent(path).replace(/%2F/g, '/')}`, {
+      const storageResponse = await authenticatedFetch(`${url}/storage/v1/object/user-files/${encodeURIComponent(path).replace(/%2F/g, '/')}`, {
         method: 'POST',
         headers: { apikey: anon, Authorization: `Bearer ${getAccessToken()}`, 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'false' },
         body: file,
@@ -673,7 +673,7 @@ export default function FilesPage() {
       });
       setFiles(prev => [...created, ...prev]);
     } catch (e) {
-      try { await fetch(`${url}/storage/v1/object/user-files/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE', headers: { apikey: anon, Authorization: `Bearer ${getAccessToken()}` } }); } catch {}
+      try { await authenticatedFetch(`${url}/storage/v1/object/user-files/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE', headers: { apikey: anon, Authorization: `Bearer ${getAccessToken()}` } }); } catch {}
       setError(e instanceof Error ? e.message : 'Could not upload file.');
     } finally { setBusy(false); }
   };
@@ -715,7 +715,7 @@ export default function FilesPage() {
       await api(`/rest/v1/files?id=eq.${encodeURIComponent(file.id)}`, { method: 'DELETE' });
 
       const storagePath = file.storage_path.split('/').map(encodeURIComponent).join('/');
-      const storageResponse = await fetch(`${url}/storage/v1/object/user-files/${storagePath}`, {
+      const storageResponse = await authenticatedFetch(`${url}/storage/v1/object/user-files/${storagePath}`, {
         method: 'DELETE',
         headers: {
           apikey: anon,
