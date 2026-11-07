@@ -32,8 +32,15 @@ function toUser(user: AuthSession['user']): AuthUser {
   };
 }
 
+function emitAuthState(event: 'TOKEN_REFRESHED' | 'SIGNED_OUT') {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('flexus-auth-state-change', { detail: { event } }));
+  }
+}
+
 function saveSession(session: AuthSession) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  emitAuthState('TOKEN_REFRESHED');
   return toUser(session.user);
 }
 
@@ -105,6 +112,49 @@ export async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+/**
+ * Makes an authenticated Supabase REST/Storage request. If the access token
+ * has expired, refresh it once and replay the original request once.
+ */
+export async function authenticatedFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  ensureConfigured();
+  let token = getAccessToken();
+  if (!token) {
+    await redirectToLogin();
+    throw new Error('Your session expired. Please log in again.');
+  }
+
+  const send = (accessToken: string) => fetch(input, {
+    ...init,
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      ...(init.headers || {}),
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  let response = await send(token);
+  const isAuthFailure = async (candidate: Response) => {
+    if (candidate.status === 401) return true;
+    const body = await candidate.clone().text().catch(() => '');
+    return /jwt expired|token expired|invalid jwt/i.test(body);
+  };
+
+  if (!response.ok && await isAuthFailure(response)) {
+    token = await refreshAccessToken() || '';
+    if (!token) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
+    }
+    response = await send(token);
+    if (!response.ok && await isAuthFailure(response)) {
+      await redirectToLogin();
+      throw new Error('Your session expired. Please log in again.');
+    }
+  }
+  return response;
+}
+
 export async function redirectToLogin() {
   await signOut();
   window.location.assign('/auth');
@@ -167,6 +217,7 @@ export async function signOut() {
     }
   }
   localStorage.removeItem(SESSION_KEY);
+  emitAuthState('SIGNED_OUT');
 }
 
 export function getStoredUser(): AuthUser | null {
@@ -181,4 +232,53 @@ export function getAccessToken(): string | null {
 export function getSupabaseUploadConfig() {
   ensureConfigured();
   return { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY };
+}
+
+
+let authMaintenanceStarted = false;
+
+/**
+ * Start one app-wide session maintainer. It refreshes on a 30-minute cadence
+ * and checks again when a suspended tab becomes visible.
+ */
+export function startAuthSessionMaintenance() {
+  if (authMaintenanceStarted || typeof window === 'undefined') return;
+  authMaintenanceStarted = true;
+
+  const onAuthStateChange = (event: Event) => {
+    const authEvent = (event as CustomEvent<{ event?: string }>).detail?.event;
+    if (authEvent === 'TOKEN_REFRESHED') {
+      console.log('Token refreshed successfully');
+    } else if (authEvent === 'SIGNED_OUT' && window.location.pathname !== '/auth') {
+      window.location.assign('/auth');
+    }
+  };
+  window.addEventListener('flexus-auth-state-change', onAuthStateChange);
+
+  const refreshIfExpiring = async (force = false) => {
+    const session = readSession();
+    if (!session?.refresh_token) return;
+    let expiresSoon = force;
+    try {
+      const payload = JSON.parse(atob(session.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      expiresSoon = expiresSoon || (typeof payload.exp === 'number' && payload.exp * 1000 - Date.now() <= 10 * 60 * 1000);
+    } catch {
+      expiresSoon = true;
+    }
+    if (!expiresSoon) return;
+    const token = await refreshAccessToken();
+    if (!token) console.error('Session refresh failed: no valid session was returned.');
+  };
+
+  window.setInterval(() => {
+    void refreshIfExpiring(true).catch((error) => console.error('Session refresh failed:', error));
+  }, 30 * 60 * 1000);
+
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      void refreshIfExpiring().catch((error) => console.error('Session refresh failed:', error));
+    }
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('focus', onVisibilityChange);
 }
