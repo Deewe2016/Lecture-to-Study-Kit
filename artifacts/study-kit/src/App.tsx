@@ -985,7 +985,7 @@ function Shell({
       )}
 
       <main
-        className={`min-h-[100dvh] ${
+        className={`workspace-main min-h-[100dvh] ${
           collapsed ? 'md:pl-[72px]' : 'md:pl-[248px]'
         }`}
       >
