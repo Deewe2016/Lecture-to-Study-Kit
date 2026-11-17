@@ -517,3 +517,53 @@ img, video, canvas, svg { max-width: 100%; }
   .document-editor-toolbar > button:nth-of-type(12),
   .document-editor-toolbar > button:nth-of-type(14) { display: none; }
 }
+
+
+/* Compact, information-dense workspace typography (keeps document pages readable). */
+.workspace-main {
+  font-size: 13px;
+}
+
+.workspace-main h1 {
+  font-size: 22px !important;
+  line-height: 1.3 !important;
+  font-weight: 600;
+  letter-spacing: -0.02em !important;
+}
+
+.workspace-main h2 {
+  font-size: 18px !important;
+  line-height: 1.35 !important;
+}
+
+.workspace-main h3 {
+  font-size: 16px !important;
+  line-height: 1.4 !important;
+}
+
+.workspace-main .text-sm {
+  font-size: 13px !important;
+  line-height: 1.45;
+}
+
+.workspace-main .text-base {
+  font-size: 14px !important;
+}
+
+.workspace-main .text-lg {
+  font-size: 15px !important;
+}
+
+.workspace-main .text-xl,
+.workspace-main .text-2xl {
+  font-size: 18px !important;
+}
+
+.workspace-main .text-3xl {
+  font-size: 21px !important;
+}
+
+.workspace-main .text-4xl,
+.workspace-main .text-5xl {
+  font-size: 22px !important;
+}
