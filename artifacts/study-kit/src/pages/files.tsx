@@ -1182,7 +1182,7 @@ export default function FilesPage() {
     <div className="mx-auto max-w-[1500px]">
       {error && <div className="mb-4 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-200">{error}</div>}
       <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-        <div><p className="font-mono text-[10px] uppercase tracking-[.2em] text-primary">Workspace</p><h1 className="mt-3 font-serif text-4xl tracking-[-.04em]">Your workspace</h1><p className="mt-2 text-sm text-muted-foreground">Files, study kits, and everything you need</p></div>
+        <div><p className="font-mono text-[10px] uppercase tracking-[.16em] text-primary">Workspace</p><h1 className="mt-1.5 font-sans text-[22px] font-semibold leading-tight tracking-[-.02em]">Your workspace</h1><p className="mt-1.5 text-[13px] text-muted-foreground">Files, study kits, and everything you need</p></div>
         <div className="relative" ref={newMenuRef}>
           <button type="button" onClick={() => setNewMenuOpen(open => !open)} disabled={busy} className="flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2.5 text-xs font-semibold text-slate-950 transition-opacity hover:opacity-90 disabled:opacity-50"><Plus size={15}/> New <ChevronDown size={14}/></button>
           {newMenuOpen && <div className="absolute right-0 top-12 z-50 w-56 rounded-xl border border-border bg-card p-1.5 shadow-2xl">
@@ -1195,8 +1195,8 @@ export default function FilesPage() {
         </div>
       </div>
 
-      <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[['Total Files', mine.length], ['Study Kits', studyKits.length], ['Storage Used', formatBytes(totalBytes)], ['Shared with Me', sharedFiles.length]].map(([label,value]) => <div key={String(label)} className="rounded-xl border border-border bg-card p-5"><p className="text-[10px] uppercase tracking-[.16em] text-muted-foreground">{label}</p><p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p></div>)}
+      <div className="mt-5 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+        {[['Total Files', mine.length], ['Study Kits', studyKits.length], ['Storage Used', formatBytes(totalBytes)], ['Shared with Me', sharedFiles.length]].map(([label,value]) => <div key={String(label)} className="rounded-lg border border-border bg-card px-3.5 py-3"><p className="text-[10px] font-medium uppercase tracking-[.12em] text-muted-foreground">{label}</p><p className="mt-1.5 text-base font-semibold leading-tight tracking-tight tabular-nums">{value}</p></div>)}
       </div>
 
       <div className="mt-8 grid gap-8 xl:grid-cols-[280px_1fr]">
