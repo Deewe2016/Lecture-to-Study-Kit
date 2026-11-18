@@ -825,39 +825,6 @@ function Shell({
 }) {
   const user = getStoredUser();
   const displayName = user?.name || 'Student';
-
-  const hour = new Date().getHours();
-
-  const greeting =
-    hour < 12
-      ? 'Good morning'
-      : hour < 18
-        ? 'Good afternoon'
-        : 'Good evening';
-
-  const [mobileOpen, setMobileOpen] =
-    useState(false);
-
-  const SIDEBAR_COLLAPSED_KEY = 'study-kit-sidebar-collapsed';
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        SIDEBAR_COLLAPSED_KEY,
-        String(collapsed),
-      );
-    } catch {
-      // Ignore storage failures.
-    }
-  }, [collapsed]);
-
   const [location] = useLocation();
 
   useHealthCheck({
@@ -878,131 +845,59 @@ function Shell({
   return (
     <div className="grain min-h-[100dvh] bg-background text-foreground">
       <aside
-        className={`fixed inset-y-0 left-0 z-30 border-r border-sidebar-border bg-sidebar py-6 transition-all md:translate-x-0 ${
-          collapsed ? 'md:w-[72px] md:px-3' : 'md:w-[248px] md:px-5'
-        } w-[248px] px-5 ${
-          mobileOpen
-            ? 'translate-x-0'
-            : '-translate-x-full'
-        }`}
+        className="sidebar-rail fixed inset-y-0 left-0 z-30 border-r border-sidebar-border bg-sidebar py-6"
+        aria-label="Main navigation"
       >
-        <div className="flex items-center justify-between">
-          <div className={collapsed ? 'md:hidden' : ''}>
-            <Brand />
-          </div>
-
-          <button
-            className="focus-ring hidden rounded-md p-1 text-muted-foreground md:block"
-            onClick={() => setCollapsed((value) => !value)}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            data-testid="button-toggle-sidebar"
-          >
-            <PanelLeft size={18} />
-          </button>
-
-          <button
-            className="focus-ring rounded-md p-1 text-muted-foreground md:hidden"
-            onClick={() => setMobileOpen(false)}
-            data-testid="button-close-sidebar"
-          >
-            <X size={18} />
-          </button>
+        <div className="sidebar-brand flex h-9 items-center">
+          <Brand />
         </div>
 
-        <div className={`mt-12 px-2 text-[10px] font-medium uppercase tracking-[.18em] text-muted-foreground ${
-          collapsed ? 'md:hidden' : ''
-        }`}>
+        <div className="sidebar-section-label mt-8 px-2 text-[10px] font-medium uppercase tracking-[.18em] text-muted-foreground">
           Workspace
         </div>
 
         <nav className="mt-3 space-y-1">
-          {nav.map(
-            ({
-              href,
-              label,
-              icon: Icon,
-            }) => (
-              <Link
-                key={href}
-                href={href}
-                onClick={() =>
-                  setMobileOpen(false)
-                }
-                className={`focus-ring flex items-center rounded-lg py-2.5 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${
-                  location === href
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground'
-                }`}
-                data-testid={`link-nav-${label
-                  .toLowerCase()
-                  .replaceAll(' ', '-')}`}
-                title={collapsed ? label : undefined}
-              >
-                <Icon
-                  className="shrink-0"
-                  size={17}
-                  strokeWidth={1.8}
-                />
-
-                <span className={collapsed ? 'md:hidden' : ''}>
-                  {label}
+          {nav.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`sidebar-nav-link focus-ring flex items-center rounded-lg py-2.5 text-sm transition-colors ${
+                location === href
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground'
+              }`}
+              data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}
+              title={label}
+              aria-label={label}
+              aria-current={location === href ? 'page' : undefined}
+            >
+              <Icon className="shrink-0" size={17} strokeWidth={1.8} />
+              <span className="sidebar-nav-label">{label}</span>
+              {href === '/new' && (
+                <span className="sidebar-nav-trailing ml-auto text-primary">
+                  <ArrowRight size={14} />
                 </span>
-
-                {href === '/new' && !collapsed && (
-                  <span className="ml-auto text-primary">
-                    <ArrowRight size={14} />
-                  </span>
-                )}
-              </Link>
-            ),
-          )}
+              )}
+            </Link>
+          ))}
         </nav>
 
-        <div
-          className={`absolute bottom-6 left-5 right-5 rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-4 ${
-            collapsed ? 'md:hidden' : ''
-          }`}
-        >
+        <div className="sidebar-footer absolute bottom-6 left-3 right-3 rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-3">
           <div className="flex items-center gap-2 text-xs text-sidebar-accent-foreground">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            Local workspace
+            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+            <span className="sidebar-nav-label">Local workspace</span>
           </div>
-
-          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+          <p className="sidebar-footer-description mt-2 text-[11px] leading-relaxed text-muted-foreground">
             Your files, kits, and progress stay in this browser.
           </p>
         </div>
       </aside>
 
-      {mobileOpen && (
-        <button
-          className="fixed inset-0 z-20 bg-background/60 md:hidden"
-          onClick={() => setMobileOpen(false)}
-          aria-label="Close navigation"
-          data-testid="button-dismiss-sidebar"
-        />
-      )}
-
-      <main
-        className={`workspace-main min-h-[100dvh] ${
-          collapsed ? 'md:pl-[72px]' : 'md:pl-[248px]'
-        }`}
-      >
+      <main className="workspace-main min-h-[100dvh] pl-[64px]">
         <header className="flex h-[72px] items-center justify-between border-b border-border/70 px-5 sm:px-8">
-          <button
-            className="focus-ring rounded-md p-2 text-muted-foreground md:hidden"
-            onClick={() => setMobileOpen(true)}
-            data-testid="button-open-sidebar"
-          >
-            <Menu size={20} />
-          </button>
-
-          <div className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Home size={14} />
-            <span className="text-muted-foreground/50">
-              /
-            </span>
+            <span className="text-muted-foreground/50">/</span>
             <span>
               {location === '/files'
                 ? 'Files'
@@ -1028,9 +923,7 @@ function Shell({
               className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-secondary text-xs font-medium text-foreground hover:border-primary/60"
               aria-label={`Log out ${displayName}`}
             >
-              {displayName
-                .slice(0, 2)
-                .toUpperCase()}
+              {displayName.slice(0, 2).toUpperCase()}
             </button>
           </div>
         </header>
