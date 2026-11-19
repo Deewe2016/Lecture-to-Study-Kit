@@ -379,6 +379,48 @@ function DocumentCardPreview({ content }: { content: unknown }) {
   );
 }
 
+
+function PdfCardPreview({ file }: { file: FileRow }) {
+  const [preview, setPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreview(null);
+
+    void (async () => {
+      const signed = await api<{ signedURL: string }>(
+        '/storage/v1/object/sign/user-files/' + file.storage_path.split('/').map(encodeURIComponent).join('/'),
+        { method: 'POST', body: JSON.stringify({ expiresIn: 3600 }) },
+      );
+      const src = signed.signedURL.startsWith('http')
+        ? signed.signedURL
+        : url + '/storage/v1' + signed.signedURL;
+      const pdf = await pdfjsLib.getDocument(src).promise;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 0.8 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Could not create PDF preview canvas.');
+      await page.render({ canvasContext: context, viewport }).promise;
+      if (!cancelled) setPreview(canvas.toDataURL('image/png'));
+      canvas.width = 0;
+      canvas.height = 0;
+    })().catch(() => {
+      if (!cancelled) setPreview(null);
+    });
+
+    return () => { cancelled = true; };
+  }, [file.id, file.storage_path]);
+
+  return (
+    <div className="flex h-24 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-zinc-950">
+      {preview ? <img src={preview} alt="" aria-hidden="true" className="h-full w-full object-contain" /> : null}
+    </div>
+  );
+}
+
 export default function FilesPage() {
   const me = getStoredUser();
   const [folders, setFolders] = useState<FolderRow[]>([]);
@@ -1080,48 +1122,41 @@ export default function FilesPage() {
         <button onClick={() => { setEditingItem({kind:'folder',id:folder.id}); setEditingValue(folder.name); setMenu(null); }} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-secondary" title="Rename"><Pencil size={13}/> Rename</button>
         <button onClick={() => { togglePin(folder.id); setMenu(null); }} className="rounded p-1.5 hover:bg-secondary" title="Pin"><Pin size={13}/></button>
         <button onClick={() => { setDialog({ kind:'share', id:folder.id }); setDialogValue(''); setMenu(null); }} className="rounded p-1.5 hover:bg-secondary" title="Share"><Share2 size={13}/></button>
-        {folder.id !== root?.id && <button onClick={() => openMoveDialog({kind:'folder',id:folder.id,name:folder.name,currentFolderId:folder.parent_folder_id})} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-secondary" title="Move"><Move size={13}/> Move</button>}
-        {folder.id !== root?.id && <button onClick={() => { void deleteFolder(folder.id); setMenu(null); }} className="rounded p-1.5 text-red-300 hover:bg-secondary" title="Delete"><Trash2 size={13}/></button>}
-      </div>}
-      {folderTree(folder.id, depth + 1)}
-    </div>
-  ));
-
-  const renameStudyKit = async (kit: LocalKit) => {
-    const next = window.prompt('Rename study kit', kit.title)?.trim();
-    if (!next || next === kit.title) return;
-    try {
-      const raw = localStorage.getItem(KIT_STORAGE);
-      const stored = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(stored)) localStorage.setItem(KIT_STORAGE, JSON.stringify(stored.map((item: LocalKit) => item.id === kit.id ? { ...item, title: next } : item)));
-      setKits(prev => prev.map(item => item.id === kit.id ? { ...item, title: next } : item));
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not rename study kit.'); }
-  };
-
-  const shareStudyKit = async (kit: LocalKit) => {
-    const shareUrl = `${window.location.origin}/kit/${kit.id}`;
-    try {
-      if (navigator.share) await navigator.share({ title: kit.title, url: shareUrl });
-      else if (navigator.clipboard) { await navigator.clipboard.writeText(shareUrl); setError(''); }
-      else throw new Error('Sharing is not available in this browser.');
-    } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      setError(e instanceof Error ? e.message : 'Could not share study kit.');
-    }
-  };
-
-  const kitCard = (kit: LocalKit) => (
-    <div key={kit.id} className="group rounded-xl border border-border bg-card p-5 hover:border-primary/40">
-      <div className="flex items-start gap-3">
-        <button type="button" onClick={() => window.location.assign(`/kit/${kit.id}`)} className="flex min-w-0 flex-1 items-start gap-3 text-left">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><BookOpen size={19}/></div>
-          <div className="min-w-0">
-            <p className="truncate text-[10px] uppercase tracking-[.16em] text-primary">{kit.courseLabel || 'Study kit'}</p>
-            <h3 className="mt-2 truncate font-serif text-xl tracking-[-.02em]">{kit.title}</h3>
-          </div>
-        </button>
-        <div className="relative shrink-0">
+        {folder.id !== root?.id && <button onClick={() => openMoveDialog({kind:'folder',id:folder.id,name:folder.name,currentFolderId:folder.parent_folder_id})} className="flex items-c  const kitCard = (kit: LocalKit) => (
+    <div key={kit.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
+      <button type="button" onClick={() => window.location.assign('/kit/' + kit.id)} className="w-full text-left">
+        <div className="grid h-24 grid-cols-3 gap-2 overflow-hidden rounded-lg border border-border/60 bg-white p-2 dark:bg-zinc-950">
+          {(kit.flashcards?.length || kit.chapters?.length) ? (
+            <div className="col-span-3 grid grid-cols-3 gap-2">
+              {Array.from({ length: 6 }, (_, index) => (
+                <div key={index} className="rounded border border-zinc-200 bg-zinc-50 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+                  <div className="mx-1.5 mt-2 h-1 rounded bg-zinc-300 dark:bg-zinc-600" />
+                  <div className="mx-1.5 mt-1.5 h-1 rounded bg-zinc-200 dark:bg-zinc-700" />
+                  <div className="mx-1.5 mt-1 h-1 w-2/3 rounded bg-zinc-200 dark:bg-zinc-700" />
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <h3 className="mt-3 whitespace-normal break-words text-sm font-medium leading-snug">{kit.title}</h3>
+        <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+          <span>{kit.flashcards?.length || 0} flashcards</span>
+          <span>{kit.chapters?.length || 0} chapters</span>
+        </p>
+      </button>
+      <div className="mt-2 flex justify-end">
+        <div className="relative">
           <button type="button" onClick={() => setMenu(menu === 'kit:' + kit.id ? null : 'kit:' + kit.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
+          {menu === 'kit:' + kit.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
+            <button type="button" onClick={() => { void renameStudyKit(kit); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
+            <button type="button" onClick={() => { void shareStudyKit(kit); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
+            <button type="button" onClick={() => { setDeleteDialog({ kind: 'kit', id: kit.id, name: kit.title }); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
+            <button type="button" onClick={() => { window.location.assign('/kit/' + kit.id); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><BookOpen size={13}/> Open</button>
+          </div>}
+        </div>
+      </div>
+    </div>
+  );lick={() => setMenu(menu === 'kit:' + kit.id ? null : 'kit:' + kit.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
           {menu === 'kit:' + kit.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
             <button type="button" onClick={() => { void renameStudyKit(kit); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
             <button type="button" onClick={() => { void shareStudyKit(kit); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
@@ -1190,18 +1225,8 @@ export default function FilesPage() {
           <div className="relative">
             <button type="button" onClick={() => setMenu(menu === 'doc:' + document.id ? null : 'doc:' + document.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
             {menu === 'doc:' + document.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
-              <button type="button" onClick={() => openMoveDialog({kind:'document',id:document.id,name:document.title,currentFolderId:document.folder_id})} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Move size={13}/> Move</button>
-              <button type="button" onClick={() => { const next = window.prompt('Rename document', document.title)?.trim(); if (next && next !== document.title) void (async () => { setBusy(true); try { await api(`/rest/v1/documents?id=eq.${document.id}`, { method: 'PATCH', body: JSON.stringify({ title: next }) }); setDocuments(prev => prev.map(item => item.id === document.id ? { ...item, title: next } : item)); } catch (e) { setError(e instanceof Error ? e.message : 'Could not rename document.'); } finally { setBusy(false); } })(); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
-              <button type="button" onClick={() => { setDialog({ kind:'document-share', id:document.id }); setDialogValue(''); setSharedUser([]); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
-              <button type="button" onClick={() => { setDeleteDialog({ kind:'document', id:document.id, name:document.title }); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
-            </div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const fileCard = (file: FileRow) => {
+              <button type="button" onClick={() =>   const fileCard = (file: FileRow) => {
+    const isPdf = file.type.toLowerCase().includes('pdf') || /\.pdf$/i.test(file.name);
     const Icon = iconFor(file.type, file.name);
     return (
       <div key={file.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
@@ -1211,19 +1236,23 @@ export default function FilesPage() {
           onClick={() => void openFile(file)}
           onKeyDown={e=>{if(e.key==='Enter'||e.key===' ') void openFile(file)}}
           className="w-full text-left"
-          aria-label={`Open ${file.name}`}
+          aria-label={\`Open \${file.name}\`}
         >
-          <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60">
-            <Icon size={34} className="text-primary" />
-          </div>
+          {isPdf ? (
+            <PdfCardPreview file={file} />
+          ) : (
+            <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60">
+              <Icon size={34} className="text-primary" />
+            </div>
+          )}
           {editingItem?.kind === 'file' && editingItem.id === file.id ? (
             <input autoFocus value={editingValue} onChange={e=>setEditingValue(e.target.value)}
               onKeyDown={e=>{if(e.key==='Enter') void saveInlineRename(); if(e.key==='Escape') setEditingItem(null);}}
               onBlur={()=>void saveInlineRename()} onDoubleClick={e=>e.stopPropagation()}
               className="mt-3 h-7 w-full rounded border border-input bg-background px-1.5 text-sm outline-none" />
           ) : (
-            <p onDoubleClick={(e)=>{e.stopPropagation(); setEditingItem({kind:'file',id:file.id}); setEditingValue(file.name);}} className="mt-3 truncate text-sm font-medium" title={file.name}>
-              {file.name.length > 15 ? file.name.slice(0, 15) + '…' : file.name}
+            <p onDoubleClick={(e)=>{e.stopPropagation(); setEditingItem({kind:'file',id:file.id}); setEditingValue(file.name);}} className="mt-3 whitespace-normal break-words text-sm font-medium leading-snug" title={file.name}>
+              {file.name}
             </p>
           )}
           <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -1246,6 +1275,37 @@ export default function FilesPage() {
               {menu === file.id && (
                 <div className="absolute right-0 top-8 z-20 w-48 rounded-lg border border-border bg-card p-1 shadow-xl">
                   <button type="button" onClick={() => openMoveDialog({kind:'file',id:file.id,name:file.name,currentFolderId:file.folder_id})} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Move size={13}/> Move</button>
+                  <button type="button" onClick={() => { void download(file); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Download size={13}/> Download</button>
+                  <button type="button" onClick={() => { setEditingItem({kind:'file',id:file.id}); setEditingValue(file.name); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDialog({ kind:'share', fileId:file.id });
+                      setDialogValue('');
+                      setMenu(null);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"
+                  >
+                    <Share2 size={13}/> Share
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      setDeleteDialog({ kind: 'file', id: file.id, name: file.name });
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"
+                  >
+                    <Trash2 size={13}/> Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };{13}/> Move</button>
                   <button type="button" onClick={() => { void download(file); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Download size={13}/> Download</button>
                   <button type="button" onClick={() => { setEditingItem({kind:'file',id:file.id}); setEditingValue(file.name); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
                   <button
