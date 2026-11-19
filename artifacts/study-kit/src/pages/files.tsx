@@ -413,6 +413,67 @@ function PdfCardPreview({ file }: { file: FileRow }) {
   );
 }
 
+function StudyKitCardPreview({ flashcards }: { flashcards: unknown[] }) {
+  const getTerm = (card: unknown): string => {
+    if (typeof card === 'string') return card.trim();
+    if (!card || typeof card !== 'object') return '';
+    const item = card as Record<string, any>;
+    const candidates = [
+      item.term,
+      item.front,
+      item.question,
+      item.word,
+      item.title,
+      item.prompt,
+      item.text,
+      item.content?.term,
+      item.content?.front,
+      item.data?.front,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+      if (candidate && typeof candidate === 'object' && typeof candidate.text === 'string' && candidate.text.trim()) {
+        return candidate.text.trim();
+      }
+    }
+    return '';
+  };
+
+  const terms = flashcards.slice(0, 3).map(getTerm);
+  const hasFlashcards = flashcards.length > 0;
+
+  return (
+    <div className="grid h-24 grid-cols-3 gap-2 overflow-hidden rounded-lg border border-border/60 bg-white p-2 dark:bg-zinc-950">
+      {hasFlashcards ? (
+        Array.from({ length: 3 }, (_, index) => {
+          const term = terms[index];
+          return (
+            <div key={index} className="flex min-w-0 flex-col justify-between rounded-md border border-zinc-200 bg-zinc-50 p-1.5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+              <div className="h-1 w-5 rounded-full bg-primary/50" />
+              {term ? (
+                <p className="line-clamp-3 break-words text-[7px] font-medium leading-tight text-zinc-700 dark:text-zinc-200">
+                  {term.split(/\\s+/).slice(0, 5).join(' ')}
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  <div className="h-1 rounded bg-zinc-200 dark:bg-zinc-700" />
+                  <div className="h-1 w-2/3 rounded bg-zinc-200 dark:bg-zinc-700" />
+                </div>
+              )}
+            </div>
+          );
+        })
+      ) : (
+        <div className="col-span-3 grid grid-cols-3 gap-2">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="rounded-md border border-dashed border-zinc-300 bg-zinc-50/70 dark:border-zinc-700 dark:bg-zinc-900/60" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function FilesPage() {
   const me = getStoredUser();
   const [folders, setFolders] = useState<FolderRow[]>([]);
@@ -1147,19 +1208,7 @@ export default function FilesPage() {
   const kitCard = (kit: LocalKit) => (
     <div key={kit.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
       <button type="button" onClick={() => window.location.assign('/kit/' + kit.id)} className="w-full text-left">
-        <div className="grid h-24 grid-cols-3 gap-2 overflow-hidden rounded-lg border border-border/60 bg-white p-2 dark:bg-zinc-950">
-          {(kit.flashcards?.length || kit.chapters?.length) ? (
-            <div className="col-span-3 grid grid-cols-3 gap-2">
-              {Array.from({ length: 6 }, (_, index) => (
-                <div key={index} className="rounded border border-zinc-200 bg-zinc-50 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
-                  <div className="mx-1.5 mt-2 h-1 rounded bg-zinc-300 dark:bg-zinc-600" />
-                  <div className="mx-1.5 mt-1.5 h-1 rounded bg-zinc-200 dark:bg-zinc-700" />
-                  <div className="mx-1.5 mt-1 h-1 w-2/3 rounded bg-zinc-200 dark:bg-zinc-700" />
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
+        <StudyKitCardPreview flashcards={kit.flashcards || []} />
         <h3 className="mt-3 whitespace-normal break-words text-sm font-medium leading-snug">{kit.title}</h3>
         <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
           <span>{kit.flashcards?.length || 0} flashcards</span>
