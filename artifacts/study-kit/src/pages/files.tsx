@@ -452,7 +452,7 @@ function StudyKitCardPreview({ flashcards }: { flashcards: unknown[] }) {
               <div className="h-1 w-5 rounded-full bg-primary/50" />
               {term ? (
                 <p className="line-clamp-3 break-words text-[7px] font-medium leading-tight text-zinc-700 dark:text-zinc-200">
-                  {term.split(/\\s+/).slice(0, 5).join(' ')}
+                  {term.split(/\s+/).slice(0, 5).join(' ')}
                 </p>
               ) : (
                 <div className="space-y-1">
