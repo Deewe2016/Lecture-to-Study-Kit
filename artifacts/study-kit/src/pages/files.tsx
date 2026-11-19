@@ -279,6 +279,106 @@ function FileViewer({ file, src, onClose, annotated, startAnnotating, onAnnotati
   );
 }
 
+
+function WhiteboardCardPreview({ content }: { content: any }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const elements = Array.isArray(content?.elements)
+    ? content.elements.filter((element: any) => element && !element.isDeleted)
+    : [];
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPreviewUrl(null);
+    if (!elements.length) return;
+
+    void (async () => {
+      const module = await import("@excalidraw/excalidraw");
+      const svg = await module.exportToSvg({
+        elements,
+        appState: { ...(content?.appState || {}), exportWithDarkMode: false },
+        files: content?.files || {},
+        exportPadding: 8,
+      });
+      if (cancelled) return;
+      objectUrl = URL.createObjectURL(new Blob([svg.outerHTML], { type: "image/svg+xml" }));
+      setPreviewUrl(objectUrl);
+    })().catch(() => {
+      if (!cancelled) setPreviewUrl(null);
+    });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [content]);
+
+  return (
+    <div className="flex h-24 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-white dark:bg-zinc-950">
+      {previewUrl && elements.length > 0 ? (
+        <img src={previewUrl} alt="" aria-hidden="true" className="h-full w-full object-contain" />
+      ) : null}
+    </div>
+  );
+}
+
+function getDocumentPreviewLines(content: unknown): Array<{ text: string; kind: string }> {
+  let parsed: any = content;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return parsed.trim() ? [{ text: parsed.trim(), kind: "paragraph" }] : [];
+    }
+  }
+
+  const lines: Array<{ text: string; kind: string }> = [];
+  const collectText = (node: any): string => {
+    if (!node) return "";
+    if (node.type === "text") return typeof node.text === "string" ? node.text : "";
+    if (!Array.isArray(node.content)) return "";
+    return node.content.map(collectText).filter(Boolean).join(" ");
+  };
+
+  const visit = (node: any) => {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "paragraph" || node.type === "heading" || node.type === "listItem" || node.type === "blockquote") {
+      const text = collectText(node).trim();
+      if (text) lines.push({ text, kind: node.type });
+      return;
+    }
+    if (Array.isArray(node.content)) node.content.forEach(visit);
+  };
+
+  visit(parsed);
+  return lines.slice(0, 8);
+}
+
+function DocumentCardPreview({ content }: { content: unknown }) {
+  const lines = useMemo(() => getDocumentPreviewLines(content), [content]);
+
+  return (
+    <div className="h-24 overflow-hidden rounded-lg border border-border/60 bg-white px-3 py-2 shadow-inner">
+      {lines.length > 0 ? (
+        <div className="space-y-1.5">
+          {lines.map((line, index) => (
+            <p
+              key={index}
+              className={line.kind === "heading"
+                ? "overflow-hidden text-ellipsis whitespace-nowrap text-[7px] font-bold leading-tight text-zinc-800"
+                : line.kind === "listItem"
+                  ? "overflow-hidden text-ellipsis whitespace-nowrap pl-1 text-[6px] leading-tight text-zinc-600"
+                  : "overflow-hidden text-ellipsis whitespace-nowrap text-[6px] leading-tight text-zinc-600"}
+            >
+              {line.kind === "listItem" ? "• " : ""}{line.text}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function FilesPage() {
   const me = getStoredUser();
   const [folders, setFolders] = useState<FolderRow[]>([]);
@@ -1060,8 +1160,8 @@ export default function FilesPage() {
   const whiteboardCard = (whiteboard: WhiteboardRow) => (
     <div key={whiteboard.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
       <button type="button" onClick={() => window.location.assign('/whiteboard?id=' + encodeURIComponent(whiteboard.id))} className="w-full text-left">
-        <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60"><Pencil size={34} className="text-primary" /></div>
-        <p className="mt-3 truncate text-sm font-medium" title={whiteboard.title}>{whiteboard.title.length > 15 ? whiteboard.title.slice(0, 15) + '…' : whiteboard.title}</p>
+        <WhiteboardCardPreview content={whiteboard.content} />
+        <p className="mt-3 whitespace-normal break-words text-sm font-medium leading-snug" title={whiteboard.title}>{whiteboard.title}</p>
         <p className="mt-1 text-[10px] text-muted-foreground">Whiteboard · {formatDate(whiteboard.updated_at)}</p>
       </button>
       {whiteboard.owner_id === me?.id && <div className="mt-3 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
@@ -1081,8 +1181,8 @@ export default function FilesPage() {
   const documentCard = (document: DocumentRow) => (
     <div key={document.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
       <button type="button" onClick={() => window.location.assign('/document/' + document.id)} className="w-full text-left">
-        <div className="flex h-24 items-center justify-center rounded-lg bg-secondary/60"><FileText size={34} className="text-primary" /></div>
-        <p className="mt-3 truncate text-sm font-medium" title={document.title}>{document.title.length > 15 ? document.title.slice(0, 15) + '…' : document.title}</p>
+        <DocumentCardPreview content={document.content} />
+        <p className="mt-3 whitespace-normal break-words text-sm font-medium leading-snug" title={document.title}>{document.title}</p>
         <p className="mt-1 text-[10px] text-muted-foreground">Document · {formatDate(document.updated_at)}</p>
       </button>
       {document.owner_id === me?.id && (
