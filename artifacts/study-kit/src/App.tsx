@@ -4133,11 +4133,6 @@ function Router() {
           />
 
           <Route
-            path="/new"
-            component={NewPage}
-          />
-
-          <Route
             path="/document/:id"
             component={DocumentPage}
           />
