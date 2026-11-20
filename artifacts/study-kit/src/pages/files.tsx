@@ -1300,7 +1300,7 @@ export default function FilesPage() {
     try {
       const source = (await readSource()).trim();
       if (!source) throw new Error('No readable text was found in this file.');
-      const title = fileName.replace(/\\.[^.]+$/, '').trim() || fileName;
+      const title = fileName.replace(/\.[^.]+$/, '').trim() || fileName;
       const response = await fetch('/api/generate-kit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1507,9 +1507,8 @@ export default function FilesPage() {
             </div>
           )}
         </div>
-      </div>
         {isPdf && generationPopup('file:' + file.id)}
-    </div>
+      </div>
     );
   };
 
