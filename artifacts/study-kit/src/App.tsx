@@ -836,7 +836,6 @@ function Shell({
 
   const nav = [
     { href: '/files', label: 'Files', icon: Folder },
-    { href: '/new', label: 'New Study Kit', icon: Plus },
     { href: '/calendar', label: 'Calendar', icon: CalendarDays },
     { href: '/chat', label: 'Chat', icon: MessageCircle },
     { href: '/ai-chat', label: 'AI Chat', icon: Sparkles },
@@ -873,11 +872,6 @@ function Shell({
             >
               <Icon className="shrink-0" size={17} strokeWidth={1.8} />
               <span className="sidebar-nav-label">{label}</span>
-              {href === '/new' && (
-                <span className="sidebar-nav-trailing ml-auto text-primary">
-                  <ArrowRight size={14} />
-                </span>
-              )}
             </Link>
           ))}
         </nav>
@@ -1046,14 +1040,6 @@ function LibraryPage() {
           </p>
         </div>
 
-        <Link
-          href="/new"
-          className="focus-ring inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5"
-          data-testid="link-create-kit"
-        >
-          <Plus size={17} />
-          Create a study kit
-        </Link>
       </div>
 
       <div className="mt-14 flex items-center justify-between border-b border-border pb-3">
@@ -1093,23 +1079,6 @@ function LibraryPage() {
           />
         ))}
 
-        <Link
-          href="/new"
-          className="focus-ring group flex min-h-[220px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/30 p-6 text-center transition-colors hover:border-primary/60 hover:bg-card/60"
-          data-testid="link-empty-create-kit"
-        >
-          <span className="flex h-11 w-11 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors group-hover:border-primary group-hover:text-primary">
-            <Plus size={19} />
-          </span>
-
-          <span className="mt-4 text-sm font-medium">
-            Start another kit
-          </span>
-
-          <span className="mt-1 text-xs text-muted-foreground">
-            Slides, notes, or pasted text
-          </span>
-        </Link>
       </div>
 
       <div className="mt-14 grid gap-4 md:grid-cols-3">
