@@ -35,6 +35,52 @@ type LocalKit = {
   createdAt?: string;
 };
 
+type GenerationKind = 'flashcards' | 'quiz' | 'studyPlan';
+type GenerationResult = {
+  flashcards: any[];
+  questions: any[];
+  reviewPlan: any[];
+  chapters: any[];
+};
+type GenerationJob = {
+  cardId: string;
+  fileName: string;
+  kind: GenerationKind;
+  status: 'generating' | 'ready' | 'error';
+  progress: number;
+  result?: GenerationResult;
+  error?: string;
+};
+type GeneratedPanel = {
+  fileName: string;
+  kind: GenerationKind;
+  result: GenerationResult;
+};
+
+function extractDocumentText(value: unknown): string {
+  if (typeof value === 'string') {
+    try {
+      return extractDocumentText(JSON.parse(value));
+    } catch {
+      return value;
+    }
+  }
+  if (Array.isArray(value)) return value.map(extractDocumentText).filter(Boolean).join('\n');
+  if (!value || typeof value !== 'object') return '';
+
+  const node = value as Record<string, any>;
+  if (Array.isArray(node.ops)) {
+    return node.ops.map((op: any) => typeof op?.insert === 'string' ? op.insert : extractDocumentText(op?.insert)).join('');
+  }
+  if (typeof node.text === 'string') return node.text;
+  const children = Array.isArray(node.content)
+    ? node.content.map(extractDocumentText).filter(Boolean).join(' ')
+    : '';
+  return /^(doc|paragraph|heading|blockquote|listItem|bulletList|orderedList|codeBlock|tableRow)$/i.test(String(node.type || ''))
+    ? children + '\n'
+    : children;
+}
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 function readLocalKits(): LocalKit[] {
@@ -496,6 +542,8 @@ export default function FilesPage() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [generationJob, setGenerationJob] = useState<GenerationJob | null>(null);
+  const [generatedPanel, setGeneratedPanel] = useState<GeneratedPanel | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [modal, setModal] = useState<{ file: FileRow; url?: string; annotating?: boolean } | null>(null);
   const [annotatedFileIds, setAnnotatedFileIds] = useState<Set<string>>(() => new Set());
@@ -546,6 +594,16 @@ export default function FilesPage() {
   };
 
   useEffect(() => { void load(); }, [me?.id]);
+
+  useEffect(() => {
+    if (!generationJob || generationJob.status !== 'generating') return;
+    const timer = window.setInterval(() => {
+      setGenerationJob(current => current && current.status === 'generating'
+        ? { ...current, progress: Math.min(90, current.progress + 4) }
+        : current);
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [generationJob?.cardId, generationJob?.kind, generationJob?.status]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedGlobalSearch(globalSearch.trim()), 300);
@@ -1205,6 +1263,106 @@ export default function FilesPage() {
     }
   };
 
+  const readPdfText = async (file: FileRow): Promise<string> => {
+    const signed = await api<{ signedURL: string }>(
+      '/storage/v1/object/sign/user-files/' + file.storage_path.split('/').map(encodeURIComponent).join('/'),
+      { method: 'POST', body: JSON.stringify({ expiresIn: 3600 }) },
+    );
+    const src = signed.signedURL.startsWith('http') ? signed.signedURL : url + '/storage/v1' + signed.signedURL;
+    const pdf = await pdfjsLib.getDocument(src).promise;
+    const pages: string[] = [];
+    try {
+      for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 40); pageNumber += 1) {
+        const page = await pdf.getPage(pageNumber);
+        const textContent = await page.getTextContent();
+        const pageText = (textContent.items as Array<{ str?: string }>)
+          .map(item => item.str || '')
+          .filter(Boolean)
+          .join(' ');
+        if (pageText.trim()) pages.push(pageText.trim());
+        if (pages.join('\n').length >= 50000) break;
+      }
+    } finally {
+      await pdf.destroy();
+    }
+    return pages.join('\n\n').slice(0, 50000).trim();
+  };
+
+  const runCardGeneration = async (
+    cardId: string,
+    fileName: string,
+    kind: GenerationKind,
+    readSource: () => Promise<string>,
+  ) => {
+    setMenu(null);
+    setError('');
+    setGenerationJob({ cardId, fileName, kind, status: 'generating', progress: 8 });
+    try {
+      const source = (await readSource()).trim();
+      if (!source) throw new Error('No readable text was found in this file.');
+      const title = fileName.replace(/\\.[^.]+$/, '').trim() || fileName;
+      const response = await fetch('/api/generate-kit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          planDays: 7,
+          materials: [{ name: fileName, kind: 'notes', text: source }],
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || 'Could not generate study material.');
+      const result: GenerationResult = {
+        flashcards: Array.isArray(payload?.flashcards) ? payload.flashcards : [],
+        questions: Array.isArray(payload?.questions) ? payload.questions : [],
+        reviewPlan: Array.isArray(payload?.reviewPlan) ? payload.reviewPlan : [],
+        chapters: Array.isArray(payload?.chapters) ? payload.chapters : [],
+      };
+      const count = kind === 'flashcards' ? result.flashcards.length
+        : kind === 'quiz' ? result.questions.length
+          : result.reviewPlan.length;
+      if (!count) throw new Error('The generator did not return any ' + (kind === 'studyPlan' ? 'study plan days.' : kind + '.'));
+      setGenerationJob(current => current?.cardId === cardId && current.kind === kind
+        ? { ...current, status: 'ready', progress: 100, result }
+        : current);
+    } catch (generationError) {
+      setGenerationJob(current => current?.cardId === cardId && current.kind === kind
+        ? { ...current, status: 'error', error: generationError instanceof Error ? generationError.message : 'Generation failed.' }
+        : current);
+    }
+  };
+
+  const generationPopup = (cardId: string) => {
+    if (!generationJob || generationJob.cardId !== cardId) return null;
+    const job = generationJob;
+    const label = job.kind === 'flashcards' ? 'Flashcards' : job.kind === 'quiz' ? 'Quiz' : 'Study Plan';
+    const progressClass = job.progress < 20 ? 'w-1/5'
+      : job.progress < 40 ? 'w-2/5'
+        : job.progress < 60 ? 'w-3/5'
+          : job.progress < 80 ? 'w-4/5'
+            : 'w-11/12';
+    return (
+      <div className="absolute left-0 right-0 top-full z-50 mt-2 rounded-xl border border-border bg-card p-3 shadow-2xl">
+        <p className="truncate text-xs font-semibold" title={job.fileName}>{job.fileName}</p>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {job.status === 'generating' ? 'Generating ' + label + '...' : job.status === 'ready' ? label + ' ready' : 'Could not generate ' + label}
+        </p>
+        {job.status === 'generating' && (
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-secondary">
+            <div className={`h-full rounded-full bg-primary transition-all duration-300 ${progressClass}`} />
+          </div>
+        )}
+        {job.status === 'ready' && job.result && (
+          <button type="button" onClick={() => setGeneratedPanel({ fileName: job.fileName, kind: job.kind, result: job.result! })}
+            className="mt-3 w-full rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90">
+            Open {label}
+          </button>
+        )}
+        {job.status === 'error' && <p className="mt-2 text-[11px] text-red-300">{job.error}</p>}
+      </div>
+    );
+  };
+
   const kitCard = (kit: LocalKit) => (
     <div key={kit.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
       <button type="button" onClick={() => window.location.assign('/kit/' + kit.id)} className="w-full text-left">
@@ -1271,7 +1429,7 @@ export default function FilesPage() {
   );
 
   const documentCard = (document: DocumentRow) => (
-    <div key={document.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
+    <div key={document.id} className="group relative rounded-xl border border-border bg-card p-4 hover:border-primary/40">
       <button type="button" onClick={() => window.location.assign('/document/' + document.id)} className="w-full text-left">
         <DocumentCardPreview content={document.content} />
         <p className="mt-3 whitespace-normal break-words text-sm font-medium leading-snug" title={document.title}>{document.title}</p>
@@ -1282,6 +1440,9 @@ export default function FilesPage() {
           <div className="relative">
             <button type="button" onClick={() => setMenu(menu === 'doc:' + document.id ? null : 'doc:' + document.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="More options"><MoreHorizontal size={14}/></button>
             {menu === 'doc:' + document.id && <div className="absolute right-0 top-8 z-20 w-40 rounded-lg border border-border bg-card p-1 shadow-xl">
+              <button type="button" onClick={() => void runCardGeneration('document:' + document.id, document.title, 'flashcards', async () => extractDocumentText(document.content))} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary">Generate Flashcards</button>
+              <button type="button" onClick={() => void runCardGeneration('document:' + document.id, document.title, 'quiz', async () => extractDocumentText(document.content))} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary">Generate Quiz</button>
+              <button type="button" onClick={() => void runCardGeneration('document:' + document.id, document.title, 'studyPlan', async () => extractDocumentText(document.content))} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary">Generate Study Plan</button>
               <button type="button" onClick={() => openMoveDialog({kind:'document',id:document.id,name:document.title,currentFolderId:document.folder_id})} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Move size={13}/> Move</button>
               <button type="button" onClick={() => { const next = window.prompt('Rename document', document.title)?.trim(); if (next && next !== document.title) void (async () => { setBusy(true); try { await api(`/rest/v1/documents?id=eq.${document.id}`, { method: 'PATCH', body: JSON.stringify({ title: next }) }); setDocuments(prev => prev.map(item => item.id === document.id ? { ...item, title: next } : item)); } catch (e) { setError(e instanceof Error ? e.message : 'Could not rename document.'); } finally { setBusy(false); } })(); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
               <button type="button" onClick={() => { setDialog({ kind:'document-share', id:document.id }); setDialogValue(''); setSharedUser([]); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
@@ -1290,6 +1451,7 @@ export default function FilesPage() {
           </div>
         </div>
       )}
+      {generationPopup('document:' + document.id)}
     </div>
   );
 
@@ -1297,7 +1459,7 @@ export default function FilesPage() {
     const isPdf = file.type.toLowerCase().includes('pdf') || /\.pdf$/i.test(file.name);
     const Icon = iconFor(file.type, file.name);
     return (
-      <div key={file.id} className="group rounded-xl border border-border bg-card p-4 hover:border-primary/40">
+      <div key={file.id} className="group relative rounded-xl border border-border bg-card p-4 hover:border-primary/40">
         <div role="button" tabIndex={0} onClick={() => void openFile(file)}
           onKeyDown={e=>{if(e.key==='Enter'||e.key===' ') void openFile(file)}}
           className="w-full text-left" aria-label={'Open ' + file.name}>
@@ -1334,6 +1496,11 @@ export default function FilesPage() {
                   <button type="button" onClick={() => { void download(file); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Download size={13}/> Download</button>
                   <button type="button" onClick={() => { setEditingItem({kind:'file',id:file.id}); setEditingValue(file.name); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Pencil size={13}/> Rename</button>
                   <button type="button" onClick={() => { setDialog({ kind:'share', fileId:file.id }); setDialogValue(''); setMenu(null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary"><Share2 size={13}/> Share</button>
+                  {isPdf && <>
+                    <button type="button" onClick={() => void runCardGeneration('file:' + file.id, file.name, 'flashcards', () => readPdfText(file))} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary">Generate Flashcards</button>
+                    <button type="button" onClick={() => void runCardGeneration('file:' + file.id, file.name, 'quiz', () => readPdfText(file))} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary">Generate Quiz</button>
+                    <button type="button" onClick={() => void runCardGeneration('file:' + file.id, file.name, 'studyPlan', () => readPdfText(file))} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-secondary">Generate Study Plan</button>
+                  </>}
                   <button type="button" onClick={() => { setMenu(null); setDeleteDialog({ kind: 'file', id: file.id, name: file.name }); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-red-300 hover:bg-secondary"><Trash2 size={13}/> Delete</button>
                 </div>
               )}
@@ -1341,6 +1508,8 @@ export default function FilesPage() {
           )}
         </div>
       </div>
+        {isPdf && generationPopup('file:' + file.id)}
+    </div>
     );
   };
 
@@ -1355,7 +1524,6 @@ export default function FilesPage() {
             <button type="button" onClick={() => { setDialog({kind:'folder'}); setDialogValue(''); setNewMenuOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary"><Folder size={16} className="text-muted-foreground" /> New Folder</button>
             <button type="button" onClick={() => void createDocument()} disabled={busy} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary disabled:opacity-50"><FileText size={16} className="text-muted-foreground" /> New Document</button>
             <button type="button" onClick={() => void createWhiteboard()} disabled={busy} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary disabled:opacity-50"><Pencil size={16} className="text-muted-foreground" /> New Whiteboard</button>
-            <button type="button" onClick={() => { setNewMenuOpen(false); window.location.assign('/new'); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary"><BookOpen size={16} className="text-muted-foreground" /> New Study Kit</button>
             <label className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-secondary"><UploadCloud size={16} className="shrink-0" /> Upload File<input type="file" className="hidden" disabled={busy} onChange={e => { const f=e.target.files?.[0]; if(f) void upload(f); e.currentTarget.value=''; }}/></label>
           </div>}
         </div>
@@ -1408,6 +1576,60 @@ export default function FilesPage() {
       </div>
 
       {modal?.url && <FileViewer file={modal.file} src={modal.url} onClose={() => setModal(null)} annotated={annotatedFileIds.has(modal.file.id)} startAnnotating={Boolean(modal.annotating)} onAnnotationSaved={(fileId) => setAnnotatedFileIds(previous => new Set(previous).add(fileId))} onRefreshSignedUrl={() => refreshSignedUrl(modal.file)} />}
+
+      <aside
+        aria-hidden={!generatedPanel}
+        className={`fixed inset-y-0 right-0 z-[130] flex w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl transition-transform duration-300 ${generatedPanel ? 'translate-x-0' : 'pointer-events-none translate-x-full'}`}
+      >
+        {generatedPanel && <>
+          <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold">{generatedPanel.kind === 'flashcards' ? 'Flashcards' : generatedPanel.kind === 'quiz' ? 'Quiz' : 'Study Plan'}</h2>
+              <p className="mt-1 truncate text-xs text-muted-foreground" title={generatedPanel.fileName}>{generatedPanel.fileName}</p>
+            </div>
+            <button type="button" onClick={() => setGeneratedPanel(null)} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Close generated content"><X size={18}/></button>
+          </header>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
+            {generatedPanel.kind === 'flashcards' && generatedPanel.result.flashcards.map((card, index) => (
+              <article key={card.id || index} className="rounded-xl border border-border bg-background p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Card {index + 1}</p>
+                <h3 className="mt-2 text-sm font-semibold leading-snug">{card.front}</h3>
+                <p className="mt-3 border-t border-border pt-3 text-sm leading-relaxed text-muted-foreground">{card.back}</p>
+                {card.hint && <p className="mt-2 text-xs text-muted-foreground">Hint: {card.hint}</p>}
+              </article>
+            ))}
+            {generatedPanel.kind === 'quiz' && generatedPanel.result.questions.map((question, index) => (
+              <article key={question.id || index} className="rounded-xl border border-border bg-background p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Question {index + 1}</p>
+                <h3 className="mt-2 text-sm font-semibold leading-snug">{question.prompt}</h3>
+                <div className="mt-3 space-y-2">
+                  {(question.options || []).map((option: string, optionIndex: number) => (
+                    <div key={optionIndex} className={`rounded-lg border px-3 py-2 text-xs ${optionIndex === question.answer ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border text-muted-foreground'}`}>
+                      {String.fromCharCode(65 + optionIndex)}. {option}
+                    </div>
+                  ))}
+                </div>
+                {question.explanation && <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{question.explanation}</p>}
+              </article>
+            ))}
+            {generatedPanel.kind === 'studyPlan' && generatedPanel.result.reviewPlan.map((day, index) => (
+              <article key={day.day || index} className="rounded-xl border border-border bg-background p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Day {day.day || index + 1}</p>
+                    <h3 className="mt-1 text-sm font-semibold">{day.focus || day.label}</h3>
+                  </div>
+                  {day.minutes && <span className="shrink-0 text-[10px] text-muted-foreground">{day.minutes} min</span>}
+                </div>
+                {day.label && <p className="mt-1 text-xs text-muted-foreground">{day.label}</p>}
+                <ul className="mt-3 space-y-2">
+                  {(day.tasks || []).map((task: string, taskIndex: number) => <li key={taskIndex} className="flex gap-2 text-xs leading-relaxed"><span className="text-primary">•</span><span>{task}</span></li>)}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </>}
+      </aside>
 
       {deleteDialog && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-5">
         <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
