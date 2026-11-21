@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
-  ChevronRight, Download, File, FileArchive, FileAudio, FileImage, FileText,
+  ChevronRight, ChevronLeft, Check, Clock3, RotateCcw, Download, File, FileArchive, FileAudio, FileImage, FileText,
   FileVideo, Folder, FolderOpen, Grid2X2, List, MoreHorizontal, Pencil, Pin, Move,
   Plus, Search, Share2, Trash2, UploadCloud, X, ZoomIn, ZoomOut, BookOpen, FilePlus2, ChevronDown
 } from 'lucide-react';
@@ -35,6 +35,18 @@ type LocalKit = {
   createdAt?: string;
 };
 
+type Progress = {
+  reviewed: string[];
+  completedTasks: string[];
+  answers: Record<string, number>;
+};
+type ViewerKit = {
+  title: string;
+  chapters: any[];
+  flashcards: any[];
+  questions: any[];
+  reviewPlan: any[];
+};
 type GenerationKind = 'flashcards' | 'quiz' | 'studyPlan';
 type GenerationResult = {
   flashcards: any[];
@@ -56,6 +68,580 @@ type GeneratedPanel = {
   kind: GenerationKind;
   result: GenerationResult;
 };
+
+function ReviewPlan({
+  kit,
+  progress,
+  update,
+}: {
+  kit: ViewerKit;
+  progress: Progress;
+  update: (
+    patch: Partial<Progress>,
+  ) => void;
+}) {
+  const toggle = (
+    task: string,
+  ) =>
+    update({
+      completedTasks:
+        progress.completedTasks.includes(
+          task,
+        )
+          ? progress.completedTasks.filter(
+              (t) => t !== task,
+            )
+          : [
+              ...progress.completedTasks,
+              task,
+            ],
+    });
+
+  const done =
+    progress.completedTasks.length;
+
+  return (
+    <div className="max-w-4xl">
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[.2em] text-primary">
+            A week that compounds
+          </p>
+
+          <h2 className="mt-3 font-serif text-3xl tracking-[-.03em]">
+            Seven gentle steps.
+          </h2>
+
+          <p className="mt-2 text-sm text-muted-foreground">
+            Short sessions, spaced just
+            enough to make the ideas stick.
+          </p>
+        </div>
+
+        <span className="font-mono text-xs text-muted-foreground">
+          {done}/
+          {kit.reviewPlan.flatMap(
+            (d) => d.tasks,
+          ).length}{' '}
+          tasks
+        </span>
+      </div>
+
+      <div className="mt-8 space-y-3">
+        {kit.reviewPlan.map(
+          (day) => (
+            <div
+              key={day.day}
+              className={`rounded-xl border p-5 transition-colors ${
+                day.day === 1
+                  ? 'border-primary/40 bg-primary/[.05]'
+                  : 'border-border bg-card'
+              }`}
+            >
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                <div className="flex items-center gap-3 sm:w-44">
+                  <span
+                    className={`flex h-9 w-9 items-center justify-center rounded-full font-mono text-xs ${
+                      day.day === 1
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-secondary text-muted-foreground'
+                    }`}
+                  >
+                    {String(
+                      day.day,
+                    ).padStart(2, '0')}
+                  </span>
+
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {day.label}
+                    </p>
+
+                    <p className="text-sm font-semibold">
+                      {day.focus}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex-1 space-y-2">
+                  {day.tasks.map(
+                    (task) => (
+                      <label
+                        key={task}
+                        className="flex cursor-pointer items-start gap-3 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={progress.completedTasks.includes(
+                            task,
+                          )}
+                          onChange={() =>
+                            toggle(
+                              task,
+                            )
+                          }
+                          className="peer sr-only"
+                          data-testid={`checkbox-task-${day.day}-${task.slice(0, 8)}`}
+                        />
+
+                        <span
+                          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                            progress.completedTasks.includes(
+                              task,
+                            )
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'border-muted-foreground/50'
+                          }`}
+                        >
+                          {progress.completedTasks.includes(
+                            task,
+                          ) && (
+                            <Check
+                              size={
+                                11
+                              }
+                            />
+                          )}
+                        </span>
+
+                        <span
+                          className={
+                            progress.completedTasks.includes(
+                              task,
+                            )
+                              ? 'text-muted-foreground line-through'
+                              : 'text-foreground'
+                          }
+                        >
+                          {task}
+                        </span>
+                      </label>
+                    ),
+                  )}
+                </div>
+
+                <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Clock3 size={13} />
+                  {day.minutes} min
+                </span>
+              </div>
+            </div>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Flashcards({
+  kit,
+  progress,
+  update,
+}: {
+  kit: ViewerKit;
+  progress: Progress;
+  update: (
+    patch: Partial<Progress>,
+  ) => void;
+}) {
+  const [index, setIndex] =
+    useState(0);
+
+  const [revealed, setRevealed] =
+    useState(false);
+
+  const card =
+    kit.flashcards[index];
+
+  const reviewed =
+    progress.reviewed.includes(
+      card.id,
+    );
+
+  const move = (
+    direction: number,
+  ) => {
+    setRevealed(false);
+
+    setIndex(
+      (index +
+        direction +
+        kit.flashcards.length) %
+        kit.flashcards.length,
+    );
+  };
+
+  const mark = () => {
+    if (!reviewed) {
+      update({
+        reviewed: [
+          ...progress.reviewed,
+          card.id,
+        ],
+      });
+    }
+
+    setRevealed(true);
+  };
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[.2em] text-primary">
+            Single-focus mode
+          </p>
+
+          <h2 className="mt-3 font-serif text-3xl tracking-[-.03em]">
+            One card at a time.
+          </h2>
+        </div>
+
+        <span className="font-mono text-xs text-muted-foreground">
+          {index + 1} /{' '}
+          {kit.flashcards.length}
+        </span>
+      </div>
+
+      <div className="mt-8 paper-surface relative min-h-[310px] rounded-2xl p-7 shadow-lg sm:p-12">
+        <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[.18em] text-slate-500">
+          <span>Flashcard</span>
+
+          <span>
+            {reviewed
+              ? 'Reviewed'
+              : 'In progress'}
+          </span>
+        </div>
+
+        <div className="flex min-h-[205px] flex-col justify-center">
+          <p className="font-serif text-3xl leading-snug tracking-[-.03em] sm:text-4xl">
+            {revealed
+              ? card.back
+              : card.front}
+          </p>
+
+          {!revealed &&
+            card.hint && (
+              <p className="mt-5 text-xs italic text-slate-500">
+                Hint: {card.hint}
+              </p>
+            )}
+
+          {revealed && (
+            <p className="mt-5 text-[10px] font-semibold uppercase tracking-[.15em] text-indigo-700">
+              Answer
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-slate-900/10 pt-5">
+          <button
+            onClick={() =>
+              setRevealed(
+                !revealed,
+              )
+            }
+            className="focus-ring flex items-center gap-2 text-xs font-semibold text-indigo-700"
+            data-testid="button-reveal-card"
+          >
+            <RotateCcw
+              size={14}
+            />
+
+            {revealed
+              ? 'Hide answer'
+              : 'Reveal answer'}
+          </button>
+
+          <span className="text-[10px] text-slate-500">
+            {
+              kit.chapters.find(
+                (c) =>
+                  c.id ===
+                  card.chapterId,
+              )?.title
+            }
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-5 flex items-center justify-center gap-3">
+        <button
+          onClick={() =>
+            move(-1)
+          }
+          className="focus-ring flex h-10 w-10 items-center justify-center rounded-full border border-border hover:bg-secondary"
+          aria-label="Previous card"
+          data-testid="button-previous-card"
+        >
+          <ChevronLeft
+            size={17}
+          />
+        </button>
+
+        <button
+          onClick={mark}
+          className={`focus-ring h-10 rounded-lg px-5 text-xs font-semibold ${
+            reviewed
+              ? 'border border-border bg-secondary'
+              : 'bg-primary text-primary-foreground'
+          }`}
+          data-testid="button-mark-card"
+        >
+          {reviewed
+            ? 'Reviewed'
+            : 'Mark as reviewed'}
+        </button>
+
+        <button
+          onClick={() =>
+            move(1)
+          }
+          className="focus-ring flex h-10 w-10 items-center justify-center rounded-full border border-border hover:bg-secondary"
+          aria-label="Next card"
+          data-testid="button-next-card"
+        >
+          <ChevronRight
+            size={17}
+          />
+        </button>
+      </div>
+
+      <p className="mt-6 text-center text-xs text-muted-foreground">
+        Use the arrow keys or buttons
+        to move through the deck.
+      </p>
+    </div>
+  );
+}
+
+function PracticeExam({
+  kit,
+  progress,
+  update,
+}: {
+  kit: ViewerKit;
+  progress: Progress;
+  update: (
+    patch: Partial<Progress>,
+  ) => void;
+}) {
+  const [index, setIndex] =
+    useState(0);
+
+  const [
+    submitted,
+    setSubmitted,
+  ] = useState(false);
+
+  const question =
+    kit.questions[index];
+
+  const selected =
+    progress.answers[
+      question.id
+    ];
+
+  const score =
+    kit.questions.filter(
+      (q) =>
+        progress.answers[
+          q.id
+        ] === q.answer,
+    ).length;
+
+  const choose = (
+    option: number,
+  ) => {
+    if (!submitted) {
+      update({
+        answers: {
+          ...progress.answers,
+          [question.id]:
+            option,
+        },
+      });
+    }
+  };
+
+  const next = () => {
+    setSubmitted(false);
+
+    setIndex(
+      (index + 1) %
+        kit.questions.length,
+    );
+  };
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[.2em] text-primary">
+            Closed-book practice
+          </p>
+
+          <h2 className="mt-3 font-serif text-3xl tracking-[-.03em]">
+            See what stayed.
+          </h2>
+        </div>
+
+        <span className="rounded-full border border-border px-3 py-1.5 font-mono text-[10px] text-muted-foreground">
+          Score {score}/
+          {kit.questions.length}
+        </span>
+      </div>
+
+      <div className="mt-8 rounded-2xl border border-border bg-card p-6 sm:p-9">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-xs text-primary">
+            Question {index + 1}{' '}
+            of {kit.questions.length}
+          </span>
+
+          <span className="text-[10px] uppercase tracking-[.14em] text-muted-foreground">
+            {question.difficulty}
+          </span>
+        </div>
+
+        <h3 className="mt-8 font-serif text-2xl leading-snug tracking-[-.025em] sm:text-3xl">
+          {question.prompt}
+        </h3>
+
+        <div className="mt-8 space-y-2.5">
+          {question.options.map(
+            (option, i) => (
+              <button
+                key={option}
+                onClick={() =>
+                  choose(i)
+                }
+                className={`focus-ring flex w-full items-center gap-3 rounded-lg border p-3.5 text-left text-sm transition-colors ${
+                  selected === i
+                    ? submitted
+                      ? i ===
+                        question.answer
+                        ? 'border-emerald-400/60 bg-emerald-400/10'
+                        : 'border-red-300/50 bg-red-300/10'
+                      : 'border-primary bg-primary/10'
+                    : 'border-border hover:bg-secondary'
+                }`}
+                data-testid={`button-answer-${question.id}-${i}`}
+              >
+                <span
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border font-mono text-[10px] ${
+                    selected === i
+                      ? 'border-primary text-primary'
+                      : 'border-muted-foreground/40 text-muted-foreground'
+                  }`}
+                >
+                  {String.fromCharCode(
+                    65 + i,
+                  )}
+                </span>
+
+                {option}
+
+                {submitted &&
+                  i ===
+                    question.answer && (
+                    <Check
+                      size={15}
+                      className="ml-auto text-emerald-300"
+                    />
+                  )}
+              </button>
+            ),
+          )}
+        </div>
+
+        {submitted && (
+          <div className="mt-6 rounded-lg border border-primary/20 bg-primary/[.06] p-4 text-sm leading-6 text-muted-foreground">
+            <span className="font-semibold text-foreground">
+              Why:
+            </span>{' '}
+            {question.explanation}
+          </div>
+        )}
+
+        <div className="mt-7 flex justify-between border-t border-border pt-5">
+          <button
+            onClick={() => {
+              setSubmitted(
+                false,
+              );
+
+              setIndex(
+                (index -
+                  1 +
+                  kit.questions
+                    .length) %
+                  kit.questions
+                    .length,
+              );
+            }}
+            className="focus-ring flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+            data-testid="button-previous-question"
+          >
+            <ChevronLeft
+              size={15}
+            />
+            Previous
+          </button>
+
+          {submitted ? (
+            <button
+              onClick={next}
+              className="focus-ring flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground"
+              data-testid="button-next-question"
+            >
+              Next question
+              <ChevronRight
+                size={14}
+              />
+            </button>
+          ) : (
+            <button
+              disabled={
+                selected ===
+                undefined
+              }
+              onClick={() =>
+                setSubmitted(
+                  true,
+                )
+              }
+              className="focus-ring flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              data-testid="button-check-answer"
+            >
+              Check answer
+              <Check
+                size={14}
+              />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GeneratedStudyKitView({ result, kind }: { result: GenerationResult; kind: GenerationKind }) {
+  const [progress, setProgress] = useState<Progress>({ reviewed: [], completedTasks: [], answers: {} });
+  const update = (patch: Partial<Progress>) => setProgress((current) => ({ ...current, ...patch }));
+  const kit: ViewerKit = {
+    title: 'Generated study kit',
+    chapters: result.chapters || [],
+    flashcards: (result.flashcards || []).map((card, index) => ({ ...card, id: card.id || `flashcard-${index}` })),
+    questions: (result.questions || []).map((question, index) => ({ ...question, id: question.id || `question-${index}` })),
+    reviewPlan: result.reviewPlan || [],
+  };
+
+  if (kind === 'flashcards') return <Flashcards kit={kit} progress={progress} update={update} />;
+  if (kind === 'quiz') return <PracticeExam kit={kit} progress={progress} update={update} />;
+  return <ReviewPlan kit={kit} progress={progress} update={update} />;
+}
 
 function extractDocumentText(value: unknown): string {
   if (typeof value === 'string') {
@@ -1588,44 +2174,8 @@ export default function FilesPage() {
             </div>
             <button type="button" onClick={() => setGeneratedPanel(null)} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Close generated content"><X size={18}/></button>
           </header>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
-            {generatedPanel.kind === 'flashcards' && generatedPanel.result.flashcards.map((card, index) => (
-              <article key={card.id || index} className="rounded-xl border border-border bg-background p-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Card {index + 1}</p>
-                <h3 className="mt-2 text-sm font-semibold leading-snug">{card.front}</h3>
-                <p className="mt-3 border-t border-border pt-3 text-sm leading-relaxed text-muted-foreground">{card.back}</p>
-                {card.hint && <p className="mt-2 text-xs text-muted-foreground">Hint: {card.hint}</p>}
-              </article>
-            ))}
-            {generatedPanel.kind === 'quiz' && generatedPanel.result.questions.map((question, index) => (
-              <article key={question.id || index} className="rounded-xl border border-border bg-background p-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Question {index + 1}</p>
-                <h3 className="mt-2 text-sm font-semibold leading-snug">{question.prompt}</h3>
-                <div className="mt-3 space-y-2">
-                  {(question.options || []).map((option: string, optionIndex: number) => (
-                    <div key={optionIndex} className={`rounded-lg border px-3 py-2 text-xs ${optionIndex === question.answer ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border text-muted-foreground'}`}>
-                      {String.fromCharCode(65 + optionIndex)}. {option}
-                    </div>
-                  ))}
-                </div>
-                {question.explanation && <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{question.explanation}</p>}
-              </article>
-            ))}
-            {generatedPanel.kind === 'studyPlan' && generatedPanel.result.reviewPlan.map((day, index) => (
-              <article key={day.day || index} className="rounded-xl border border-border bg-background p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Day {day.day || index + 1}</p>
-                    <h3 className="mt-1 text-sm font-semibold">{day.focus || day.label}</h3>
-                  </div>
-                  {day.minutes && <span className="shrink-0 text-[10px] text-muted-foreground">{day.minutes} min</span>}
-                </div>
-                {day.label && <p className="mt-1 text-xs text-muted-foreground">{day.label}</p>}
-                <ul className="mt-3 space-y-2">
-                  {(day.tasks || []).map((task: string, taskIndex: number) => <li key={taskIndex} className="flex gap-2 text-xs leading-relaxed"><span className="text-primary">•</span><span>{task}</span></li>)}
-                </ul>
-              </article>
-            ))}
+          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            <GeneratedStudyKitView result={generatedPanel.result} kind={generatedPanel.kind} />
           </div>
         </>}
       </aside>
