@@ -52,9 +52,19 @@ function normalizeKit(kit, title) {
     });
 
   const overview = String(kit.overview || "").replace(/\s+/g, " ").trim();
+  console.log("[Groq] Quality check input:", JSON.stringify({ chapters: normalizedChapters.length, flashcards: normalizedCards.length, overviewPresent: Boolean(overview), overviewWords: overview.split(/\s+/).filter(Boolean).length }));
   const overviewShort = overview.split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 2).join(" ").slice(0, 500);
   const cardsForChapters = normalizedCards.filter((c) => chapterIds.has(c.chapterId));
-  if (normalizedChapters.length < 3 || cardsForChapters.length < 6 || !overviewShort || overviewShort.split(/\s+/).length > 90) return null;
+  const qualityFailures = [];
+  if (normalizedChapters.length < 3) qualityFailures.push(`chapters: expected at least 3, received ${normalizedChapters.length}`);
+  if (cardsForChapters.length < 6) qualityFailures.push(`flashcards: expected at least 6 linked to valid chapters, received ${cardsForChapters.length}`);
+  if (!overviewShort) qualityFailures.push("overview: missing or empty");
+  if (overviewShort.split(/\s+/).length > 90) qualityFailures.push(`overview: expected at most 90 words, received ${overviewShort.split(/\s+/).length}`);
+  if (qualityFailures.length) {
+    console.log("[Groq] Quality check failed:", qualityFailures);
+    console.error("[Groq] QUALITY CHECK FAILURE:", qualityFailures.join("; "));
+    return null;
+  }
 
   return {
     title: String(kit.title || title).replace(/\s+/g, " ").trim(),
@@ -87,10 +97,7 @@ async function generateWithGroq(title, source, syllabus, days, mode = "material"
       ? "EXISTING STUDY KIT (preserve useful existing content and IDs where concepts remain the same):\n" + JSON.stringify(existingKit || {}) + "\n\nNEW MATERIAL TO INCORPORATE:\n" + source
       : "SOURCE MATERIAL START\n" + source + "\nSOURCE MATERIAL END";
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
+  const requestBody = {
       model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
       temperature: 0.1,
       response_format: { type: "json_object" },
@@ -117,15 +124,27 @@ chapter: {id,title,summary,keyPoints,objective}
 question: {id,chapterId,prompt,options,answer,explanation,difficulty}
 flashcard: {id,chapterId,front,back,hint}` },
         { role: "user", content: `Student title: ${title}\nReview plan: ${days} days\nSyllabus: ${syllabus || "Not provided"}\nMode: ${mode}\n\n${promptSource}\n\nFirst understand the concepts and relationships. Then write original teaching-oriented content.` }
-      ]
-    })
+      ]    };
+  console.log("[Groq] Full prompt/messages sent to Groq:", JSON.stringify(requestBody.messages, null, 2));
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
     const details = await response.text().catch(() => "");
     throw new Error(`Groq HTTP ${response.status}: ${details.slice(0, 400)}`);
   }
-  const data = await response.json();
+  const rawResponse = await response.text();
+  console.log("[Groq] Raw HTTP response string before JSON parsing:", rawResponse);
+  let data;
+  try {
+    data = JSON.parse(rawResponse);
+  } catch (error) {
+    console.error("[Groq] Failed to parse raw HTTP response JSON:", error instanceof Error ? error.message : error);
+    throw error;
+  }
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new Error("Groq returned no content.");
   return JSON.parse(content);
@@ -165,8 +184,13 @@ export default async function handler(req, res) {
 
   try {
     const generated = await generateWithGroq(generationTitle, source, syllabus, days, mode, existingKit);
+    console.log("[Groq] Data immediately before quality check:", JSON.stringify(generated, null, 2));
     const kit = normalizeKit(generated, generationTitle);
-    if (!kit) return res.status(502).json({ error: "Groq returned a study kit that did not pass the quality checks. Please try again." });
+    if (!kit) {
+      console.log("[Groq] Quality check returned null; review the field-level failure details above.");
+      console.error("[Groq] QUALITY CHECK FAILURE: normalizeKit rejected the generated study kit.");
+      return res.status(502).json({ error: "Groq returned a study kit that did not pass the quality checks. Please try again." });
+    }
     kit.reviewPlan = buildReviewPlan(kit.chapters, days);
     if (mode === "update") {
       const oldCards = new Map((Array.isArray(existingKit.flashcards) ? existingKit.flashcards : []).map((card) => [String(card.front || "").trim().toLowerCase(), card]));
