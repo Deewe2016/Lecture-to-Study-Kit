@@ -12,59 +12,103 @@ function cleanText(value) {
 }
 
 function normalizeKit(kit, title) {
-  if (!kit || typeof kit !== "object") return null;
-  const bad = /(published\s*:\s*\d{4}|global environmental assessment series|climate policy\s*&?\s*science division)/i;
-  const chapters = Array.isArray(kit.chapters) ? kit.chapters : [];
-  const cards = Array.isArray(kit.flashcards) ? kit.flashcards : [];
+  if (!kit || typeof kit !== "object" || Array.isArray(kit)) return null;
+  const clean = (value, fallback = "") => String(value ?? fallback).replace(/\s+/g, " ").trim();
+  const asArray = (value) => Array.isArray(value) ? value : [];
 
-  const normalizedChapters = chapters
-    .filter((c) => c && typeof c === "object")
+  const chapters = asArray(kit.chapters)
+    .filter((item) => item && typeof item === "object" && !Array.isArray(item))
     .slice(0, 6)
-    .map((c, i) => ({
-      id: String(c.id || `chapter-${i + 1}`),
-      title: String(c.title || `Topic ${i + 1}`).replace(/\s+/g, " ").trim(),
-      summary: String(c.summary || "").replace(/\s+/g, " ").trim().slice(0, 420),
-      keyPoints: Array.isArray(c.keyPoints) ? c.keyPoints.map((p) => String(p).replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 4) : [],
-      objective: String(c.objective || "").replace(/\s+/g, " ").trim().slice(0, 220),
-    }))
-    .filter((c) => c.summary && c.keyPoints.length >= 2);
+    .map((chapter, index) => ({
+      id: clean(chapter.id, `chapter-${index + 1}`) || `chapter-${index + 1}`,
+      title: clean(chapter.title, `Topic ${index + 1}`) || `Topic ${index + 1}`,
+      summary: clean(chapter.summary).slice(0, 420),
+      keyPoints: asArray(chapter.keyPoints).map((point) => clean(point)).filter(Boolean).slice(0, 4),
+      objective: clean(chapter.objective).slice(0, 220),
+    }));
 
-  const normalizedCards = cards
-    .filter((c) => c && typeof c === "object")
-    .map((c, i) => ({
-      id: String(c.id || `f${i + 1}`),
-      chapterId: String(c.chapterId || ""),
-      front: String(c.front || "").replace(/\s+/g, " ").trim(),
-      back: String(c.back || "").replace(/\s+/g, " ").trim(),
-      hint: String(c.hint || "Recall the concept before revealing the answer.").replace(/\s+/g, " ").trim(),
+  const normalizedCards = asArray(kit.flashcards)
+    .filter((card) => card && typeof card === "object" && !Array.isArray(card))
+    .slice(0, 100)
+    .map((card, index) => ({
+      id: clean(card.id, `f${index + 1}`) || `f${index + 1}`,
+      chapterId: clean(card.chapterId, chapters[0]?.id || ""),
+      front: clean(card.front ?? card.question ?? card.term),
+      back: clean(card.back ?? card.answer ?? card.definition),
+      hint: clean(card.hint, "Recall the concept before revealing the answer."),
     }))
-    .filter((c) => {
-      if (!c.chapterId || !c.front.endsWith("?") || c.front.length < 15 || c.front.length > 180) return false;
-      if (!c.back || c.back.length < 15 || c.back.length > 350) return false;
-      if (bad.test(c.front) || bad.test(c.back)) return false;
-      if (/what is the main idea of/i.test(c.front)) return false;
-      if (/^(what does (this|the) (lecture|chapter|document) say|what is this (lecture|chapter) about)/i.test(c.front)) return false;
-      return true;
+    .filter((card) => card.front || card.back);
+
+  const normalizedQuestions = asArray(kit.questions)
+    .filter((question) => question && typeof question === "object" && !Array.isArray(question))
+    .slice(0, 50)
+    .map((question, index) => {
+      const options = asArray(question.options ?? question.choices)
+        .map((option) => clean(typeof option === "object" ? option?.text ?? option?.label : option))
+        .filter(Boolean);
+      const rawAnswer = question.answer ?? question.correctAnswer ?? question.correctOption ?? 0;
+      let answer = typeof rawAnswer === "number" ? rawAnswer : options.indexOf(clean(rawAnswer));
+      if (!Number.isInteger(answer) || answer < 0 || answer >= Math.max(options.length, 1)) answer = 0;
+      return {
+        id: clean(question.id, `q${index + 1}`) || `q${index + 1}`,
+        chapterId: clean(question.chapterId, chapters[0]?.id || ""),
+        prompt: clean(question.prompt ?? question.question ?? question.text),
+        options,
+        answer,
+        explanation: clean(question.explanation ?? question.rationale),
+        difficulty: clean(question.difficulty, "standard") || "standard",
+      };
     })
-    .slice(0, 24);
+    .filter((question) => question.prompt || question.options.length || question.explanation);
 
-  const overview = String(kit.overview || "").replace(/\s+/g, " ").trim();
-  const overviewSentences = overview.split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 2).join(" ").slice(0, 500);
-  if (normalizedChapters.length < 3 || normalizedCards.length < 6 || !overviewSentences || overviewSentences.split(/\s+/).length > 90) return null;
+  const normalizedPlan = asArray(kit.reviewPlan ?? kit.studyPlan)
+    .filter((day) => day && typeof day === "object" && !Array.isArray(day))
+    .slice(0, 30)
+    .map((day, index) => ({
+      day: Number.isFinite(Number(day.day)) && Number(day.day) > 0 ? Number(day.day) : index + 1,
+      label: clean(day.label, `Day ${index + 1}`) || `Day ${index + 1}`,
+      focus: clean(day.focus ?? day.title ?? day.topic),
+      tasks: asArray(day.tasks ?? day.activities).map((task) => clean(typeof task === "object" ? task?.text ?? task?.title : task)).filter(Boolean),
+      minutes: Number.isFinite(Number(day.minutes ?? day.duration)) && Number(day.minutes ?? day.duration) >= 0
+        ? Number(day.minutes ?? day.duration)
+        : 0,
+    }))
+    .filter((day) => day.focus || day.tasks.length || day.label);
 
-  const chapterIds = new Set(normalizedChapters.map((c) => c.id));
-  const cardsForRealChapters = normalizedCards.filter((c) => chapterIds.has(c.chapterId));
-  if (cardsForRealChapters.length < 6) return null;
+  const overview = clean(kit.overview ?? kit.description).slice(0, 500);
+  const hasUsableContent =
+    normalizedCards.some((card) => card.front || card.back) ||
+    normalizedQuestions.some((question) => question.prompt || question.options.length) ||
+    normalizedPlan.some((day) => day.focus || day.tasks.length) ||
+    chapters.some((chapter) => chapter.title || chapter.summary || chapter.keyPoints.length);
+  if (!hasUsableContent) return null;
 
   return {
-    title: String(kit.title || title).replace(/\s+/g, " ").trim(),
-    courseLabel: String(kit.courseLabel || "Personal study space").replace(/\s+/g, " ").trim(),
-    overview: overviewSentences,
-    chapters: normalizedChapters,
-    reviewPlan: Array.isArray(kit.reviewPlan) ? kit.reviewPlan.slice(0, 30) : [],
-    questions: Array.isArray(kit.questions) ? kit.questions.slice(0, 12) : [],
-    flashcards: cardsForRealChapters,
+    title: clean(kit.title, title) || title,
+    courseLabel: clean(kit.courseLabel, "Personal study space") || "Personal study space",
+    overview,
+    chapters,
+    reviewPlan: normalizedPlan,
+    questions: normalizedQuestions,
+    flashcards: normalizedCards,
   };
+}
+
+function parseGroqJson(content) {
+  if (typeof content !== "string" || !content.trim()) throw new Error("Groq returned no content.");
+  const stripped = content.replace(/^\uFEFF/, "").replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    const firstObject = stripped.indexOf("{");
+    const lastObject = stripped.lastIndexOf("}");
+    if (firstObject < 0 || lastObject <= firstObject) throw new Error("Groq returned content that could not be parsed as JSON.");
+    try {
+      return JSON.parse(stripped.slice(firstObject, lastObject + 1));
+    } catch {
+      throw new Error("Groq returned content that could not be parsed as JSON.");
+    }
+  }
 }
 
 function shuffleAnswers(kit) {
@@ -176,7 +220,7 @@ First identify the concepts mentally. Then write original teaching-oriented cont
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new Error("Groq returned no content.");
-  return JSON.parse(content);
+  return parseGroqJson(content);
 }
 
 export default async function handler(req, res) {
@@ -193,11 +237,27 @@ export default async function handler(req, res) {
   if (!title || !source) return res.status(400).json({ error: "Add a title and at least one valid material." });
 
   try {
-    const generated = await generateWithGroq(title, source, syllabus, planDays, overviewLevel);
-    const kit = normalizeKit(generated, title);
-    if (!kit) return res.status(502).json({ error: "Groq returned a study kit that did not pass the quality checks. Please try again." });
+    let kit = null;
+    let lastError = null;
 
-    kit.reviewPlan = buildReviewPlan(kit.chapters, planDays);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const generated = await generateWithGroq(title, source, syllabus, planDays, overviewLevel);
+        kit = normalizeKit(generated, title);
+        if (kit) break;
+        lastError = new Error("Groq returned no usable study content.");
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (!kit) {
+      throw lastError || new Error("Groq could not generate usable study content after 3 attempts.");
+    }
+
+    if (kit.chapters.length && !kit.reviewPlan.length) {
+      kit.reviewPlan = buildReviewPlan(kit.chapters, planDays);
+    }
     return res.status(200).json(shuffleAnswers(kit));
   } catch (error) {
     console.error("Study kit generation failed:", error);
