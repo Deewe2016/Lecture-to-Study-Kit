@@ -1885,7 +1885,13 @@ export default function FilesPage() {
     setGenerationJob({ cardId, fileName, kind, status: 'generating', progress: 8 });
     try {
       const source = (await readSource()).trim();
-      if (!source) throw new Error('No readable text was found in this file.');
+      const contentLabel = kind === 'flashcards' ? 'flashcards' : kind === 'quiz' ? 'quiz' : 'study plan';
+      if (source.length < 200) {
+        setGenerationJob(current => current?.cardId === cardId && current.kind === kind
+          ? { ...current, status: 'error', error: `Not enough content to generate ${contentLabel}. Try using a longer document.` }
+          : current);
+        return;
+      }
       const title = fileName.replace(/\.[^.]+$/, '').trim() || fileName;
       const response = await fetch('/api/generate-kit', {
         method: 'POST',
@@ -1897,7 +1903,12 @@ export default function FilesPage() {
         }),
       });
       const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.error || 'Could not generate study material.');
+      if (!response.ok) {
+        if (payload?.code === 'INSUFFICIENT_CONTENT') {
+          throw new Error(`Not enough content to generate ${contentLabel}. Try using a longer document.`);
+        }
+        throw new Error('GENERATION_FAILED');
+      }
       const result: GenerationResult = {
         flashcards: Array.isArray(payload?.flashcards) ? payload.flashcards : [],
         questions: Array.isArray(payload?.questions) ? payload.questions : [],
@@ -1912,8 +1923,11 @@ export default function FilesPage() {
         ? { ...current, status: 'ready', progress: 100, result }
         : current);
     } catch (generationError) {
+      const message = generationError instanceof Error && generationError.message.startsWith('Not enough content to generate ')
+        ? generationError.message
+        : 'Generation failed. Please try again.';
       setGenerationJob(current => current?.cardId === cardId && current.kind === kind
-        ? { ...current, status: 'error', error: generationError instanceof Error ? generationError.message : 'Generation failed.' }
+        ? { ...current, status: 'error', error: message }
         : current);
     }
   };
