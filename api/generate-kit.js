@@ -164,13 +164,7 @@ async function generateWithGroq(title, source, syllabus, planDays, overviewLevel
     advanced: `Use precise subject-specific terminology and include useful nuance, relationships, and distinctions. Assume the student already understands the basic vocabulary.`,
   }[level];
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  const requestBody = {
       model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
       temperature: 0.1,
       response_format: { type: "json_object" },
@@ -261,15 +255,30 @@ SOURCE MATERIAL END
 
 First identify the concepts mentally. Then write original teaching-oriented content. The final flashcards must test knowledge from those concepts, not the file itself.`,
         },
-      ],
-    }),
+      ],    };
+  console.log("[Groq] Full prompt/messages sent to Groq:", JSON.stringify(requestBody.messages, null, 2));
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     throw new Error(`Groq HTTP ${response.status}: ${body.slice(0, 300)}`);
   }
-  const data = await response.json();
+  const rawResponse = await response.text();
+  console.log("[Groq] Raw HTTP response string before JSON parsing:", rawResponse);
+  let data;
+  try {
+    data = JSON.parse(rawResponse);
+  } catch (error) {
+    console.error("[Groq] Failed to parse raw HTTP response JSON:", error instanceof Error ? error.message : error);
+    throw error;
+  }
   console.log("[Groq] Raw completion response:", JSON.stringify(data));
   const content = data?.choices?.[0]?.message?.content;
   console.log("[Groq] Raw message content before validation:", content);
@@ -313,6 +322,7 @@ export default async function handler(req, res) {
       try {
         console.log(`[Groq] Starting study-kit generation attempt ${attempt}/3.`);
         const generated = await generateWithGroq(title, source, syllabus, planDays, overviewLevel);
+        console.log("[Groq] Data immediately before quality check:", JSON.stringify(generated, null, 2));
         kit = normalizeKit(generated, title);
         if (kit) {
           console.log(`[Groq] Study-kit generation attempt ${attempt}/3 passed validation.`);
