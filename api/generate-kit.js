@@ -255,7 +255,8 @@ SOURCE MATERIAL END
 
 First identify the concepts mentally. Then write original teaching-oriented content. The final flashcards must test knowledge from those concepts, not the file itself.`,
         },
-      ],    };
+      ],
+    };
   console.log("[Groq] Full prompt/messages sent to Groq:", JSON.stringify(requestBody.messages, null, 2));
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
