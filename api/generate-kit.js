@@ -314,6 +314,13 @@ export default async function handler(req, res) {
   const overviewLevel = typeof input.overviewLevel === "string" ? input.overviewLevel.toLowerCase() : "standard";
 
   if (!title || !source) return res.status(400).json({ error: "Add a title and at least one valid material." });
+  if (source.length < 200) {
+    console.log("[Groq] Skipping generation: extracted source is below the 200-character minimum.", { characterCount: source.length });
+    return res.status(400).json({
+      code: "INSUFFICIENT_CONTENT",
+      error: "Not enough content to generate study material. Try using a longer document.",
+    });
+  }
 
   try {
     let kit = null;
@@ -347,6 +354,6 @@ export default async function handler(req, res) {
     return res.status(200).json(shuffleAnswers(kit));
   } catch (error) {
     console.error("Study kit generation failed:", error);
-    return res.status(502).json({ error: error instanceof Error ? error.message : "Could not generate a study kit." });
+    return res.status(502).json({ error: "Generation failed. Please try again." });
   }
 }
