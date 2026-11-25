@@ -81,7 +81,19 @@ function normalizeKit(kit, title) {
     normalizedQuestions.some((question) => question.prompt || question.options.length) ||
     normalizedPlan.some((day) => day.focus || day.tasks.length) ||
     chapters.some((chapter) => chapter.title || chapter.summary || chapter.keyPoints.length);
-  if (!hasUsableContent) return null;
+  if (!hasUsableContent) {
+    console.error("[Groq] Quality check failed: parsed JSON contained no usable study content.", {
+      topLevelKeys: Object.keys(kit),
+      chapters: chapters.length,
+      flashcards: normalizedCards.length,
+      questions: normalizedQuestions.length,
+      reviewPlanItems: normalizedPlan.length,
+      overviewPresent: Boolean(overview),
+      expectedFields: ["title", "courseLabel", "overview", "chapters", "reviewPlan", "questions", "flashcards"],
+      missingFields: ["title", "courseLabel", "overview", "chapters", "reviewPlan", "questions", "flashcards"].filter((field) => !(field in kit)),
+    });
+    return null;
+  }
 
   return {
     title: clean(kit.title, title) || title,
@@ -165,39 +177,79 @@ async function generateWithGroq(title, source, syllabus, planDays, overviewLevel
       messages: [
         {
           role: "system",
-          content: `You are an expert educational content designer. You must UNDERSTAND the source before creating the study kit. Never make the output by copying, concatenating, or rearranging source chunks.
-
-The requested explanation level is: ${level.toUpperCase()}.
-${levelInstructions}
-
-Return ONLY valid JSON with these top-level keys: title, courseLabel, overview, chapters, reviewPlan, questions, flashcards.
-
-HARD RULES:
-- Ignore cover-page metadata, publication details, repeated headers/footers, page numbers, navigation text, and decorative text.
-- Never create a flashcard about the document title, publication year, publisher, series, author, or "main idea of [document]".
-- The overview must synthesize the whole lecture in exactly 1–2 concise sentences and at most 70 words.
-- Identify 3–6 REAL concepts taught by the source. Chapter titles must name those concepts.
-- Each chapter summary must explain the concept in your own words. Key points must be facts, mechanisms, relationships, causes/effects, examples, or distinctions supported by the source.
-- Create 2–4 flashcards for EACH chapter. Every front must be a specific question that tests understanding of a concept, mechanism, relationship, comparison, cause/effect, or important fact.
-- Good card: "Why does increased atmospheric CO2 affect ocean chemistry?"
-- Bad card: "What is the main idea of Understanding Climate Change?"
-- Bad card: "What does Chapter 1 cover?"
-- Every back must directly answer its question in 1–3 concise sentences. Never paste slide headings, metadata, or unrelated source fragments.
-- Do not use headings or labels as answers.
-- Practice questions must test understanding, not document structure.
-- If PDF extraction mixed columns, reconstruct meaning from context.
-- Use ONLY information supported by the source. Do not invent facts.
-- Do not output Markdown, HTML, SVG, XML, code fences, or UI markup inside any field. All fields must contain plain text only.
-
-Schemas:
-chapter={id,title,summary,keyPoints,objective}
-reviewPlan item={day,label,focus,tasks,minutes}
-question={id,chapterId,prompt,options,answer,explanation,difficulty}
-flashcard={id,chapterId,front,back,hint}`,
+          content: "You are a JSON generator. You return only valid raw JSON. No markdown. No explanation. No code fences. Only JSON.",
         },
         {
           role: "user",
-          content: `Create the study kit now.
+          content: `Create the study kit now. You are an expert educational content designer. Understand the source before creating the study kit; do not copy, concatenate, or rearrange source chunks.
+
+OUTPUT CONTRACT — FOLLOW EXACTLY:
+- Return ONLY one raw JSON object. No Markdown, no code fences, no explanation, no preamble, no text before or after the JSON.
+- Every top-level field and every nested field shown in the schema/example below is REQUIRED. Never omit a field, even when its value is empty. Use "" for an empty string, [] for an empty array, and 0 for a numeric value when appropriate.
+- Use exactly these top-level keys: title, courseLabel, overview, chapters, reviewPlan, questions, flashcards.
+- Match the example's property names and value types exactly. Do not add alternate property names.
+- All field values must be plain text or the specified JSON primitive/array/object types. No Markdown, HTML, SVG, XML, or UI markup inside fields.
+
+EXACT REQUIRED JSON STRUCTURE:
+{
+  "title": "Student study kit title",
+  "courseLabel": "Subject or course",
+  "overview": "A concise 1–2 sentence overview.",
+  "chapters": [
+    {
+      "id": "chapter-1",
+      "title": "Concept name",
+      "summary": "An original explanation of the concept.",
+      "keyPoints": ["Supported key point"],
+      "objective": "What the student should understand"
+    }
+  ],
+  "reviewPlan": [
+    {
+      "day": 1,
+      "label": "Day 1",
+      "focus": "Concept to review",
+      "tasks": ["Specific study task"],
+      "minutes": 25
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "chapterId": "chapter-1",
+      "prompt": "A question testing understanding",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "answer": 0,
+      "explanation": "Why the correct answer is correct",
+      "difficulty": "standard"
+    }
+  ],
+  "flashcards": [
+    {
+      "id": "f1",
+      "chapterId": "chapter-1",
+      "front": "A specific recall question",
+      "back": "A concise, accurate answer",
+      "hint": "A useful clue"
+    }
+  ]
+}
+
+CONTENT RULES:
+- The requested explanation level is: ${level.toUpperCase()}.
+- ${levelInstructions}
+- Ignore cover-page metadata, publication details, repeated headers/footers, page numbers, navigation text, and decorative text.
+- Never create a flashcard about the document title, publication year, publisher, series, author, or "main idea of [document]".
+- The overview must synthesize the whole lecture in exactly 1–2 concise sentences and at most 70 words.
+- Identify 3–6 real concepts taught by the source. Chapter titles must name those concepts.
+- Each chapter summary must explain the concept in your own words. Key points must be facts, mechanisms, relationships, causes/effects, examples, or distinctions supported by the source.
+- Create 2–4 flashcards for each chapter. Every front must be a specific question testing a concept, mechanism, relationship, comparison, cause/effect, or important fact.
+- Every flashcard back must directly answer its question in 1–3 concise sentences.
+- Practice questions must test understanding, not document structure. Provide four options and an integer answer index from 0 through 3.
+- Ignore headings or labels as answers. If PDF extraction mixed columns, reconstruct meaning from context.
+- Use ONLY information supported by the source. Do not invent facts.
+- Return all required arrays and all required object properties, even if an array must be empty. Prefer populated content whenever the source supports it.
+
 Student title: ${title}
 Plan length: ${planDays} days
 Requested explanation level: ${level}
@@ -218,9 +270,26 @@ First identify the concepts mentally. Then write original teaching-oriented cont
     throw new Error(`Groq HTTP ${response.status}: ${body.slice(0, 300)}`);
   }
   const data = await response.json();
+  console.log("[Groq] Raw completion response:", JSON.stringify(data));
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error("Groq returned no content.");
-  return parseGroqJson(content);
+  console.log("[Groq] Raw message content before validation:", content);
+  if (!content) {
+    console.error("[Groq] Quality check failed: choices[0].message.content is missing or empty.", {
+      responseKeys: data && typeof data === "object" ? Object.keys(data) : [],
+      choicesPresent: Array.isArray(data?.choices),
+      firstChoiceKeys: data?.choices?.[0] && typeof data.choices[0] === "object" ? Object.keys(data.choices[0]) : [],
+      messageKeys: data?.choices?.[0]?.message && typeof data.choices[0].message === "object" ? Object.keys(data.choices[0].message) : [],
+    });
+    throw new Error("Groq returned no content.");
+  }
+  try {
+    const parsed = parseGroqJson(content);
+    console.log("[Groq] JSON parsing succeeded. Top-level keys:", parsed && typeof parsed === "object" ? Object.keys(parsed) : []);
+    return parsed;
+  } catch (error) {
+    console.error("[Groq] JSON parse/quality check failed:", error instanceof Error ? error.message : error);
+    throw error;
+  }
 }
 
 export default async function handler(req, res) {
@@ -242,12 +311,18 @@ export default async function handler(req, res) {
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
+        console.log(`[Groq] Starting study-kit generation attempt ${attempt}/3.`);
         const generated = await generateWithGroq(title, source, syllabus, planDays, overviewLevel);
         kit = normalizeKit(generated, title);
-        if (kit) break;
-        lastError = new Error("Groq returned no usable study content.");
+        if (kit) {
+          console.log(`[Groq] Study-kit generation attempt ${attempt}/3 passed validation.`);
+          break;
+        }
+        lastError = new Error("Groq returned no usable study content: chapters, flashcards, questions, and reviewPlan contained no usable entries.");
+        console.error(`[Groq] Quality check failed on attempt ${attempt}/3:`, lastError.message);
       } catch (error) {
         lastError = error;
+        console.error(`[Groq] Generation attempt ${attempt}/3 failed:`, error instanceof Error ? error.message : error);
       }
     }
 
