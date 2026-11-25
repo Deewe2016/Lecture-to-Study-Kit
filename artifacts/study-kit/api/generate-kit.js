@@ -146,8 +146,19 @@ flashcard: {id,chapterId,front,back,hint}` },
     throw error;
   }
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error("Groq returned no content.");
-  return JSON.parse(content);
+  console.log("[Groq] Raw completion content before parsing:", content);
+  if (!content) {
+    console.log("[Groq] Quality check input: Groq message content is missing or empty.");
+    console.error("[Groq] QUALITY CHECK FAILURE: choices[0].message.content is missing or empty.");
+    throw new Error("Groq returned no content.");
+  }
+  try {
+    return JSON.parse(content);
+  } catch (error) {
+    console.log("[Groq] Quality check failed during completion-content parsing.");
+    console.error("[Groq] QUALITY CHECK FAILURE: Groq message content is not valid JSON:", error instanceof Error ? error.message : error);
+    throw error;
+  }
 }
 
 function shuffleAnswers(kit) {
